@@ -1,0 +1,3 @@
+# Durable acceptance separates delivery from support status
+
+A support request or message is considered `accepted-pending` when the delivery intent is durably recorded, even though no GitHub issue or comment identity is guaranteed yet. Delivery outcomes (`locally-unsent`, `accepted-pending`, `delivered`, `failed`, and `outcome-unknown`) are separate from the GitHub-backed support status (`open` or `closed`); unknown provider outcomes must be reconciled before retrying. This preserves honest user-visible receipts without turning operational state into a competing support record or claiming exactly-once provider side effects.

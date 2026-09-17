@@ -1,0 +1,3 @@
+# The MVP starts with a plain-text GitHub-backed conversation
+
+The first end-to-end slice is an authorized WordPress reporter submitting a plain-text support request, receiving an honest durable delivery status, and seeing one client-visible reply from the mapped private support repository after manual refresh. The MVP then adds client replies and close/reopen actions; anonymous reporting, live chat or polling, session recording, AI triage, autonomous coding, attachments and screenshots, rich diagnostics, a local WordPress outbox, automatic engineering-issue creation, and extra notifications are deferred so the canonical conversation and delivery semantics can be proven first.
