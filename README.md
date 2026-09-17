@@ -7,7 +7,7 @@ No functionality is implemented yet — this is a scaffold.
 
 ## Layout
 
-- `plugin/` — the WordPress plugin. `plugin/gq-support-for-wp.php` is the
+- `plugin/` — the WordPress plugin. `plugin/gq-support.php` is the
   main plugin file installed into WordPress; it enqueues the built widget
   from `plugin/assets/dist/`.
 - `plugin/app/` — the chat widget frontend (React + TanStack Query), built

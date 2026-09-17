@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       GQ Support for WP
- * Plugin URI:         https://github.com/Quick-Release/gq-support-for-wp
+ * Plugin URI:         https://github.com/Quick-Release/gq-support
  * Description:        Adds an in-dashboard chat window for logged-in editors and administrators to report bugs.
  * Version:            0.0.1
  * Requires at least:  6.0
@@ -9,7 +9,7 @@
  * Author:             GetQuick
  * License:            GPL-2.0-or-later
  * License URI:        https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain:        gq-support-for-wp
+ * Text Domain:        gq-support
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
