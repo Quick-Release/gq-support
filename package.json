@@ -14,6 +14,12 @@
     "wp:ssh": "ddev ssh gq-support-testsite",
     "wp:update": "ddev exec -p gq-support-testsite composer update roots/wordpress --with-all-dependencies --no-interaction && ddev exec -p gq-support-testsite wp plugin update --all",
     "wp": "ddev exec -p gq-support-testsite wp",
-    "wp:check": "ddev exec -p gq-support-testsite wp plugin check gq-support"
+    "wp:check": "ddev exec -p gq-support-testsite wp plugin check gq-support",
+    "lint:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcs",
+    "lint:php:fix": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcbf",
+    "analyse:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer analyse"
+  },
+  "devDependencies": {
+    "lefthook": "^2.1.14"
   }
 }

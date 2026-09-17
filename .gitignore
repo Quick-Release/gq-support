@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 plugin/assets/dist/
+plugin/vendor/
 .wrangler/
 .env
 .env.*

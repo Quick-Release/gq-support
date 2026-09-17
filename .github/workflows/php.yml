@@ -1,0 +1,63 @@
+name: PHP
+
+on:
+  pull_request:
+    paths:
+      - "plugin/**"
+      - ".github/workflows/php.yml"
+  push:
+    branches: [main]
+    paths:
+      - "plugin/**"
+      - ".github/workflows/php.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: php-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: plugin
+
+jobs:
+  lint:
+    name: PHPCS + PHPStan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          tools: composer:v2, cs2pr
+
+      - uses: ramsey/composer-install@v3
+        with:
+          working-directory: plugin
+
+      - name: PHPCS
+        run: vendor/bin/phpcs --report-full --report-checkstyle=./phpcs-report.xml
+
+      - name: Annotate PHPCS results
+        if: ${{ always() }}
+        run: cs2pr ./phpcs-report.xml
+
+      - name: PHPStan
+        if: ${{ always() }}
+        run: composer analyse -- --error-format=github
+
+  plugin-check:
+    name: Plugin Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: wordpress/plugin-check-action@v1
+        with:
+          build-dir: plugin
+          exclude-directories: app,vendor,tests
+          exclude-files: composer.json,composer.lock,phpstan.neon.dist,.phpcs.xml.dist

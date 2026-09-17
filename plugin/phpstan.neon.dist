@@ -1,0 +1,11 @@
+parameters:
+	level: 6
+	phpVersion:
+		min: 80000
+		max: 80499
+	paths:
+		- gq-support.php
+		- uninstall.php
+		- includes
+	bootstrapFiles:
+		- tests/phpstan/bootstrap.php

@@ -1,16 +1,29 @@
 <?php
 /**
  * Core plugin bootstrap.
+ *
+ * @package GQ_Support
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Registers the plugin's WordPress hooks.
+ */
 final class GQ_Support_Plugin {
 
+	/**
+	 * Shared plugin instance.
+	 *
+	 * @var GQ_Support_Plugin|null
+	 */
 	private static ?GQ_Support_Plugin $instance = null;
 
+	/**
+	 * Returns the shared plugin instance, creating it on first call.
+	 */
 	public static function instance(): GQ_Support_Plugin {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -19,6 +32,9 @@ final class GQ_Support_Plugin {
 		return self::$instance;
 	}
 
+	/**
+	 * Registers admin hooks.
+	 */
 	private function __construct() {
 		add_action( 'admin_enqueue_scripts', array( $this, 'maybe_enqueue_chat_widget' ) );
 		add_action( 'admin_footer', array( $this, 'maybe_render_root' ) );
@@ -31,6 +47,9 @@ final class GQ_Support_Plugin {
 		return current_user_can( 'edit_others_posts' );
 	}
 
+	/**
+	 * Enqueues the chat widget assets for users allowed to report bugs.
+	 */
 	public function maybe_enqueue_chat_widget(): void {
 		if ( ! is_user_logged_in() || ! $this->current_user_can_report_bugs() ) {
 			return;
@@ -58,6 +77,9 @@ final class GQ_Support_Plugin {
 		);
 	}
 
+	/**
+	 * Prints the widget mount point for users allowed to report bugs.
+	 */
 	public function maybe_render_root(): void {
 		if ( ! is_user_logged_in() || ! $this->current_user_can_report_bugs() ) {
 			return;

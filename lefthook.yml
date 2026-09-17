@@ -1,0 +1,11 @@
+pre-commit:
+  commands:
+    phpcs:
+      root: ""
+      glob:
+        - "plugin/*.php"
+        - "plugin/**/*.php"
+      exclude:
+        - "plugin/vendor/**"
+        - "plugin/app/**"
+      run: scripts/phpcs-staged.sh {staged_files}
