@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+plugin/assets/dist/
+.wrangler/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+*.tsbuildinfo
+.alchemy/

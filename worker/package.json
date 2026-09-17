@@ -1,0 +1,22 @@
+{
+  "name": "gq-support-worker",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "alchemy dev",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-rc.115",
+    "alchemy": "^2.0.0-beta.77",
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260916.1",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.133.0"
+  }
+}
