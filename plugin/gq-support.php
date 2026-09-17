@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name:       GQ Support for WP
+ * Plugin Name:       GQ Support
  * Plugin URI:         https://github.com/Quick-Release/gq-support
  * Description:        Adds an in-dashboard chat window for logged-in editors and administrators to report bugs.
  * Version:            0.0.1

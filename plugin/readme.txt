@@ -1,8 +1,8 @@
-=== GQ Support for WP ===
+=== GQ Support ===
 Contributors: getquick
 Tags: support, chat, bug-report
 Requires at least: 6.0
-Tested up to: 6.6
+Tested up to: 7.1
 Requires PHP: 8.0
 Stable tag: 0.0.1
 License: GPLv2 or later
