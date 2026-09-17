@@ -7,6 +7,12 @@
     "dev:app": "pnpm --filter gq-support-app dev",
     "build:app": "pnpm --filter gq-support-app build",
     "dev:worker": "pnpm --filter gq-support-worker dev",
-    "deploy:worker": "pnpm --filter gq-support-worker deploy"
+    "deploy:worker": "pnpm --filter gq-support-worker deploy",
+    "wp:start": "ddev start gq-support-for-wp-testsite && pnpm run wp:update",
+    "wp:stop": "ddev stop gq-support-for-wp-testsite",
+    "wp:open": "ddev launch gq-support-for-wp-testsite",
+    "wp:ssh": "ddev ssh gq-support-for-wp-testsite",
+    "wp:update": "ddev exec -p gq-support-for-wp-testsite composer update roots/wordpress --with-all-dependencies --no-interaction && ddev exec -p gq-support-for-wp-testsite wp plugin update --all",
+    "wp": "ddev exec -p gq-support-for-wp-testsite wp"
   }
 }
