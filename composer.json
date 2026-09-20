@@ -1,0 +1,46 @@
+{
+    "name": "getquick/gq-support",
+    "description": "WordPress plugin: in-dashboard chat for editors/admins to report bugs",
+    "homepage": "https://github.com/Quick-Release/gq-support",
+    "support": {
+        "issues": "https://github.com/Quick-Release/gq-support/issues",
+        "source": "https://github.com/Quick-Release/gq-support"
+    },
+    "keywords": [
+        "wordpress",
+        "wordpress-plugin",
+        "support",
+        "chat",
+        "bug-report"
+    ],
+    "license": "GPL-2.0-or-later",
+    "type": "wordpress-plugin",
+    "require": {
+        "php": ">=8.0",
+        "composer/installers": "^2.0"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.9",
+        "wp-coding-standards/wpcs": "^3.1",
+        "phpcompatibility/phpcompatibility-wp": "^2.1",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "phpstan/phpstan": "^2.2",
+        "szepeviktor/phpstan-wordpress": "^2.0",
+        "phpstan/extension-installer": "^1.4"
+    },
+    "extra": {
+        "installer-name": "gq-support"
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true,
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "scripts": {
+        "lint": "phpcs",
+        "lint:fix": "phpcbf",
+        "analyse": "phpstan analyse --memory-limit=1G"
+    }
+}
