@@ -1,4 +1,4 @@
-=== GQ Support ===
+=== GETQUICK Support ===
 Contributors: getquick
 Tags: support, chat, bug-report
 Requires at least: 6.0

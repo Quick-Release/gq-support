@@ -1,6 +1,6 @@
-# GQ Support
+# GETQUICK Support
 
-GQ Support is a WordPress plugin that adds an in-dashboard chat window for
+GETQUICK Support is a WordPress plugin that adds an in-dashboard chat window for
 logged-in editors and administrators to report bugs.
 
 ## Install with Composer

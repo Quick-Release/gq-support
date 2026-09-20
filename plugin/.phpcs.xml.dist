@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
-<ruleset name="GQ Support">
-	<description>Coding standards for the GQ Support WordPress plugin.</description>
+<ruleset name="GETQUICK Support">
+	<description>Coding standards for the GETQUICK Support WordPress plugin.</description>
 
 	<file>.</file>
 	<exclude-pattern>*/app/*</exclude-pattern>

@@ -1,4 +1,4 @@
-# GQ Support
+# GETQUICK Support
 
 WordPress plugin that adds an in-dashboard chat window for logged-in editors
 and administrators to report bugs.

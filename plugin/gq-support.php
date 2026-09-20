@@ -1,12 +1,14 @@
 <?php
 /**
- * Plugin Name:       GQ Support
+ * Plugin Name:       GETQUICK Support
  * Plugin URI:         https://github.com/Quick-Release/gq-support
  * Description:        Adds an in-dashboard chat window for logged-in editors and administrators to report bugs.
  * Version:            0.0.1
  * Requires at least:  6.0
  * Requires PHP:       8.0
- * Author:             GetQuick
+ * Requires Plugins:   getquick-options
+ * Author:             GETQUICK
+ * Author URI:         https://getquick.io
  * License:            GPL-2.0-or-later
  * License URI:        https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:        gq-support
@@ -25,4 +27,14 @@ define( 'GQ_SUPPORT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
 require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-plugin.php';
 
-GQ_Support_Plugin::instance();
+add_action(
+	'plugins_loaded',
+	static function (): void {
+		if ( ! defined( 'GETQUICK_DESIGN_VERSION' ) ) {
+			return;
+		}
+
+		GQ_Support_Plugin::instance();
+	},
+	20
+);

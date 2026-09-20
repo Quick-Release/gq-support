@@ -107,8 +107,8 @@ jobs:
           git -C "$package_repo" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           cp -R package-dist/. "$package_repo/"
           git -C "$package_repo" add --all
-          git -C "$package_repo" commit -m "Release GQ Support $VERSION"
-          git -C "$package_repo" tag -a "v$VERSION" -m "GQ Support $VERSION"
+          git -C "$package_repo" commit -m "Release GETQUICK Support $VERSION"
+          git -C "$package_repo" tag -a "v$VERSION" -m "GETQUICK Support $VERSION"
           git -C "$package_repo" remote add origin "https://x-access-token:$GH_TOKEN@github.com/$REPOSITORY.git"
           git -C "$package_repo" push --force origin HEAD:refs/heads/composer
           git -C "$package_repo" push origin "v$VERSION"
