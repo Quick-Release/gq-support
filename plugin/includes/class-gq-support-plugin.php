@@ -69,12 +69,16 @@ final class GQ_Support_Plugin {
 			true
 		);
 
-		wp_enqueue_style(
-			'gq-support-app',
-			GQ_SUPPORT_PLUGIN_URL . 'assets/dist/app.css',
-			array(),
-			GQ_SUPPORT_VERSION
-		);
+		$style_path = GQ_SUPPORT_PLUGIN_DIR . 'assets/dist/app.css';
+
+		if ( file_exists( $style_path ) ) {
+			wp_enqueue_style(
+				'gq-support-app',
+				GQ_SUPPORT_PLUGIN_URL . 'assets/dist/app.css',
+				array(),
+				GQ_SUPPORT_VERSION
+			);
+		}
 	}
 
 	/**
