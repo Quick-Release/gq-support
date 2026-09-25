@@ -35,24 +35,24 @@ plugin install path and allows the Composer installer plugin:
 }
 ```
 
-Until the package is registered on Packagist, add the public GitHub repository
-as a VCS repository and require the first release explicitly:
+GETQUICK sites install it from the GETQUICK Composer registry, which builds
+every `v*` release tag (see
+[getquick-registry](https://github.com/Quick-Release/getquick-registry)'s
+`docs/clients.md` for giving a site access):
 
 ```json
 {
   "repositories": [
-    {
-      "type": "vcs",
-      "url": "https://github.com/Quick-Release/gq-support"
-    }
+    { "type": "composer", "url": "https://proxy.composer.getquick.io" }
   ],
   "require": {
-    "getquick/gq-support": "^0.0.1"
+    "getquick/gq-support": "^0.1.0"
   }
 }
 ```
 
-Run `composer update` after adding the repository. Composer’s package installer
+The public GitHub repository also works as a `vcs` repository. Run
+`composer update` after adding the repository. Composer’s package installer
 places the plugin at `wp-content/plugins/gq-support/` by default, or at the
 Bedrock path shown above.
 

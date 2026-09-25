@@ -17,7 +17,7 @@ permissions:
 jobs:
   publish:
     name: Publish Composer package
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Check out source
         uses: actions/checkout@v4

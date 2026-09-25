@@ -45,7 +45,7 @@ Packagist:
         }
     ],
     "require": {
-        "getquick/gq-support": "^0.0.1"
+        "getquick/gq-support": "^0.1.0"
     }
 }
 ```

@@ -1,7 +1,7 @@
 {
   "name": "gq-support",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "WordPress plugin: in-dashboard chat for editors/admins to report bugs",
   "scripts": {
     "dev:app": "pnpm --filter gq-support-app dev",
