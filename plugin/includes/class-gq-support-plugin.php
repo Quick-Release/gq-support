@@ -1,6 +1,6 @@
 <?php
 /**
- * Core plugin bootstrap.
+ * Context gates for the WordPress plugin.
  *
  * @package GQ_Support
  */
@@ -10,85 +10,32 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Registers the plugin's WordPress hooks.
+ * Registers only work that has a current consumer.
  */
 final class GQ_Support_Plugin {
 
 	/**
-	 * Shared plugin instance.
-	 *
-	 * @var GQ_Support_Plugin|null
+	 * Register lifecycle initialization in relevant WordPress contexts.
 	 */
-	private static ?GQ_Support_Plugin $instance = null;
+	public static function boot(): void {
+		add_action( 'admin_init', array( __CLASS__, 'maybe_initialize_admin' ) );
+		add_action( 'rest_api_init', array( GQ_Support_Lifecycle::class, 'ensure_site' ) );
 
-	/**
-	 * Returns the shared plugin instance, creating it on first call.
-	 */
-	public static function instance(): GQ_Support_Plugin {
-		if ( null === self::$instance ) {
-			self::$instance = new self();
+		if ( defined( 'WP_CLI' ) && WP_CLI ) {
+			GQ_Support_Lifecycle::ensure_site();
 		}
-
-		return self::$instance;
 	}
 
 	/**
-	 * Registers admin hooks.
+	 * AJAX, admin-post, and network admin are not site-admin screens.
 	 */
-	private function __construct() {
-		add_action( 'admin_enqueue_scripts', array( $this, 'maybe_enqueue_chat_widget' ) );
-		add_action( 'admin_footer', array( $this, 'maybe_render_root' ) );
-	}
+	public static function maybe_initialize_admin(): void {
+		global $pagenow;
 
-	/**
-	 * Only editors and administrators get the chat widget.
-	 */
-	private function current_user_can_report_bugs(): bool {
-		return current_user_can( 'edit_others_posts' );
-	}
-
-	/**
-	 * Enqueues the chat widget assets for users allowed to report bugs.
-	 */
-	public function maybe_enqueue_chat_widget(): void {
-		if ( ! is_user_logged_in() || ! $this->current_user_can_report_bugs() ) {
+		if ( is_network_admin() || wp_doing_ajax() || 'admin-post.php' === $pagenow ) {
 			return;
 		}
 
-		$script_path = GQ_SUPPORT_PLUGIN_DIR . 'assets/dist/app.js';
-
-		if ( ! file_exists( $script_path ) ) {
-			return;
-		}
-
-		wp_enqueue_script(
-			'gq-support-app',
-			GQ_SUPPORT_PLUGIN_URL . 'assets/dist/app.js',
-			array(),
-			GQ_SUPPORT_VERSION,
-			true
-		);
-
-		$style_path = GQ_SUPPORT_PLUGIN_DIR . 'assets/dist/app.css';
-
-		if ( file_exists( $style_path ) ) {
-			wp_enqueue_style(
-				'gq-support-app',
-				GQ_SUPPORT_PLUGIN_URL . 'assets/dist/app.css',
-				array(),
-				GQ_SUPPORT_VERSION
-			);
-		}
-	}
-
-	/**
-	 * Prints the widget mount point for users allowed to report bugs.
-	 */
-	public function maybe_render_root(): void {
-		if ( ! is_user_logged_in() || ! $this->current_user_can_report_bugs() ) {
-			return;
-		}
-
-		echo '<div id="gq-support-root"></div>';
+		GQ_Support_Lifecycle::ensure_site();
 	}
 }

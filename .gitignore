@@ -11,3 +11,7 @@ plugin/vendor/
 *.log
 *.tsbuildinfo
 .alchemy/
+.test-site/
+
+__pycache__/
+*.pyc

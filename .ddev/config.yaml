@@ -1,0 +1,4 @@
+name: gq-support-lifecycle-testsite
+type: wordpress
+docroot: .test-site
+php_version: "8.2"
