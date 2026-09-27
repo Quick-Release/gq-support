@@ -73,15 +73,12 @@ jobs:
         run: bash plugin/tests/integration/run.sh
       - name: Multisite lifecycle and cleanup
         run: bash plugin/tests/integration/multisite.sh
-
-  plugin-check:
-    name: Plugin Check
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: wordpress/plugin-check-action@v1
-        with:
-          build-dir: plugin
-          exclude-directories: app,vendor,tests
-          exclude-files: composer.json,composer.lock,phpstan.neon.dist,.phpcs.xml.dist
+      # The Plugin Check action tries to download Requires Plugins from WP.org.
+      # GETQUICK Design is private; this DDEV site already has the test fixture.
+      - name: Plugin Check
+        if: matrix.wp-version == ''
+        run: |
+          ddev wp --path=.test-site plugin install plugin-check --activate
+          ddev wp --path=.test-site plugin check gq-support \
+            --exclude-directories=tests,app,vendor \
+            --exclude-files=composer.json,composer.lock,phpstan.neon.dist,.phpcs.xml.dist
