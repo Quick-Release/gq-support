@@ -13,4 +13,6 @@ wp eval-file plugin/tests/integration/lifecycle.php network
 wp eval-file plugin/tests/integration/lifecycle.php uninstall
 # The network plugin still boots; the next site-admin/CLI request recreates only this site's markers.
 wp eval-file plugin/tests/integration/lifecycle.php active
+# Keep the wp-config.php multisite constants in sync before the disposable site is stopped.
+if [[ "$(uname -s)" == Darwin ]]; then ddev mutagen sync; fi
 echo 'Multisite lifecycle and bounded uninstall passed.'

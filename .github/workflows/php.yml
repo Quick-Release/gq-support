@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - "plugin/**"
+      - ".ddev/**"
       - ".github/workflows/php.yml"
   push:
     branches: [main]
     paths:
       - "plugin/**"
+      - ".ddev/**"
       - ".github/workflows/php.yml"
 
 permissions:
@@ -49,6 +51,28 @@ jobs:
       - name: PHPStan
         if: ${{ always() }}
         run: composer analyse -- --error-format=github
+
+  lifecycle-integration:
+    name: WordPress lifecycle (DDEV)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        wp-version: ['6.5.0', ''] # Oldest supported and current latest.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ddev/github-action-setup-ddev@v1
+        with:
+          version: 1.25.4
+          autostart: false
+      - name: Single-site lifecycle and HTTP
+        env:
+          WP_VERSION: ${{ matrix.wp-version }}
+        run: bash plugin/tests/integration/run.sh
+      - name: Multisite lifecycle and cleanup
+        run: bash plugin/tests/integration/multisite.sh
 
   plugin-check:
     name: Plugin Check

@@ -16,19 +16,45 @@ switch ( $gq_support_scenario ) {
 		if ( ! is_plugin_active( 'gq-support/gq-support.php' ) && ! is_plugin_active_for_network( 'gq-support/gq-support.php' ) ) {
 			$gq_support_fail( 'Plugin not active.' );
 		}
-		if ( ! get_option( 'gq_support_installation_id' ) || 1 !== (int) get_option( 'gq_support_schema_version' ) ) {
+		if ( ! get_option( 'gq_support_installation_id' ) || 2 !== (int) get_option( 'gq_support_schema_version' ) ) {
 			$gq_support_fail( 'Missing installation identity or schema marker.' );
 		}
 		if ( wp_next_scheduled( 'gq_support_reconcile' ) ) {
 			$gq_support_fail( 'Unexpected scheduled work.' );
 		}
 		break;
+	case 'clone':
+		$gq_support_old_id = get_option( 'gq_support_installation_id' );
+		$gq_support_home   = get_option( 'home' );
+		// WP-CLI overrides home URLs; remove its filters to simulate a real cloned site.
+		remove_all_filters( 'option_home' );
+		remove_all_filters( 'home_url' );
+		try {
+			update_option( 'home', 'https://clone.example.test', false );
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
+			do_action( 'rest_api_init', rest_get_server() );
+			if ( get_option( 'gq_support_installation_id' ) === $gq_support_old_id ) {
+				$gq_support_fail( 'A cloned installation retained the original identity.' );
+			}
+		} finally {
+			update_option( 'home', $gq_support_home, false );
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Restore the installation to its original context.
+			do_action( 'rest_api_init', rest_get_server() );
+		}
+		break;
 	case 'upgrade':
 		$gq_support_id = get_option( 'gq_support_installation_id' );
+		delete_option( 'gq_support_installation_origin' );
+		update_option( 'gq_support_schema_version', 1, false );
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
+		do_action( 'rest_api_init', rest_get_server() );
+		if ( 2 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id || ! get_option( 'gq_support_installation_origin' ) ) {
+			$gq_support_fail( 'Schema-1 upgrade did not preserve identity and bind the URL.' );
+		}
 		update_option( 'gq_support_schema_version', 0, false );
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
 		do_action( 'rest_api_init', rest_get_server() );
-		if ( 1 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id ) {
+		if ( 2 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id ) {
 			$gq_support_fail( 'Upgrade failed or installation identity changed.' );
 		}
 		break;
@@ -39,7 +65,7 @@ switch ( $gq_support_scenario ) {
 			define( 'WP_UNINSTALL_PLUGIN', 'gq-support/gq-support.php' );
 		}
 		require dirname( __DIR__, 2 ) . '/uninstall.php';
-		if ( false !== get_option( 'gq_support_installation_id' ) || false !== get_option( 'gq_support_schema_version' ) ) {
+		if ( false !== get_option( 'gq_support_installation_id' ) || false !== get_option( 'gq_support_schema_version' ) || false !== get_option( 'gq_support_installation_origin' ) ) {
 			$gq_support_fail( 'Uninstall failed to remove owned local markers.' );
 		}
 		if ( 'unchanged' !== get_option( 'gq_support_external_record' ) ) {

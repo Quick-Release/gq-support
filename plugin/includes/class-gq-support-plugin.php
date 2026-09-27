@@ -15,6 +15,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class GQ_Support_Plugin {
 
 	/**
+	 * Explain why an already-active plugin cannot initialize without its dependency.
+	 */
+	public static function missing_dependency_notice(): void {
+		if ( ! current_user_can( 'activate_plugins' ) ) {
+			return;
+		}
+
+		echo '<div class="notice notice-error"><p>';
+		echo esc_html__( 'GETQUICK Support requires the active GETQUICK Design plugin.', 'gq-support' );
+		echo '</p></div>';
+	}
+
+	/**
 	 * Register lifecycle initialization in relevant WordPress contexts.
 	 */
 	public static function boot(): void {

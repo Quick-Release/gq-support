@@ -13,3 +13,4 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 // WordPress removes a deleted site's options with that site's tables.
 delete_option( 'gq_support_schema_version' );
 delete_option( 'gq_support_installation_id' );
+delete_option( 'gq_support_installation_origin' );
