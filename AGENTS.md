@@ -1,5 +1,7 @@
 ## Agent skills
 
+All project skills live in `.agents/skills/`, shared across harnesses. Pi discovers that directory directly; `.claude/skills` is a compatibility symlink for Claude Code. Add or edit skills in the shared directory.
+
 ### Issue tracker
 
 Issues are tracked in GitHub Issues for `Quick-Release/gq-support`. See `docs/agents/issue-tracker.md`.
