@@ -1,17 +1,19 @@
 # WordPress bootstrap, hooks, and plugin lifecycle
 
 - **Research target:** GitHub issue [#3](https://github.com/Quick-Release/gq-support/issues/3)
-- **Status:** Fact-finding and design recommendation; no implementation decision is applied by this note
+- **Status:** WordPress lifecycle research; support-request semantics are superseded by [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md)
 - **Access date:** 2026-09-18
 - **Repository:** `Quick-Release/gq-support`
 
 ## Scope and inputs
 
-This note uses the repository's domain vocabulary from [`CONTEXT.md`](../../CONTEXT.md): **Client**, **WordPress installation**, **Environment**, **Reporter**, **Support request**, **Message**, **Support repository**, **Visibility scope**, and **Delivery outcome**.
+> **Current model:** This research predates ADR 0009. Use [`support-domain-design.md`](../support-domain-design.md) for Reporter visibility, GitHub issue projections, and the current admin flows. The lifecycle and launcher-loading facts remain relevant; route and conversation examples below that expose client comments/replies are historical.
 
-The accepted domain boundary is carried from [`docs/support-domain-design.md`](../support-domain-design.md) and ADRs 0001–0008: GitHub owns the client-visible conversation; WordPress owns local identity and capability context; the intake/delivery service owns routing, idempotency, receipts, attempts, and reconciliation; the widget is a projection. The existing WordPress/GitHub research note is also treated as prior design input: [`wordpress-github-support-widget.md`](wordpress-github-support-widget.md).
+This note uses the repository's domain vocabulary from [`CONTEXT.md`](../../CONTEXT.md): **Client**, **WordPress project**, **WordPress installation**, **Environment**, **Reporter**, **Support request**, **Project repository**, **Visibility scope**, and **Delivery outcome**.
 
-The checked-out repository does not contain copies of GitHub issue #2, #22, or #3. In this environment, the GitHub HTML and API URLs for those issues returned 404. Issue #2's accepted decisions are represented locally by `docs/support-domain-design.md` and ADRs 0001–0008. The existing WordPress/GitHub research note is the available local record of the earlier implementation discussion associated with this work. No claim about the unavailable issue comments is made here.
+The current boundary is recorded in [`docs/support-domain-design.md`](../support-domain-design.md) and ADR 0009: WordPress owns local identity and capabilities; the approved project mapping selects its existing GitHub repository; GitHub owns the issue text and status; operational records associate each Reporter with their GitHub issue identities. The WordPress projection shows only authorized issue text and status, never comments. Earlier ADRs and [`wordpress-github-support-widget.md`](wordpress-github-support-widget.md) record the previous model and are historical where they conflict.
+
+The checked-out repository does not contain copies of GitHub issue #2, #22, or #3. In this environment, the GitHub HTML and API URLs for those issues returned 404. The current support decisions are represented locally by `docs/support-domain-design.md` and ADR 0009; ADRs 0001, 0005, 0007, and 0008 record superseded choices. The existing WordPress/GitHub research note is the available local record of the earlier implementation discussion associated with this work. No claim about the unavailable issue comments is made here.
 
 ## Decision-shaped summary
 
@@ -258,7 +260,7 @@ flowchart TD
 |---|---|---|---|
 | `admin_enqueue_scripts` | Native asset enqueue point for admin pages; receives `$hook_suffix`, allowing page gating. ([official reference](https://developer.wordpress.org/reference/hooks/admin_enqueue_scripts/)) | It does not render a root and its callback can run on every admin page, so it must remain a cheap gate. | **Primary asset hook.** Enqueue a small launcher shell on supported site-admin screens. Use the exact suffix returned by `add_submenu_page()` for full app assets on the dedicated page. |
 | `admin_footer` | A predictable place to echo the mount element/data near the end of normal admin markup. ([official reference](https://developer.wordpress.org/reference/hooks/admin_footer/)) | It is output, not authorization or asset management; unusual admin rendering contexts need explicit testing. | **Root only.** Use it after the same eligibility check as enqueueing. |
-| `admin_menu` + `add_submenu_page` | Native dedicated page registration; capability controls menu visibility and WordPress returns a page hook suffix. ([`admin_menu`](https://developer.wordpress.org/reference/hooks/admin_menu/), [`add_submenu_page`](https://developer.wordpress.org/reference/functions/add_submenu_page/)) | It does not make a floating launcher appear on other pages; callback capability checks are still required. | **Dedicated page.** Add one page under Settings or Tools, not a top-level menu, unless later product research justifies a top-level destination. |
+| `admin_menu` + `add_submenu_page` | Native dedicated page registration; capability controls menu visibility and WordPress returns a page hook suffix. ([`admin_menu`](https://developer.wordpress.org/reference/hooks/admin_menu/), [`add_submenu_page`](https://developer.wordpress.org/reference/functions/add_submenu_page/)) | It does not make a floating launcher appear on other pages; callback capability checks are still required. | **Dedicated page.** Prefer `GETQUICK → Support` when GETQUICK Config is present; see [focused repository-connection research](support-widget-and-repository-connection.md). Fall back to Settings when the GETQUICK menu is absent. |
 | `admin_bar_menu` | Native way to add a toolbar node to admin-bar items. ([official reference](https://developer.wordpress.org/reference/hooks/admin_bar_menu/)) | The admin bar may be hidden or unavailable, and it is navigation rather than a reliable floating surface. | **Optional secondary affordance.** Link to the dedicated page or set a launcher-open intent; do not depend on it for universal availability. |
 
 ### Supported WP-Admin screen policy

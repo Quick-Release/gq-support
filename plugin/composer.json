@@ -1,6 +1,6 @@
 {
     "name": "getquick/gq-support",
-    "description": "WordPress plugin: in-dashboard chat for editors/admins to report bugs",
+    "description": "WordPress plugin: in-dashboard support issue submission and status widget",
     "homepage": "https://github.com/Quick-Release/gq-support",
     "support": {
         "issues": "https://github.com/Quick-Release/gq-support/issues",
@@ -10,7 +10,6 @@
         "wordpress",
         "wordpress-plugin",
         "support",
-        "chat",
         "bug-report"
     ],
     "license": "GPL-2.0-or-later",

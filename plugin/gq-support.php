@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       GETQUICK Support
  * Plugin URI:         https://github.com/Quick-Release/gq-support
- * Description:        Adds an in-dashboard chat window for logged-in editors and administrators to report bugs.
+ * Description:        Adds an in-dashboard support widget for authenticated users to submit reports and view their status.
  * Version:            0.1.0
  * Requires at least:  6.0
  * Requires PHP:       8.0

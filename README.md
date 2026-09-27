@@ -1,7 +1,8 @@
 # GETQUICK Support
 
-WordPress plugin that adds an in-dashboard chat window for logged-in editors
-and administrators to report bugs.
+WordPress plugin that adds an in-dashboard support widget. Authenticated
+Reporters submit support requests and view the submitted text and status in
+WordPress; issues are stored in the connected project GitHub repository.
 
 No functionality is implemented yet — this is a scaffold.
 
@@ -61,7 +62,7 @@ Bedrock path shown above.
 - `plugin/` — the WordPress plugin. `plugin/gq-support.php` is the
   main plugin file installed into WordPress; it enqueues the built widget
   from `plugin/assets/dist/`.
-- `plugin/app/` — the chat widget frontend (React + TanStack Query), built
+- `plugin/app/` — the support widget frontend (React + TanStack Query), built
   with Vite into `plugin/assets/dist/`.
 - `worker/` — a Cloudflare Worker backend, provisioned with
   [Alchemy](https://alchemy.run) and written with
@@ -72,7 +73,7 @@ Bedrock path shown above.
 ```sh
 pnpm install
 
-# build the chat widget bundle consumed by the WordPress plugin
+# build the support widget bundle consumed by the WordPress plugin
 pnpm build:app
 
 # run the Cloudflare worker locally

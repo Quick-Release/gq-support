@@ -1,7 +1,9 @@
 # GETQUICK Support
 
-GETQUICK Support is a WordPress plugin that adds an in-dashboard chat window for
-logged-in editors and administrators to report bugs.
+GETQUICK Support is a WordPress plugin that adds an in-dashboard support
+widget. Authenticated Reporters submit support requests and view their submitted
+text and status in WordPress; issues are stored in the connected project GitHub
+repository.
 
 ## Install with Composer
 

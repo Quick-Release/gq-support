@@ -1,8 +1,10 @@
 # Architecture research: WordPress–GitHub support widget
 
-- **Status:** Recommended architecture for the first implementation slice
+- **Status:** Historical architecture recommendation; superseded for repository and client-visibility semantics by [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md)
 - **Research date:** 2026-09-18
 - **Scope:** An authenticated WordPress admin widget that submits client support requests to the project-configured, dedicated private GitHub support repository.
+
+> **Current model:** This research predates ADR 0009. Its dedicated Support repository and client-visible conversation recommendations are historical; use [`support-domain-design.md`](../support-domain-design.md) and ADR 0009 for current behavior. Non-conflicting WordPress REST, GitHub App, and delivery research may still be useful.
 
 This document is an implementation recommendation, not a replacement for the accepted domain decisions. The repository's terminology and boundaries are defined in [`CONTEXT.md`](../../CONTEXT.md), the support domain design in [`docs/support-domain-design.md`](../support-domain-design.md), and the relevant decisions in [`docs/adr/`](../adr/).
 

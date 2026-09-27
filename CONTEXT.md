@@ -1,73 +1,71 @@
 # Client Support
 
-This context defines the client-facing support conversations initiated from authenticated WordPress installations and recorded in GitHub.
+This context defines support reports submitted from authenticated WordPress projects and recorded as issues in each project's existing GitHub repository. Reporters use the WordPress support experience and do not access GitHub directly.
 
 ## Identities and boundaries
 
 **Client**:
-The customer boundary for support. A client may have multiple WordPress installations and environments.
+The customer boundary for support. A Client may have multiple WordPress projects, installations, and environments.
 _Avoid_: Tenant in product-facing language
 
+**WordPress project**:
+A Client's project whose WordPress installation is connected to its existing GitHub repository for support issue intake.
+
 **WordPress installation**:
-A configured WordPress site through which a client uses the support experience. Its environment distinguishes contexts such as production and staging.
+A configured WordPress site through which a Reporter submits and views support requests. Its environment distinguishes contexts such as production and staging.
 _Avoid_: Site when the deployment boundary matters
 
 **Environment**:
-The operational context of a WordPress installation, such as production or staging. It is part of installation identity and does not create a separate client.
+The operational context of a WordPress installation, such as production or staging. It is part of installation identity and does not create a separate Client.
 
 **Reporter**:
-An authenticated WordPress user authorized to submit, view, and act on support requests within an explicit visibility scope. A reporter does not need a GitHub account.
+An authenticated WordPress user authorized to submit and view their own support requests, or requests within an explicitly granted visibility scope. A Reporter does not need a GitHub account.
 _Avoid_: GitHub user
 
-**Support manager**:
-A person granted an explicit visibility and action scope across one installation or an approved set of installations. This is a support capability, not a synonym for a WordPress role.
+**Developer**:
+An internal project collaborator assigned to work on a support issue. The GitHub App creates the issue; the Developer is its assignee.
 
-## Support conversation
+**Support manager**:
+A person granted an explicit visibility scope across one installation or an approved set of installations. This is a support capability, not a synonym for a WordPress role.
+
+## Support issues
 
 **Support request**:
-One client-facing conversation thread about a support concern. Once delivered, its canonical provider representation is an issue in the client's support repository.
-_Avoid_: Ticket when referring to the client-facing conversation
+A report submitted by a Reporter and represented by one GitHub issue in the connected WordPress project's repository. The Reporter sees the submitted issue text and status in WordPress; GitHub comments are not part of the client-facing experience.
+_Avoid_: Conversation, client-facing ticket thread
 
-**Message**:
-One authored, append-only entry in a support request. The initial message is represented by the issue body and later messages by comments; corrections are new messages rather than edits or deletions.
+**Project repository**:
+The existing GitHub repository connected to a WordPress project. It can contain both internal engineering issues and support requests; the Client has no direct GitHub access through this product.
+_Avoid_: Dedicated Support repository
 
-**Message attribution**:
-The verified WordPress reporter and installation associated with a message. GitHub may show the support App as the provider author, but that does not replace human attribution.
-
-**Client-visible classification**:
-An allowlisted classification shown in the client projection. It is not an authorization rule or a delivery state; internal engineering labels are excluded.
-
-**Support repository**:
-The dedicated private GitHub repository assigned to a client for client-visible support requests. It is distinct from the product development repository.
-
-**Repository mapping**:
-The approved association between a client or installation and its support repository. One repository per client is the normal case; a separate installation mapping requires explicit isolation approval. Reporters cannot change it through the support experience.
+**Client-origin label**:
+A GitHub label applied to issues created through the support experience to distinguish them for internal triage. It is classification, not authorization or proof of Reporter identity.
 
 **GitHub issue identity**:
-The provider-side identity that locates a support request in its support repository. It is separate from the support request's domain identity.
+The provider-side identity that locates a Support request in its Project repository. It is separate from the Reporter's identity and is associated with that Reporter by trusted support records.
 
-## Authority, authorization, and delivery
-
-**Conversation record**:
-The GitHub support issue and its approved client-visible comments. GitHub is authoritative for this record; other representations are projections or operational references.
-
-**Operational record**:
-The durable routing, idempotency, receipt, delivery-attempt, and reconciliation information needed to operate support delivery. It is not a competing conversation record.
-
-**Visibility scope**:
-An explicit authorization boundary defining which installations or support requests a reporter may see. It is independent of WordPress role names.
-
-**Delivery receipt**:
-An operational record of accepting or attempting to deliver a message or support request to GitHub. A receipt does not by itself prove that GitHub created the issue or comment.
-
-**Delivery outcome**:
-The known state of a delivery intent: locally unsent, durably accepted and pending, delivered, failed, or outcome unknown. An outcome is separate from support-request status.
+**Reporter issue list**:
+The WordPress projection of Support requests associated with the authenticated Reporter or an explicitly granted visibility scope. It includes submitted issue text and support status, not GitHub comments or unrelated Project repository issues.
 
 **Support status**:
-Whether a support request is open or closed. Support status is separate from delivery outcome and follows the client-visible conversation record.
+Whether a Support request's GitHub issue is open or closed. GitHub is authoritative for this status; delivery outcome is separate.
 
 **Engineering issue**:
-An internal project issue used for implementation discussion or work derived from a support request. Its comments are not automatically part of the client-visible conversation.
+An issue used for internal project work in the same Project repository. It is never included in a Reporter's issue list merely because it shares a label or repository.
 
-**Client-visible reply**:
-A message intentionally written to the support conversation surface for the reporter or support manager to read. Internal engineering comments are not client-visible replies.
+## Authority and delivery
+
+**Repository mapping**:
+The approved association between a WordPress project/installation and its existing Project repository. Reporters cannot choose or change the mapping through the support experience.
+
+**Operational record**:
+The durable mapping between a Support request, its Client, WordPress installation, verified Reporter, and GitHub issue identity, plus delivery and reconciliation information. It supports authorization and operations without replacing GitHub as the issue record.
+
+**Visibility scope**:
+An explicit authorization boundary defining which Support requests a Reporter may see. By default, a Reporter sees only requests they submitted; an explicitly granted Support manager scope may cover approved installations. It is independent of WordPress role names and GitHub labels.
+
+**Delivery receipt**:
+An operational record of accepting or attempting to create a Support request in GitHub. A receipt does not by itself prove that GitHub created the issue.
+
+**Delivery outcome**:
+The known state of an issue-creation intent: locally unsent, durably accepted and pending, delivered, failed, or outcome unknown. An outcome is separate from Support status.

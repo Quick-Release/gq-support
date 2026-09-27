@@ -1,232 +1,87 @@
 # Client support domain design
 
-This record captures the decisions reached while grilling [GitHub issue #2](https://github.com/Quick-Release/gq-support/issues/2). It defines the domain boundary and MVP behavior; it does not authorize implementation of every optional subsystem.
-
-The canonical glossary is [`CONTEXT.md`](../CONTEXT.md). Accepted architectural decisions are recorded in [`docs/adr/`](adr/).
+This record describes support reports submitted by authenticated WordPress users and tracked as issues in each project's existing GitHub repository. Clients do not access GitHub; the WordPress plugin is the only client-facing projection. See [ADR 0009](adr/0009-project-repository-intake-and-reporter-scoped-projection.md) for the accepted repository and visibility decision.
 
 ## Context boundary
 
 ```text
-Authenticated WordPress user
+Authenticated WordPress Reporter
         |
         v
-WordPress support UI + authenticated REST boundary
+GETQUICK Support launcher and issue list
         |
         v
-Intake/delivery service -------- operational records only
+WordPress REST boundary -- verified identity and visibility scope
         |
         v
-Approved client -> support-repository mapping
+Intake/delivery service -- routing, idempotency, issue mapping, receipts
         |
         v
-Dedicated private GitHub support repository
-        |-- issue body: initial report
-        |-- comments: client-visible messages
-        `-- open/closed: support status
-
-Engineering project issues remain separate and are not mirrored automatically.
-The WordPress UI reads a projection and never becomes a competing support database.
+GitHub App -- creates issue, applies client-origin label, assigns Developer
+        |
+        v
+Existing GitHub repository for the WordPress project
+        `-- issue body: submitted report; open/closed: support status
 ```
 
-## Identities and boundaries
+The Reporter sees only Support requests associated with their verified WordPress identity, or those within an explicitly granted Support manager scope. The issue body and open/closed status are projected into WordPress. GitHub comments and unrelated engineering issues are not returned to the client.
 
-- A **Client** is the customer support boundary and may have multiple WordPress installations and environments.
-- A **WordPress installation** is a configured site; its environment distinguishes production, staging, and similar contexts.
+## Identities and ownership
+
+- A **Client** is the customer support boundary and may have multiple WordPress projects, installations, and environments.
+- A **WordPress project** connects to its existing GitHub repository; the plugin does not create a separate Support repository.
 - A **Reporter** is an authenticated WordPress user, not a GitHub user.
-- A **Support request** is one client-facing conversation thread.
-- A **Message** is an authored, append-only entry in that conversation.
-- A **Support repository** is the client's dedicated private GitHub repository for client-visible support requests.
-- An **Engineering issue** is a separate internal project issue; its comments are not automatically client-visible.
+- A **Support request** is one report submitted through the plugin and represented by one GitHub issue.
+- The **GitHub App** is the issue author. An internal **Developer** is assigned to the issue.
 
-## Ownership and source of truth
-
-| Concern | Authority | Projection or boundary rule |
+| Concern | Authority | Projection/boundary |
 | --- | --- | --- |
-| Installation, environment, current WordPress user, and capabilities | WordPress | The service verifies the authenticated local identity and explicit visibility scope. |
-| Client-to-installation-to-repository routing | Approved operator-controlled configuration | Reporters cannot select or change routing. One repository per client is normal; a per-installation exception requires explicit isolation approval. |
-| Support request and initial report | GitHub support repository | The initial report is the issue body once delivered. |
-| Client-visible messages | GitHub support repository | Later messages are comments. The support repository is a client-visible conversation surface. |
-| Support status | GitHub support repository | `open` and `closed` are authoritative; the UI does not maintain a competing status. |
-| Client-visible classifications | GitHub support repository | Only an allowlisted classification is projected. Internal engineering labels are excluded. |
-| Reporter and installation attribution | Verified WordPress identity associated with each message | The GitHub App may be the provider author, but the human reporter and installation remain part of message attribution. |
-| Repository and issue identities, idempotency, receipts, attempts, and reconciliation | Operational service | These records operate delivery and projection; they do not become a second conversation record. |
-| Widget display | Read-only projection | The UI is never authoritative. |
-| Attachments | Not in the MVP | Attachment metadata and storage require a later privacy and authorization decision. |
+| WordPress installation, environment, current Reporter, local capabilities | WordPress | Resolved server-side; never accepted as browser identity claims. |
+| Project-to-repository mapping | Approved project configuration | The Reporter cannot choose or change the repository. |
+| Support request text and open/closed status | GitHub issue in the project's repository | WordPress shows only the submitted text and status for authorized requests. |
+| Reporter-to-request association and GitHub issue identity | Operational service records | Used to list only requests created in that authenticated Reporter context. |
+| Delivery receipts, attempts, idempotency, reconciliation | Operational service | Explain delivery; do not replace the GitHub issue. |
+| Client-origin label | GitHub issue metadata | Internal triage classification only; never an authorization rule. |
+| GitHub issue comments | Project repository | Internal collaboration; never included in the client projection. |
 
-## Authorization and visibility
+Project repository collaborators can read Support request issues in GitHub. This design keeps clients out of GitHub; it does not hide report content from people who already have access to the project repository.
 
-| Actor | Scope | Allowed actions | Not implied |
-| --- | --- | --- | --- |
-| Reporter | Own requests by default | Create, view, reply, close, and reopen own requests | Access to another installation, client, or GitHub repository |
-| Support manager | Explicitly granted scope over one installation or an approved set | View and act on requests in that scope | Access outside the granted scope |
-| Support staff | The relevant private support repository | Reply, close, and reopen directly in GitHub | Internal project-issue comments becoming client-visible |
-| Engineering collaborator | Internal project repositories/issues | Discuss and implement engineering work | Client-support visibility or mutation rights |
-| Anonymous or unscoped user | None | None | Any support data or action |
+## Authorization and issue listing
 
-Visibility is capability-based and independent of WordPress role names or GitHub membership.
+| Actor | Default scope | WordPress view |
+| --- | --- | --- |
+| Reporter | Requests they submitted through the authenticated WordPress installation | Submitted issue text and open/closed status only |
+| Support manager | Explicitly granted scope over one installation or an approved set | Requests in that scope, with the same client-facing fields |
+| Project developer | Access granted by the project's GitHub repository | Works the issue in GitHub; comments remain internal to the project team |
+| Anonymous or unscoped user | None | No Support requests |
 
-## GitHub field semantics
+The service must record the verified Reporter, WordPress installation, Support request identity, and GitHub issue identity when creating the issue. A list/read request first resolves the actor's authorized Support request identities, then projects only those issues. A shared `client` label may help internal triage, but filtering by that label alone would return other Reporters' issues from the same repository.
 
-- The initial report is the issue body.
-- Every later client or support message is a comment.
-- MVP messages are append-only; corrections are new comments rather than edits or deletions.
-- GitHub `open`/`closed` is the support-request status.
-- Labels are classification, not authorization or delivery state.
-- Every support-repository comment is eligible for the client-visible conversation. Internal discussion belongs in a separate engineering issue.
-- The provider identity of the GitHub App does not replace verified WordPress reporter and installation attribution.
+Clients do not receive GitHub repository access, issue URLs that grant access, GitHub credentials, or arbitrary issue-number lookup. Every issue read is checked against the server-side association and Visibility scope.
 
-## Delivery semantics
+## Issue and delivery semantics
 
-Delivery outcome is separate from support status:
+- The GitHub App creates one GitHub issue for each Support request, applies the agreed general client-origin label, and assigns an internal Developer.
+- The issue body contains the submitted report. A future field-to-issue-title rule should be explicit; the label and issue author are not Reporter identity.
+- The Reporter projection includes the submitted issue text and authoritative `open`/`closed` status. It excludes comments, internal labels, assignments, and unrelated repository issues unless a later decision adds a field.
+- A report is not confirmed delivered just because WordPress accepted the browser request. Preserve the established delivery outcomes: `locally-unsent`, `accepted-pending`, `delivered`, `failed`, and `outcome-unknown`. Reconcile an ambiguous GitHub create before retrying.
+- GitHub issue creation is attributed to the GitHub App. The assigned Developer is responsible for handling it; do not use a developer's personal credential just to make that person appear as issue author.
 
-1. `locally-unsent`: not durably submitted; no receipt exists.
-2. `accepted-pending`: the delivery intent is durably recorded, but no GitHub identity is guaranteed.
-3. `delivered`: the GitHub issue or comment identity is recorded and verified.
-4. `failed`: delivery is known not to have completed and requires a new attempt.
-5. `outcome-unknown`: GitHub may have accepted the change; reconcile before retrying.
+## First product slice
 
-Delivery intents have idempotency keys and preserve order per support request. A reply or close/reopen action cannot be accepted ahead of an unresolved request creation or earlier mutation. The system does not claim exactly-once GitHub side effects.
+1. An authorized Reporter opens the bottom-right launcher in WP-Admin.
+2. The Reporter submits a plain-text report.
+3. The service creates and labels an issue in the connected project's existing repository and assigns a Developer.
+4. WordPress lists only that Reporter's plugin-created requests, showing the submitted issue text and current status.
+5. Project-team discussion remains in GitHub and is never rendered as a client conversation.
 
-## Sequences
+This is an issue intake and status experience, not live chat or a threaded client conversation. The connection/setup page is an operator surface under `GETQUICK → Support`, separate from the Reporter launcher.
 
-### Initial report
+## Deferred or unresolved
 
-```mermaid
-sequenceDiagram
-    actor R as Reporter
-    participant W as WordPress
-    participant I as Intake/delivery service
-    participant G as GitHub support repository
-
-    R->>W: Submit plain-text report
-    W->>I: Authenticated request + idempotency key
-    alt Intake unavailable before acceptance
-        I-->>W: No durable acceptance
-        W-->>R: locally-unsent / retryable
-    else Accepted
-        I-->>W: accepted-pending receipt
-        I->>G: Create issue with initial report as body
-        alt GitHub confirms
-            G-->>I: Issue identity
-            I-->>W: delivered
-        else Known failure
-            I-->>W: failed
-        else Ambiguous provider result
-            I-->>W: outcome-unknown
-            I->>G: Reconcile before retry
-        end
-    end
-```
-
-### Reply
-
-```mermaid
-sequenceDiagram
-    actor R as Reporter
-    actor S as Support staff
-    participant W as WordPress
-    participant I as Intake/delivery service
-    participant G as GitHub support repository
-
-    R->>W: Submit reply in an authorized scope
-    W->>I: Authenticated comment intent
-    I->>G: Add comment after prior intents are resolved
-    G-->>I: Comment identity
-    I-->>W: delivered
-    S->>G: Add client-visible support reply directly
-    R->>W: Manual refresh
-    W->>G: Read projected conversation
-    G-->>W: Body, comments, status, classifications
-```
-
-### Close/reopen
-
-```mermaid
-sequenceDiagram
-    actor A as Authorized actor
-    participant W as WordPress
-    participant I as Intake/delivery service
-    participant G as GitHub support repository
-
-    A->>W: Request close or reopen
-    W->>I: Ordered state-change intent
-    I->>G: Change GitHub issue state
-    G-->>I: Confirmed state (or ambiguous result)
-    I-->>W: delivered / outcome-unknown
-    A->>W: Manual refresh
-    W->>G: Read authoritative state
-    G-->>W: open or closed
-```
-
-Support staff may perform the same state changes directly in GitHub. The next projection refresh reflects GitHub's state.
-
-### Provider outage and recovery
-
-```mermaid
-sequenceDiagram
-    actor R as Reporter
-    participant W as WordPress
-    participant I as Intake/delivery service
-    participant G as GitHub
-
-    R->>W: Submit report or mutation
-    W->>I: Delivery intent
-    alt Intake is unavailable
-        I--xW: No durable acceptance
-        W-->>R: locally-unsent
-    else Intake accepts, GitHub is unavailable
-        I-->>W: accepted-pending
-        I->>G: Retry/reconcile later
-    else GitHub result is ambiguous
-        G--xI: Timeout or lost response
-        I-->>W: outcome-unknown
-        I->>G: Reconcile by idempotency/provider identity
-        alt Existing change found
-            G-->>I: Treat as delivered
-        else No change found
-            I->>G: Retry once ordering permits
-        end
-    end
-```
-
-## MVP boundary
-
-### First end-to-end slice
-
-1. An authorized WordPress reporter submits a plain-text report.
-2. The system returns an honest durable receipt/status.
-3. The mapped private support repository receives the issue.
-4. Support staff posts one client-visible reply.
-5. The reporter sees the reply after manual refresh.
-
-### Remaining MVP behavior
-
-- Client replies from WordPress.
-- Close and reopen actions within the actor's explicit scope.
-- Viewing own requests or requests within an explicit support-manager scope.
-- Manual refresh of the GitHub-backed projection.
-
-### Deferred
-
-- Anonymous/public reporting.
-- Live sockets, polling, and live chat.
-- Session recording.
-- AI triage.
-- Autonomous coding.
-- Screenshots, attachments, and R2.
-- Rich diagnostics/context collection.
-- A local WordPress outbox.
-- Automatic engineering-issue creation or workbench handoff.
-- Additional notifications beyond explicit UI status.
-
-## Explicit follow-up boundaries
-
-Issue #2 does not settle the following; they remain in the linked implementation/research slices:
-
-- GitHub App permissions, installation authentication, and credential rotation.
-- Onboarding/configuration storage and lifecycle.
-- Shared versus dedicated Cloudflare resources.
-- D1, Queues, R2, and webhook adoption.
-- Privacy, retention, export, and erasure.
-- Measured performance budgets.
-- WordPress REST, build, CI, and operational details.
+- Whether a Reporter may close or reopen a Support request; current agreement only establishes viewing issue status.
+- Whether each project has a fixed default Developer assignee or how a Developer is chosen.
+- The exact issue title rule if the submission form has only a report body.
+- Connection lifecycle, GitHub App installation verification, mapping ownership, and revocation handling; see [repository connection research](research/support-widget-and-repository-connection.md).
+- Privacy/retention of report text in the operational service while delivery is pending or being reconciled.
+- Any future client-visible response channel. Adding comments to the WordPress projection would require a new decision; repository comments remain internal by default.
