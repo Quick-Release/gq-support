@@ -22,6 +22,9 @@ The operational context of a WordPress installation, such as production or stagi
 An authenticated WordPress user authorized to submit and view their own support requests, or requests within an explicitly granted visibility scope. A Reporter does not need a GitHub account.
 _Avoid_: GitHub user
 
+**Reporter subject**:
+A non-reassignable identity for a Reporter within one WordPress installation; it is not their email, username, or WordPress user ID across installations.
+
 **Developer**:
 An internal project collaborator assigned to work on a support issue. The GitHub App creates the issue; the Developer is its assignee.
 
@@ -57,6 +60,9 @@ An issue used for internal project work in the same Project repository. It is ne
 
 **Repository mapping**:
 The approved association between a WordPress project/installation and its existing Project repository. Reporters cannot choose or change the mapping through the support experience.
+
+**Installation credential**:
+A revocable identity for one approved WordPress installation and environment when contacting the support service; it does not authorize another installation or an operator.
 
 **Operational record**:
 The durable mapping between a Support request, its Client, WordPress installation, verified Reporter, and GitHub issue identity, plus delivery and reconciliation information. It supports authorization and operations without replacing GitHub as the issue record.
