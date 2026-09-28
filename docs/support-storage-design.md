@@ -57,6 +57,7 @@ Constraints and indexes:
 | Column | Notes |
 |---|---|
 | `id` | `int_…`, the opaque marker written on the issue's first line. It is not the resource `id` |
+| `slot` | The request's Slot, repeated so every statement can be scoped. `(request_id, slot)` is a composite FK to `support_request (id, slot)` |
 | `request_id` | FK to `support_request` |
 | `kind`, `seq` | `create` only in the MVP. `seq` orders later intents (#28, ADR 0006). `UNIQUE (request_id, seq)` |
 | `state` | `pending`, `in_flight`, `delivered`, `failed`, `outcome_unknown` |
@@ -125,7 +126,7 @@ The query uses `list_mine` (an index search, not a scan), and rows read are abou
 
 ## Isolation
 
-The Slot → Client relation lives in code, so D1 cannot enforce it with a foreign key. `storageFor(slot)` is the only query path. Acceptance checks that `repository_id` equals the Slot's mapping at that moment. A transfer that updates a row is accepted only within the same Client. Cross-Slot tests are mandatory (ADR 0013), and they include:
+The Slot → Client relation lives in code, so D1 cannot enforce it with a foreign key. `storageFor(slot)` (`worker/src/storage.ts`) is the only query path for Slot-owned tables: it binds the Slot as `?1` and rejects any statement that does not AND `slot = ?1` for every table it reads or writes. Cross-Slot work (the delivery sweep, webhook lookups by issue, credential lookups before a Slot is known) uses narrow, named queries outside the seam. A Client moved to its own database (ADR 0013) is routed there by the same seam. Acceptance checks that `repository_id` equals the Slot's mapping at that moment. A transfer that updates a row is accepted only within the same Client. Cross-Slot tests are mandatory (ADR 0013), and they include:
 
 - the same Submission ID used from two Reporters and from two Slots;
 - a production and a staging Slot that share one repository;
