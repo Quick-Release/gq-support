@@ -57,9 +57,35 @@ switch ( $gq_support_scenario ) {
 		if ( 3 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id ) {
 			$gq_support_fail( 'Upgrade failed or installation identity changed.' );
 		}
+		$gq_support_capabilities  = array( 'gq_support_submit_requests', 'gq_support_manage_settings' );
+		$gq_support_administrator = get_role( 'administrator' );
+		array_map( array( $gq_support_administrator, 'remove_cap' ), $gq_support_capabilities );
+		delete_option( 'gq_support_administrator_grants' );
+		update_option( 'gq_support_schema_version', 2, false );
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
+		do_action( 'rest_api_init', rest_get_server() );
+		$gq_support_administrator = get_role( 'administrator' );
+		if ( 3 !== (int) get_option( 'gq_support_schema_version' )
+			|| ! $gq_support_administrator->has_cap( 'gq_support_submit_requests' )
+			|| ! $gq_support_administrator->has_cap( 'gq_support_manage_settings' )
+			|| get_option( 'gq_support_administrator_grants' ) !== $gq_support_capabilities ) {
+			$gq_support_fail( 'Schema-2 upgrade did not make the initial Administrator grant.' );
+		}
+		$gq_support_administrator->remove_cap( 'gq_support_submit_requests' );
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
+		do_action( 'rest_api_init', rest_get_server() );
+		$gq_support_regranted = get_role( 'administrator' )->has_cap( 'gq_support_submit_requests' );
+		get_role( 'administrator' )->add_cap( 'gq_support_submit_requests' );
+		if ( $gq_support_regranted ) {
+			$gq_support_fail( 'A current-schema request re-granted a revoked capability.' );
+		}
 		break;
 	case 'uninstall':
 		update_option( 'gq_support_external_record', 'unchanged', false );
+		// Treat manage-settings as independently granted: uninstall must remove only recorded grants.
+		get_role( 'administrator' )->add_cap( 'gq_support_submit_requests' );
+		get_role( 'administrator' )->add_cap( 'gq_support_manage_settings' );
+		update_option( 'gq_support_administrator_grants', array( 'gq_support_submit_requests' ), false );
 		if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress uninstall guard.
 			define( 'WP_UNINSTALL_PLUGIN', 'gq-support/gq-support.php' );
@@ -68,6 +94,11 @@ switch ( $gq_support_scenario ) {
 		if ( false !== get_option( 'gq_support_installation_id' ) || false !== get_option( 'gq_support_schema_version' ) || false !== get_option( 'gq_support_installation_origin' ) ) {
 			$gq_support_fail( 'Uninstall failed to remove owned local markers.' );
 		}
+		$gq_support_administrator = get_role( 'administrator' );
+		if ( $gq_support_administrator->has_cap( 'gq_support_submit_requests' ) || ! $gq_support_administrator->has_cap( 'gq_support_manage_settings' ) || false !== get_option( 'gq_support_administrator_grants' ) ) {
+			$gq_support_fail( 'Uninstall did not remove exactly the recorded Administrator grants.' );
+		}
+		$gq_support_administrator->remove_cap( 'gq_support_manage_settings' );
 		if ( 'unchanged' !== get_option( 'gq_support_external_record' ) ) {
 			$gq_support_fail( 'Uninstall removed unrelated data.' );
 		}

@@ -14,9 +14,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class GQ_Support_Lifecycle {
 
-	/** The current local schema, independent of the display version. */
-	private const SCHEMA_VERSION = 3;
-
 	/**
 	 * Activation only initializes the current site. Network sites initialize on first use.
 	 *
@@ -53,19 +50,27 @@ final class GQ_Support_Lifecycle {
 		}
 
 		$origin = untrailingslashit( home_url( '/' ) );
-		if ( $version < self::SCHEMA_VERSION ) {
+		if ( $version < 2 ) {
 			// Migration 2: bind the existing identity to this site's current URL.
 			add_option( 'gq_support_installation_origin', $origin, '', false );
-			update_option( 'gq_support_schema_version', self::SCHEMA_VERSION, false );
+			update_option( 'gq_support_schema_version', 2, false );
 		}
 
 		if ( $version < 3 ) {
+			// Migration 3: the initial Administrator grant, once; later revocations stick.
+			// Record only what this migration added so uninstall leaves independent grants alone.
 			$administrator = get_role( 'administrator' );
-			if ( $administrator && ! $administrator->has_cap( 'gq_support_submit_requests' ) ) {
-				$administrator->add_cap( 'gq_support_submit_requests' );
-				add_option( 'gq_support_administrator_grant', 1, '', false );
+			$granted       = array();
+			foreach ( array( 'gq_support_submit_requests', 'gq_support_manage_settings' ) as $capability ) {
+				if ( $administrator && ! $administrator->has_cap( $capability ) ) {
+					$administrator->add_cap( $capability );
+					$granted[] = $capability;
+				}
 			}
-			update_option( 'gq_support_schema_version', self::SCHEMA_VERSION, false );
+			if ( $granted ) {
+				add_option( 'gq_support_administrator_grants', $granted, '', false );
+			}
+			update_option( 'gq_support_schema_version', 3, false );
 		}
 
 		if ( get_option( 'gq_support_installation_origin' ) !== $origin ) {

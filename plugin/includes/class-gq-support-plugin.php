@@ -14,6 +14,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class GQ_Support_Plugin {
 
+	/** Approved site-admin screens; WooCommerce screens match by the `woocommerce` prefix. */
+	private const SCREENS = array( 'dashboard', 'post', 'edit-post' );
+
 	/**
 	 * Explain why an already-active plugin cannot initialize without its dependency.
 	 */
@@ -31,6 +34,7 @@ final class GQ_Support_Plugin {
 	 * Register lifecycle initialization in relevant WordPress contexts.
 	 */
 	public static function boot(): void {
+		add_action( 'init', array( __CLASS__, 'load_textdomain' ) );
 		add_action( 'admin_init', array( __CLASS__, 'maybe_initialize_admin' ) );
 		add_action( 'rest_api_init', array( GQ_Support_Lifecycle::class, 'ensure_site' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_launcher' ) );
@@ -40,6 +44,14 @@ final class GQ_Support_Plugin {
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			GQ_Support_Lifecycle::ensure_site();
 		}
+	}
+
+	/**
+	 * The launcher's own strings are printed by PHP; the app loads its JSON translations separately.
+	 * Releases ship outside WordPress.org, so core's just-in-time loading never finds the bundled `.mo`.
+	 */
+	public static function load_textdomain(): void {
+		load_plugin_textdomain( 'gq-support', false, dirname( plugin_basename( GQ_SUPPORT_PLUGIN_FILE ) ) . '/languages' );
 	}
 
 	/**
@@ -60,13 +72,12 @@ final class GQ_Support_Plugin {
 	 * The connection record must be issued by the future operator flow, not by a browser field.
 	 */
 	private static function eligible(): bool {
-		// phpcs:ignore WordPress.WP.Capabilities.Unknown -- Granted on the Administrator role in schema migration 3; other grants are explicit.
 		if ( ! is_admin() || is_network_admin() || is_user_admin() || wp_doing_ajax() || ! is_user_logged_in() || ! current_user_can( 'gq_support_submit_requests' ) ) {
 			return false;
 		}
 
 		$screen = get_current_screen();
-		if ( ! $screen || ( ! in_array( $screen->id, array( 'dashboard', 'post', 'edit-post' ), true ) && ! str_starts_with( $screen->id, 'woocommerce' ) ) ) {
+		if ( ! $screen || ( ! in_array( $screen->id, self::SCREENS, true ) && ! str_starts_with( $screen->id, 'woocommerce' ) ) ) {
 			return false;
 		}
 
@@ -101,16 +112,21 @@ final class GQ_Support_Plugin {
 		wp_add_inline_script( 'gq-support-launcher', 'window.gqSupportLauncher=' . wp_json_encode( $bootstrap ) . ';', 'before' );
 	}
 
+	/** Later hooks render only when `enqueue_launcher()` accepted this request. */
+	private static function launcher_enqueued(): bool {
+		return wp_script_is( 'gq-support-launcher', 'enqueued' );
+	}
+
 	/** Render only if the launcher was registered for this request. */
 	public static function render_launcher(): void {
-		if ( ! wp_script_is( 'gq-support-launcher', 'enqueued' ) ) {
+		if ( ! self::launcher_enqueued() ) {
 			return;
 		}
 		?>
 		<div id="gq-support-root" class="gq-support-root">
-			<button type="button" class="gq-support-launcher" aria-expanded="false" aria-controls="gq-support-panel">
+			<button type="button" class="gq-support-launcher" aria-expanded="false">
 				<?php echo esc_html__( 'Support', 'gq-support' ); ?>
-				<span class="gq-support-draft-indicator" hidden aria-label="<?php echo esc_attr__( 'Unsent draft', 'gq-support' ); ?>"></span>
+				<span class="gq-support-draft-indicator" hidden><span class="gq-support-sr-only"><?php echo esc_html__( 'Unsent draft', 'gq-support' ); ?></span></span>
 			</button>
 			<span class="gq-support-launcher-status gq-support-sr-only" role="status" aria-live="polite"></span>
 		</div>
@@ -119,7 +135,7 @@ final class GQ_Support_Plugin {
 
 	/** Let core generate dependency, REST middleware, and translation tags inside an inert template. */
 	public static function render_deferred_assets(): void {
-		if ( ! wp_script_is( 'gq-support-launcher', 'enqueued' ) ) {
+		if ( ! self::launcher_enqueued() ) {
 			return;
 		}
 		$scripts            = wp_scripts();

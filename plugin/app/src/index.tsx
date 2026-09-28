@@ -4,18 +4,20 @@ import { createElement, createRoot } from "@wordpress/element";
 import { App } from "./App";
 import "./app.css";
 
+type VisibilityListener = (visible: boolean, hasDraft: boolean) => void;
+
 declare global {
   interface Window {
-    gqSupportMount: (container: HTMLElement) => void;
-    gqSupportOpen: () => void;
+    gqSupportMount: (container: HTMLElement, onVisibilityChange: VisibilityListener) => void;
+    gqSupportToggle: () => void;
   }
 }
 
-let open: (() => void) | undefined;
-window.gqSupportMount = (container) => {
-  const host = document.createElement('div');
-  host.className = 'gq-support-app-host';
+let toggle: (() => void) | undefined;
+window.gqSupportMount = (container, onVisibilityChange) => {
+  const host = document.createElement("div");
+  host.className = "gq-support-app-host";
   container.appendChild(host);
-  createRoot(host).render(<App registerOpen={(callback) => { open = callback; }} />);
+  createRoot(host).render(<App registerToggle={(callback) => { toggle = callback; }} onVisibilityChange={onVisibilityChange} />);
 };
-window.gqSupportOpen = () => open?.();
+window.gqSupportToggle = () => toggle?.();

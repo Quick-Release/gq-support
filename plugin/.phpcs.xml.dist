@@ -37,6 +37,15 @@
 		</properties>
 	</rule>
 
+	<rule ref="WordPress.WP.Capabilities">
+		<properties>
+			<property name="custom_capabilities" type="array">
+				<element value="gq_support_submit_requests"/>
+				<element value="gq_support_manage_settings"/>
+			</property>
+		</properties>
+	</rule>
+
 	<config name="minimum_supported_wp_version" value="6.5"/>
 
 	<rule ref="PHPCompatibilityWP"/>

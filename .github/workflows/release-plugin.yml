@@ -76,6 +76,10 @@ jobs:
           [ "$constant_version" = "$VERSION" ] || { echo "PHP constant is $constant_version, expected $VERSION" >&2; exit 1; }
           [ "$stable_tag" = "$VERSION" ] || { echo "Stable tag is $stable_tag, expected $VERSION" >&2; exit 1; }
           test -s plugin/assets/dist/index.js
+          test -s plugin/assets/dist/index.css
+          test -s plugin/assets/dist/index-rtl.css
+          test -s plugin/assets/launcher.js
+          test -s plugin/assets/launcher.css
           test -s plugin/assets/dist/index.asset.php
           grep -q "'wp-element'" plugin/assets/dist/index.asset.php
           ! grep -q "'react-jsx-runtime'" plugin/assets/dist/index.asset.php
@@ -94,7 +98,10 @@ jobs:
           cp plugin/README.md package-dist/
           cp plugin/composer.json package-dist/
           cp -R plugin/includes package-dist/includes
+          cp plugin/assets/launcher.js plugin/assets/launcher.css package-dist/assets/
           cp -R plugin/assets/dist package-dist/assets/dist
+          mkdir -p package-dist/languages
+          cp plugin/languages/*.json plugin/languages/*.mo package-dist/languages/
 
       - name: Publish package branch and tag
         env:

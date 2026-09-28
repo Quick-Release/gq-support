@@ -4,15 +4,28 @@
   if (!root) return;
   const button = root.querySelector('.gq-support-launcher');
   const status = root.querySelector('.gq-support-launcher-status');
+  const indicator = root.querySelector('.gq-support-draft-indicator');
   let nodes;
   let next = 0;
   let loading = false;
   let mounted = false;
 
-  async function load() {
+  // The panel reports its state; the launcher keeps its own button in sync.
+  function onVisibilityChange(visible, hasDraft) {
+    button.setAttribute('aria-expanded', String(visible));
+    indicator.hidden = visible || !hasDraft;
+    if (!visible) button.focus();
+  }
+
+  function showStatus(message, visible) {
+    status.textContent = message;
+    status.classList.toggle('gq-support-sr-only', !visible);
+  }
+
+  async function onLauncherClick() {
     if (loading) return;
     if (mounted) {
-      window.gqSupportOpen();
+      window.gqSupportToggle();
       return;
     }
     loading = true;
@@ -20,7 +33,7 @@
       const template = document.getElementById('gq-support-app-assets');
       nodes = template ? Array.from(template.content.children) : [];
     }
-    status.textContent = window.gqSupportLauncher.loading;
+    showStatus(window.gqSupportLauncher.loading, false);
     try {
       while (next < nodes.length) {
         const source = nodes[next];
@@ -47,15 +60,15 @@
         next++;
       }
       if (typeof window.gqSupportMount !== 'function') throw new Error('Support app unavailable');
-      window.gqSupportMount(root);
+      window.gqSupportMount(root, onVisibilityChange);
       mounted = true;
-      status.textContent = '';
-      window.gqSupportOpen();
+      button.setAttribute('aria-controls', 'gq-support-panel');
+      showStatus('', false);
     } catch (error) {
-      status.textContent = window.gqSupportLauncher.error;
+      showStatus(window.gqSupportLauncher.error, true);
     } finally {
       loading = false;
     }
   }
-  button.addEventListener('click', load);
+  button.addEventListener('click', onLauncherClick);
 })();
