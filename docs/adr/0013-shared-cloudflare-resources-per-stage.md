@@ -1,0 +1,7 @@
+---
+status: accepted
+---
+
+# One shared Worker and D1 database per stage
+
+The support service runs as one Worker and one D1 database per deployment stage (`staging`, `prod`, and personal `dev_*` stages) in a GETQUICK-owned Cloudflare account, shared by every Client. Isolation between Clients and installations is enforced in the application: the verified installation key resolves the Client, installation and repository from trusted records, and every query goes through one installation-scoped storage seam. We chose this over a D1 database or Worker per Client because Cloudflare bindings are fixed at deploy time, so each new Client would mean a redeploy and another migration target. That work buys a database boundary against query-scoping bugs, but the Worker and GitHub App key would still be shared, and cost does not favour either option. The trade-off is that a scoping bug can cross Clients, so the storage seam and cross-installation isolation tests are mandatory. A per-Client D1 bound to the shared Worker is the escalation path, taken when a contract requires separation, a Client needs its own restore or legal hold, the shared database reaches half its 10 GB cap or misses its latency budget, or one Client measurably slows the others. A Worker in a Client's own account is a contractual exception, not a default. See the [isolation research](../research/cloudflare-isolation-and-alchemy-provisioning.md).

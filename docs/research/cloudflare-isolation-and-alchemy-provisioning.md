@@ -7,6 +7,8 @@
 
 ## Decision summary
 
+> **Superseded in part.** [ADR 0013](../adr/0013-shared-cloudflare-resources-per-stage.md) records the topology below. [ADR 0012](../adr/0012-installation-signing-with-site-held-ed25519-keys.md) replaces the per-installation HMAC keys with site-held Ed25519 keys: D1 stores only public keys, so the key-encryption key (KEK) and envelope encryption described here are not needed.
+
 1. **Topology.** Deploy **one shared Worker and one shared D1 database per environment stage** (`staging`, `prod`, plus personal `dev_*` stages) in a GETQUICK-owned Cloudflare account. Every Client uses the same resources. Isolation between Clients and between installations is enforced in the application: the verified installation credential resolves the Client, installation and repository from trusted rows, and every query is keyed by that installation.
 2. **Dedicated resources are an escalation path.** Moving a Client to its own resources is a documented migration with objective triggers. The next step is a per-Client D1 bound to the shared Worker (option 2). A Worker in the Client's own account (option 3) is a contractual exception, not a default.
 3. **Minimum infrastructure for the first slice.**
