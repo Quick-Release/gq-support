@@ -36,49 +36,65 @@ final class GQ_Support_Lifecycle {
 
 	/**
 	 * Initialize or upgrade a site's local state, only in a relevant context.
+	 * A migrated site reads exactly one option here.
 	 */
 	public static function ensure_site(): void {
-		$version = (int) get_option( 'gq_support_schema_version', 0 );
-		if ( $version < 1 ) {
-			// Migration 1: create a distinct, opaque installation reference per site.
-			add_option( 'gq_support_installation_id', wp_generate_uuid4(), '', false );
-			if ( false === get_option( 'gq_support_schema_version', false ) ) {
-				add_option( 'gq_support_schema_version', 1, '', false );
-			} else {
-				update_option( 'gq_support_schema_version', 1, false );
-			}
-		}
-
 		$origin = untrailingslashit( home_url( '/' ) );
-		if ( $version < 2 ) {
-			// Migration 2: bind the existing identity to this site's current URL.
-			add_option( 'gq_support_installation_origin', $origin, '', false );
-			update_option( 'gq_support_schema_version', 2, false );
+		$state  = GQ_Support_State::find() ?? self::migrate( $origin );
+
+		if ( $state['origin'] !== $origin ) {
+			// A database copy at a new URL must not reuse the source installation's identity or key.
+			// A deliberate domain move also requires the Operator to reconnect the site.
+			$connected = 'not_connected' !== $state['connection'] || GQ_Support_Signing_Key::stored();
+			GQ_Support_Signing_Key::delete();
+			GQ_Support_State::update(
+				array(
+					'installation_id' => wp_generate_uuid4(),
+					'origin'          => $origin,
+				) + ( $connected ? GQ_Support_State::disconnected( 'copied_or_moved' ) : array() )
+			);
+		}
+	}
+
+	/**
+	 * Migration 4 folds the schema 1–3 options into `gq_support_state`,
+	 * running any earlier step a site has not reached on the way.
+	 *
+	 * @param string $origin The site's current URL.
+	 * @return array<string, mixed>
+	 */
+	private static function migrate( string $origin ): array {
+		$version = (int) get_option( 'gq_support_schema_version', 0 );
+		$state   = GQ_Support_State::defaults();
+
+		// Migration 1: a distinct, opaque installation reference per site.
+		$state['installation_id'] = (string) ( $version >= 1 ? get_option( 'gq_support_installation_id', '' ) : '' );
+		if ( '' === $state['installation_id'] ) {
+			$state['installation_id'] = wp_generate_uuid4();
 		}
 
-		if ( $version < 3 ) {
+		// Migration 2: bind the identity to the URL it was created at.
+		$state['origin'] = (string) ( $version >= 2 ? get_option( 'gq_support_installation_origin', $origin ) : $origin );
+
+		if ( $version >= 3 ) {
+			$state['administrator_grants'] = array_values( (array) get_option( 'gq_support_administrator_grants', array() ) );
+		} else {
 			// Migration 3: the initial Administrator grant, once; later revocations stick.
 			// Record only what this migration added so uninstall leaves independent grants alone.
 			$administrator = get_role( 'administrator' );
-			$granted       = array();
 			foreach ( array( 'gq_support_submit_requests', 'gq_support_manage_settings' ) as $capability ) {
 				if ( $administrator && ! $administrator->has_cap( $capability ) ) {
 					$administrator->add_cap( $capability );
-					$granted[] = $capability;
+					$state['administrator_grants'][] = $capability;
 				}
 			}
-			if ( $granted ) {
-				add_option( 'gq_support_administrator_grants', $granted, '', false );
-			}
-			update_option( 'gq_support_schema_version', 3, false );
 		}
 
-		if ( get_option( 'gq_support_installation_origin' ) !== $origin ) {
-			// A database copy at a new URL must not reuse the source installation's identity.
-			// A deliberate domain move also requires the operator to reconnect the site.
-			if ( update_option( 'gq_support_installation_id', wp_generate_uuid4(), false ) ) {
-				update_option( 'gq_support_installation_origin', $origin, false );
+		if ( add_option( GQ_Support_State::OPTION, $state, '', false ) ) {
+			foreach ( array( 'gq_support_installation_id', 'gq_support_installation_origin', 'gq_support_schema_version', 'gq_support_administrator_grants', 'gq_support_connection' ) as $legacy ) {
+				delete_option( $legacy );
 			}
 		}
+		return GQ_Support_State::get();
 	}
 }

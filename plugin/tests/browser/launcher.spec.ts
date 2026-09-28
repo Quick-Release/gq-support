@@ -3,19 +3,21 @@ import { execFileSync } from 'node:child_process';
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
 const wp = (args: string[]) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.test-site', 'wp', ...args], { encoding: 'utf8' }).trim();
+const setConnection = (connection: string) => wp(['eval', `GQ_Support_State::update( array( 'connection' => '${connection}' ) );`]);
 
 // Run against a disposable DDEV site: plugin is symlinked under wp-content/plugins.
 test.beforeAll(() => {
   wp(['option', 'update', 'WPLANG', '']);
   wp(['language', 'core', 'install', 'pt_PT', 'ar']);
   wp(['plugin', 'activate', 'gq-support']);
-  wp(['eval', "update_option('gq_support_connection', array('status' => 'connected', 'installation_id' => get_option('gq_support_installation_id')));"]);
+  // The launcher only needs a connected state; enrollment itself is covered by the integration tests.
+  setConnection('connected');
   wp(['user', 'update', 'admin', '--user_pass=launcher-test-password']);
   wp(['user', 'update', 'editor', '--user_pass=editor']);
   // The block editor's welcome guide is a core modal that correctly covers the launcher; keep it closed.
   wp(['eval', "update_user_option(get_user_by('login', 'admin')->ID, 'persisted_preferences', array('core/edit-post' => array('welcomeGuide' => false), '_modified' => gmdate('c')));"]);
 });
-test.afterAll(() => { wp(['option', 'delete', 'gq_support_connection']); });
+test.afterAll(() => setConnection('not_connected'));
 
 async function logIn(page: Page, user = 'admin', password = 'launcher-test-password') {
   await page.goto(`${site}/wp-login.php`);
@@ -97,8 +99,7 @@ test('ungranted Reporter has no assets', async ({ page }) => {
 });
 
 test('Reporter on an unconfigured installation has no assets', async ({ page }) => {
-  const connection = wp(['option', 'get', 'gq_support_connection', '--format=json']);
-  wp(['option', 'delete', 'gq_support_connection']);
+  setConnection('not_connected');
   try {
     await logIn(page);
     await page.goto(`${site}/wp-admin/`);
@@ -106,7 +107,7 @@ test('Reporter on an unconfigured installation has no assets', async ({ page }) 
     await expect(page.locator('#gq-support-root')).toHaveCount(0);
     await expect(page.locator('script[src*="gq-support-launcher"]')).toHaveCount(0);
   } finally {
-    wp(['option', 'update', 'gq_support_connection', connection, '--format=json']);
+    setConnection('connected');
   }
 });
 

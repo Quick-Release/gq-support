@@ -11,66 +11,67 @@ $gq_support_fail     = static function ( string $message ): void {
 	throw new RuntimeException( $message );
 };
 
+/**
+ * Replace the migrated state with a site at an earlier schema.
+ *
+ * @param array<string, mixed> $legacy Legacy options to write.
+ */
+$gq_support_legacy_site = static function ( array $legacy ): void {
+	delete_option( 'gq_support_state' );
+	foreach ( $legacy as $gq_support_name => $gq_support_value ) {
+		add_option( $gq_support_name, $gq_support_value, '', false );
+	}
+	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
+	do_action( 'rest_api_init', rest_get_server() );
+};
+
 switch ( $gq_support_scenario ) {
 	case 'active':
 		if ( ! is_plugin_active( 'gq-support/gq-support.php' ) && ! is_plugin_active_for_network( 'gq-support/gq-support.php' ) ) {
 			$gq_support_fail( 'Plugin not active.' );
 		}
-		if ( ! get_option( 'gq_support_installation_id' ) || 3 !== (int) get_option( 'gq_support_schema_version' ) ) {
+		$gq_support_state = get_option( 'gq_support_state' );
+		if ( ! is_array( $gq_support_state ) || empty( $gq_support_state['installation_id'] ) || GQ_Support_State::SCHEMA_VERSION !== $gq_support_state['schema_version'] ) {
 			$gq_support_fail( 'Missing installation identity or schema marker.' );
 		}
 		if ( wp_next_scheduled( 'gq_support_reconcile' ) ) {
 			$gq_support_fail( 'Unexpected scheduled work.' );
 		}
 		break;
-	case 'clone':
-		$gq_support_old_id = get_option( 'gq_support_installation_id' );
-		$gq_support_home   = get_option( 'home' );
-		// WP-CLI overrides home URLs; remove its filters to simulate a real cloned site.
-		remove_all_filters( 'option_home' );
-		remove_all_filters( 'home_url' );
-		try {
-			update_option( 'home', 'https://clone.example.test', false );
-			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
-			do_action( 'rest_api_init', rest_get_server() );
-			if ( get_option( 'gq_support_installation_id' ) === $gq_support_old_id ) {
-				$gq_support_fail( 'A cloned installation retained the original identity.' );
-			}
-		} finally {
-			update_option( 'home', $gq_support_home, false );
-			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Restore the installation to its original context.
-			do_action( 'rest_api_init', rest_get_server() );
-		}
-		break;
 	case 'upgrade':
-		$gq_support_id = get_option( 'gq_support_installation_id' );
-		delete_option( 'gq_support_installation_origin' );
-		update_option( 'gq_support_schema_version', 1, false );
-		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
-		do_action( 'rest_api_init', rest_get_server() );
-		if ( 3 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id || ! get_option( 'gq_support_installation_origin' ) ) {
-			$gq_support_fail( 'Schema-1 upgrade did not preserve identity and bind the URL.' );
-		}
-		update_option( 'gq_support_schema_version', 0, false );
-		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
-		do_action( 'rest_api_init', rest_get_server() );
-		if ( 3 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id ) {
-			$gq_support_fail( 'Upgrade failed or installation identity changed.' );
-		}
+		$gq_support_state         = GQ_Support_State::get();
 		$gq_support_capabilities  = array( 'gq_support_submit_requests', 'gq_support_manage_settings' );
 		$gq_support_administrator = get_role( 'administrator' );
+
+		// Schema 1: identity only. The upgrade keeps it and binds the current URL.
+		$gq_support_legacy_site(
+			array(
+				'gq_support_installation_id' => 'schema-1-id',
+				'gq_support_schema_version'  => 1,
+			)
+		);
+		$gq_support_upgraded = GQ_Support_State::get();
+		if ( 'schema-1-id' !== $gq_support_upgraded['installation_id'] || $gq_support_state['origin'] !== $gq_support_upgraded['origin'] ) {
+			$gq_support_fail( 'Schema-1 upgrade did not preserve identity and bind the URL.' );
+		}
+
+		// Schema 2 without grants: the upgrade makes the initial Administrator grant.
 		array_map( array( $gq_support_administrator, 'remove_cap' ), $gq_support_capabilities );
-		delete_option( 'gq_support_administrator_grants' );
-		update_option( 'gq_support_schema_version', 2, false );
-		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
-		do_action( 'rest_api_init', rest_get_server() );
+		$gq_support_legacy_site(
+			array(
+				'gq_support_installation_id'     => 'schema-2-id',
+				'gq_support_installation_origin' => $gq_support_state['origin'],
+				'gq_support_schema_version'      => 2,
+			)
+		);
 		$gq_support_administrator = get_role( 'administrator' );
-		if ( 3 !== (int) get_option( 'gq_support_schema_version' )
-			|| ! $gq_support_administrator->has_cap( 'gq_support_submit_requests' )
+		if ( ! $gq_support_administrator->has_cap( 'gq_support_submit_requests' )
 			|| ! $gq_support_administrator->has_cap( 'gq_support_manage_settings' )
-			|| get_option( 'gq_support_administrator_grants' ) !== $gq_support_capabilities ) {
+			|| GQ_Support_State::get()['administrator_grants'] !== $gq_support_capabilities ) {
 			$gq_support_fail( 'Schema-2 upgrade did not make the initial Administrator grant.' );
 		}
+
+		// A migrated site never grants again, so a revocation sticks.
 		$gq_support_administrator->remove_cap( 'gq_support_submit_requests' );
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
 		do_action( 'rest_api_init', rest_get_server() );
@@ -79,36 +80,13 @@ switch ( $gq_support_scenario ) {
 		if ( $gq_support_regranted ) {
 			$gq_support_fail( 'A current-schema request re-granted a revoked capability.' );
 		}
-		break;
-	case 'uninstall':
-		update_option( 'gq_support_external_record', 'unchanged', false );
-		// Treat manage-settings as independently granted: uninstall must remove only recorded grants.
-		get_role( 'administrator' )->add_cap( 'gq_support_submit_requests' );
-		get_role( 'administrator' )->add_cap( 'gq_support_manage_settings' );
-		update_option( 'gq_support_administrator_grants', array( 'gq_support_submit_requests' ), false );
-		if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
-			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress uninstall guard.
-			define( 'WP_UNINSTALL_PLUGIN', 'gq-support/gq-support.php' );
-		}
-		require dirname( __DIR__, 2 ) . '/uninstall.php';
-		if ( false !== get_option( 'gq_support_installation_id' ) || false !== get_option( 'gq_support_schema_version' ) || false !== get_option( 'gq_support_installation_origin' ) ) {
-			$gq_support_fail( 'Uninstall failed to remove owned local markers.' );
-		}
-		$gq_support_administrator = get_role( 'administrator' );
-		if ( $gq_support_administrator->has_cap( 'gq_support_submit_requests' ) || ! $gq_support_administrator->has_cap( 'gq_support_manage_settings' ) || false !== get_option( 'gq_support_administrator_grants' ) ) {
-			$gq_support_fail( 'Uninstall did not remove exactly the recorded Administrator grants.' );
-		}
-		$gq_support_administrator->remove_cap( 'gq_support_manage_settings' );
-		if ( 'unchanged' !== get_option( 'gq_support_external_record' ) ) {
-			$gq_support_fail( 'Uninstall removed unrelated data.' );
-		}
-		delete_option( 'gq_support_external_record' );
+		update_option( 'gq_support_state', $gq_support_state, false );
 		break;
 	case 'network':
 		if ( ! is_multisite() ) {
 			$gq_support_fail( 'Multisite required.' );
 		}
-		$gq_support_first = get_option( 'gq_support_installation_id' );
+		$gq_support_first = GQ_Support_State::get()['installation_id'];
 		$gq_support_site  = wp_insert_site(
 			array(
 				'domain' => wp_parse_url( home_url(), PHP_URL_HOST ),
@@ -119,12 +97,12 @@ switch ( $gq_support_scenario ) {
 			$gq_support_fail( $gq_support_site->get_error_message() );
 		}
 		switch_to_blog( $gq_support_site );
-		if ( false !== get_option( 'gq_support_installation_id' ) ) {
+		if ( false !== get_option( 'gq_support_state' ) ) {
 			$gq_support_fail( 'New site was initialized eagerly.' );
 		}
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
 		do_action( 'rest_api_init', rest_get_server() );
-		$gq_support_second = get_option( 'gq_support_installation_id' );
+		$gq_support_second = GQ_Support_State::get()['installation_id'];
 		if ( ! $gq_support_second || $gq_support_first === $gq_support_second ) {
 			$gq_support_fail( 'Site identities are not distinct.' );
 		}

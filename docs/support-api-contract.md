@@ -130,7 +130,7 @@ Every `gq-support/v1` response sends `Cache-Control: private, no-store` explicit
 | Response size | `limit_response_size` 64 KB. An oversized or unparseable response is ambiguous. |
 | Worker path | `/v1/...`. The path version changes only on a breaking change, and `/v2` then runs alongside `/v1` until the fleet has migrated. |
 | Version header | `GQ-Support-Plugin-Version`. Within v1 the Worker makes only additive changes and accepts every supported plugin version. Older plugins get 426. |
-| Signing headers | `GQ-Support-Key-Id`, `GQ-Support-Timestamp`, `GQ-Support-Request-Id`, `Content-Digest` (RFC 9530, sha-256), `GQ-Support-Signature`. The signer is an injected dependency. Its canonical string, algorithm, clock window and replay store belong to #32. |
+| Signing headers | `GQ-Support-Key-Id`, `GQ-Support-Installation-Id`, `GQ-Support-Timestamp`, `GQ-Support-Request-Id`, `Content-Digest` (RFC 9530, sha-256), `GQ-Support-Signature`. The signer is an injected dependency. Its canonical string, algorithm, clock window and replay store belong to #32. |
 | Forwarded identity | The attested Reporter subject and, for `scope=site`, a freshly attested view-site grant. There is no WordPress nonce, cookie, email, username, or numeric user ID, and no browser-supplied installation, Client, or repository. |
 | When calls happen | Only inside a `gq-support/v1` route callback. Never during page rendering, activation, or cron. |
 

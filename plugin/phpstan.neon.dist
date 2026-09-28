@@ -9,3 +9,5 @@ parameters:
 		- includes
 	bootstrapFiles:
 		- tests/phpstan/bootstrap.php
+	scanFiles:
+		- tests/phpstan/wp-cli.php

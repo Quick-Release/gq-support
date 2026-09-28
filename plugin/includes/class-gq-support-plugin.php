@@ -41,8 +41,15 @@ final class GQ_Support_Plugin {
 		add_action( 'admin_footer', array( __CLASS__, 'render_launcher' ) );
 		add_action( 'admin_print_footer_scripts', array( __CLASS__, 'render_deferred_assets' ), 20 );
 
+		if ( is_admin() ) {
+			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-setup-page.php';
+			GQ_Support_Setup_Page::register();
+		}
+
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			GQ_Support_Lifecycle::ensure_site();
+			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-cli.php';
+			WP_CLI::add_command( 'gq-support', GQ_Support_CLI::class );
 		}
 	}
 
@@ -68,8 +75,8 @@ final class GQ_Support_Plugin {
 	}
 
 	/**
-	 * Only site-admin Reporters on configured installations get the widget.
-	 * The connection record must be issued by the future operator flow, not by a browser field.
+	 * Only site-admin Reporters on connected installations get the widget.
+	 * Only an Enrollment exchange with the service connects a site.
 	 */
 	private static function eligible(): bool {
 		if ( ! is_admin() || is_network_admin() || is_user_admin() || wp_doing_ajax() || ! is_user_logged_in() || ! current_user_can( 'gq_support_submit_requests' ) ) {
@@ -81,11 +88,7 @@ final class GQ_Support_Plugin {
 			return false;
 		}
 
-		$connection = get_option( 'gq_support_connection' );
-		return is_array( $connection )
-			&& isset( $connection['installation_id'], $connection['status'] )
-			&& 'connected' === $connection['status']
-			&& get_option( 'gq_support_installation_id' ) === $connection['installation_id'];
+		return 'connected' === GQ_Support_State::get()['connection'];
 	}
 
 	/** Register the app without enqueueing it; only the tiny launcher is sent initially. */

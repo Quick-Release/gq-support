@@ -54,7 +54,8 @@ sequenceDiagram
 - **Retrying an interrupted setup:** repeating the exchange with the same code *and the same public key* is idempotent and returns the same result. The same code with a different public key is rejected. An expired or unknown code returns a generic "code not valid" error.
 - **Abuse:** `/v1/enroll` is rate-limited per IP address. Codes carry 128 bits, so guessing is not a practical attack.
 - **Environment mismatch:** if the slot's environment differs from `wp_get_environment_type()`, enrollment still completes. The setup page shows a warning, because WordPress reports `production` whenever the type is unset.
-- **Signed requests after enrollment** carry the installation ID. The Worker rejects a key used with any other installation ID.
+- **Signed requests after enrollment** carry the installation ID in the signed `GQ-Support-Installation-Id` header. The Worker rejects a key used with any other installation ID.
+- **Pending key:** a retry with the same code reuses the pending key, so the service sees the same public key. A different code replaces an abandoned pending key. Only 400, 404, 409, 410 and 422 mean "code not valid"; 429 is a rate limit, and anything else is "could not be reached".
 
 ## Rotation, revocation and disconnect
 
@@ -64,7 +65,7 @@ sequenceDiagram
 | Self-rotation by the site | Not supported | A stolen key cannot be used to lock out the real site |
 | Operator revocation | `revoke <slot>` | Immediate. Site shows "Rejected by service"; Reporters get `gq_support_not_configured` |
 | Mapping removed from code | PR + deploy | Key rejected after deploy |
-| Disconnect (site admin) | Setup page or `wp gq-support disconnect` | Signed "revoke my key" request as a best effort, then local keys deleted whatever the result. Reconnecting needs a new code |
+| Disconnect (site admin) | Setup page or `wp gq-support disconnect` | Signed `DELETE /v1/installation` as a best effort, then local keys deleted whatever the result. Reconnecting needs a new code |
 | Repository made public, archived, or App access lost | Detected by the service (GitHub App research) | Mapping suspended; test shows "suspended"; Reporters get `gq_support_not_configured` |
 
 Delivery intents already accepted stay in the service to be reconciled after a revocation (security design). A site can always give up its own access but never raise it.
@@ -85,8 +86,8 @@ The lifecycle already gives a site a new installation ID when `home_url()` chang
 
 | Option | Autoload | Contents | Read when |
 |---|---|---|---|
-| `gq_support_state` | no | Installation ID, origin, schema version, connection state (`not_connected`, `connected`, `copied_or_moved`, `rejected`), key ID, environment, `connected_at`, last test result and time, capability grant record | Admin screens that need the launcher or setup page; REST routes |
-| `gq_support_signing_key` | no | Active Ed25519 private key; a pending key during enrollment | Only when signing a service request |
+| `gq_support_state` | no | Installation ID, origin, schema version, connection state (`not_connected`, `connected`, `copied_or_moved`, `rejected`), key ID, key fingerprint, environment, `connected_at`, last test result and time, capability grant record | Admin screens that need the launcher or setup page; REST routes |
+| `gq_support_signing_key` | no | Active Ed25519 private key; a pending key during enrollment, with a hash of the code it was made for | Only when signing a service request |
 
 - The existing `gq_support_installation_id`, `gq_support_installation_origin`, `gq_support_schema_version` and `gq_support_administrator_grants` options migrate into `gq_support_state` in one versioned step. That takes admin screens from 2–4 option queries to one ([performance research](https://github.com/Quick-Release/gq-support/issues/18)).
 - `GQ_SUPPORT_SIGNING_KEY` and `GQ_SUPPORT_KEY_ID` constants in `wp-config.php` override the stored key, for sites whose deployment manages secrets. The setup page then shows "Managed by server configuration" and hides Disconnect. `GQ_SUPPORT_SERVICE_URL` is described in the API contract.

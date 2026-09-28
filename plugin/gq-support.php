@@ -26,6 +26,11 @@ define( 'GQ_SUPPORT_PLUGIN_FILE', __FILE__ );
 define( 'GQ_SUPPORT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GQ_SUPPORT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
+require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-state.php';
+require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-signing-key.php';
+require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-signer.php';
+require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-service-client.php';
+require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-connection.php';
 require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-lifecycle.php';
 require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-plugin.php';
 
