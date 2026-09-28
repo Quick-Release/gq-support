@@ -63,7 +63,23 @@ stateDiagram-v2
     Open --> Absent: navigate or reload
 ```
 
-Only the vanilla launcher is available before activation. On click, load the manifest's WordPress script dependencies in order, then the full app and its stylesheet; use the generated asset version for cache busting. Show loading and error status accessibly, offer an explicit retry after asset/runtime failure, and do not loop retries automatically. REST errors remain in the open app's request/form state; a 401/403 clears Reporter-specific memory and requires the server-side capability gate to be re-evaluated. Closing stops plugin-owned requests and background work but preserves an in-progress draft for the current page session. A full navigation tears down in-memory state; reopening the same page reuses downloaded code but starts no work until opened.
+Only the vanilla launcher is available before activation. On click, the launcher loads the app's not-yet-loaded WordPress dependencies in order, then the app and its stylesheet, using the deferred asset template described below. Show loading and error status accessibly, offer an explicit retry after asset/runtime failure, and do not loop retries automatically. REST errors remain in the open app's request/form state; a 401/403 clears Reporter-specific memory and requires the server-side capability gate to be re-evaluated. Closing stops plugin-owned requests and background work but preserves an in-progress draft for the current page session. A full navigation tears down in-memory state; reopening the same page reuses downloaded code but starts no work until opened.
+
+### Deferred asset template
+
+The launcher cannot load the app from a list of script URLs alone. In WordPress 6.5, `wp-api-fetch` gets its REST root and `wp_rest` nonce from inline scripts that core prints after it (`createRootURLMiddleware` and `createNonceMiddleware` in `wp-includes/script-loader.php`), and `wp_set_script_translations()` also prints inline. Loading only the `src` files would give an app with no REST authentication and no translations. Rebuilding that inline output in plugin code would copy core internals, and script modules cannot depend on classic scripts such as `wp-element` at 6.5. So WordPress renders the tags and the launcher only inserts them later:
+
+1. **Register, never enqueue.** Register the `gq-support-app` script and style from `index.asset.php`: its dependencies, and its `version` for cache busting. Call `wp_set_script_translations()` for the app handle.
+2. **Render into an inert template.** On eligible screens only, hook `admin_print_footer_scripts` at a priority after core's footer printing (priority 10). Set `do_concat = false` on `wp_scripts()` and `wp_styles()` so tags are not merged into `load-scripts.php`. Use output buffering around `do_items( 'gq-support-app' )` for scripts and styles, and print the result inside `<template id="gq-support-app-assets">`. `WP_Dependencies` skips handles the screen has already printed. On the block editor, for example, the template holds only the app and any missing dependencies. Browsers do not run or fetch anything inside a `<template>`.
+3. **Insert on open.** On the first open, walk the template's nodes in order. Recreate each `<script>` with `document.createElement('script')` and copy its attributes and text; do not clone it, so the browser treats it as a new script. For external scripts, wait for `load` before inserting the next node. Inline scripts run as soon as they are inserted. Insert stylesheets as `<link>` elements and wait for them to load. Mount the app only after the last node loads.
+4. **Recover from failure.** An `error` event on any script or stylesheet stops the sequence. The launcher announces a retryable error and does not mount. Retry continues from the failed node, so already-run scripts do not run twice. The launcher never retries on its own.
+5. **Keep it to one bundle.** The MVP ships a single entry with no dynamic imports, so it needs no chunk URLs. If code splitting is added later, derive the chunk public path from the registered script URL.
+
+The nonce inside the template is issued at page render, like any enqueued `wp-api-fetch`. A stale nonce follows the REST 401/403 path above.
+
+### Style scoping
+
+Prefix every selector with `.gq-support-` and use no element-level or global selectors. Take accent colours from `--wp-admin-theme-color` so the widget follows the user's admin colour scheme. Put the launcher above page content but below core modal and overlay layers, such as the media modal and block-editor popovers. #23 verifies these on the Dashboard, block editor, and a WooCommerce screen when WooCommerce is installed, and checks focus order and the admin colour schemes.
 
 The implementation validation plan is:
 
@@ -71,7 +87,9 @@ The implementation validation plan is:
 |---|---|
 | Public request, anonymous user, unauthorized user, unsupported admin context | No launcher root, plugin scripts/styles, React runtime, or REST requests. |
 | Eligible Reporter before opening | Only the tiny vanilla launcher and its scoped styles/bootstrap load; no `wp-element`, full app, or support-data request. |
-| Cold open | Load `wp-element` dependencies in manifest order, then app and app CSS; mount once and fetch only the authorized Reporter projection. |
+| Cold open | Insert the deferred asset template in order, including core inline scripts and translations. Mount once, and fetch only the authorized Reporter projection. REST calls carry the `wp_rest` nonce. |
+| Screen that already loaded `wp-element` (block editor) | The template holds only the missing handles. React is not loaded twice. |
+| WordPress 6.5.0 minimum | The same cold-open, REST, and failure checks pass in the DDEV job pinned to 6.5.0. |
 | Runtime/app/style load failure | Keep launcher usable, announce a retryable error, and make no duplicate mount or automatic retry. |
 | Close/reopen | Stop requests while closed, preserve the current-page draft, reuse loaded code, and fetch only after reopening/manual refresh or an explicit action. |
 | Navigation/reload | Tear down in-memory state; the next request re-runs the PHP eligibility gate. |
