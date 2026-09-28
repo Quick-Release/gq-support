@@ -400,6 +400,8 @@ plugin/
       class-gq-support-support-service.php# WordPress-to-Worker intent boundary
 ```
 
+This tree is the target shape, not a checklist. #30 built only `class-gq-support-plugin.php` (context gates) and `class-gq-support-lifecycle.php` (activation, migrations, identity, and cleanup). Later tickets add a class only when their slice needs it; do not create empty modules ahead of time.
+
 ### Notes on the current PHP class
 
 `class-gq-support-plugin.php` currently registers `admin_init` and `rest_api_init` lifecycle work plus a WP-CLI initialization path; it does not enqueue or render the launcher. Keep the future asset gate small and separate from REST, lifecycle, authorization, and Worker responsibilities. The implementation should not turn this class into a god object.
@@ -514,18 +516,20 @@ Record PHP wall time, memory, database query count/time, outbound HTTP count, re
    - Add only the hooks in this note that have a consumer.
    - Test filter tampering/revalidation, forbidden scope, response redaction, and no secret leakage.
 
-## Open decisions before implementation is considered complete
+## Open decisions and their owners
 
-- Exact plugin capabilities (`gq_support_submit`, read/reply/state capabilities) and how they map to explicit Visibility scopes.
-- The supported-screen allowlist versus “all normal site-admin screens,” especially Customizer/iframe and unusual plugin screens.
-- Whether the dedicated page is needed in the first launcher ticket or follows the floating launcher.
-- How the vanilla launcher dynamically loads the `@wordpress/scripts` app and its `wp-element` dependency in order, with retryable recovery, while keeping both absent until explicit activation.
-- Whether per-site identity is generated locally, provisioned by onboarding, or bound to a service-issued installation record.
-- Network-admin configuration surface and network/site option ownership.
-- The Worker authentication/replay contract, which remains an open decision in the existing research note.
-- Whether any WordPress cron maintenance is needed at all; delivery should remain external unless a new decision says otherwise.
-- Hook API stability/versioning and the first real extension consumer.
-- Privacy/retention/erasure policy for any local configuration or transient operational payloads.
+Each decision this research left open now has an owner, or is already resolved:
+
+- **Capabilities and Visibility scopes:** decided in #4. #31 grants `gq_support_submit_requests` and `gq_support_manage_settings` to Administrators once per site; `gq_support_view_site_requests` is granted explicitly. See [`support-security-design.md`](../support-security-design.md).
+- **Per-site installation identity:** implemented in #30 as a non-autoloaded local ID bound to `home_url('/')` and rotated after a URL change. See [ADR 0010](../adr/0010-installation-scoped-attestation-not-cross-site-identity.md) and [`bootstrap-lifecycle-verification.md`](bootstrap-lifecycle-verification.md).
+- **On-demand launcher loading:** [ADR 0011](../adr/0011-wordpress-native-react-runtime.md). Loading order and failure recovery are verified under #5.
+- **Supported-screen allowlist and whether the dedicated page ships first:** #23, with UX in #13.
+- **Network-admin configuration surface and network/site option ownership:** #7.
+- **Worker authentication and replay contract:** #32.
+- **WordPress cron maintenance:** none in the MVP; delivery stays external. Adding cron needs a new accepted decision.
+- **Hook API stability and the first real extension consumer:** #14.
+- **Privacy, retention, and erasure of local configuration or transient payloads:** #16.
+- **Public-request performance budgets as release gates:** #18. The measured second run in `bootstrap-lifecycle-verification.md` misses the proposed 1% median target.
 
 ## Sources
 
