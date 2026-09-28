@@ -1,0 +1,9 @@
+{
+  "landingPage": "/wp-admin/",
+  "login": true,
+  "steps": [
+    { "step": "activatePlugin", "pluginPath": "getquick-design/getquick-design.php" },
+    { "step": "activatePlugin", "pluginPath": "gq-support/gq-support.php" },
+    { "step": "runPHP", "code": "<?php require '/wordpress/wp-load.php'; GQ_Support_Lifecycle::ensure_site(); update_option('gq_support_connection', array('status'=>'connected','installation_id'=>get_option('gq_support_installation_id')), false); echo 'ok';" }
+  ]
+}
