@@ -239,6 +239,7 @@ const schemes = ['fresh', 'light', 'modern', 'blue', 'coffee', 'ectoplasm', 'mid
 test('launcher and panel keep AA contrast in every admin colour scheme', async ({ page }) => {
   await logIn(page);
   const accents = new Set<string>();
+  const coreAccents = new Set<string>();
   try {
     for (const scheme of schemes) {
       wp(['user', 'meta', 'update', 'admin', 'admin_color', scheme]);
@@ -253,7 +254,13 @@ test('launcher and panel keep AA contrast in every admin colour scheme', async (
         };
         const contrast = (a: string, b: string) => { const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (l1 + 0.05) / (l2 + 0.05); };
         const css = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+        // Resolve core's accent for this screen; WordPress 6.5 defines it per scheme only in the block editor.
+        const probe = document.body.appendChild(document.createElement('span'));
+        probe.style.color = 'var(--wp-admin-theme-color, #007cba)';
+        const coreAccent = getComputedStyle(probe).color;
+        probe.remove();
         return {
+          coreAccent,
           accent: css('.gq-support-tab[aria-selected="true"]').borderBottomColor,
           launcherText: contrast(css('.gq-support-launcher').color, css('.gq-support-launcher').backgroundColor),
           launcherOnPage: contrast(css('.gq-support-launcher').backgroundColor, getComputedStyle(document.body).backgroundColor),
@@ -262,14 +269,16 @@ test('launcher and panel keep AA contrast in every admin colour scheme', async (
         };
       });
       accents.add(report.accent);
+      coreAccents.add(report.coreAccent);
+      expect(report.accent, scheme).toBe(report.coreAccent);
       // WCAG AA: 4.5:1 for text, 3:1 for the selected-tab indicator and focus ring (same accent).
       expect(report.launcherText, scheme).toBeGreaterThanOrEqual(4.5);
       expect(report.panelText, scheme).toBeGreaterThanOrEqual(4.5);
       expect(report.launcherOnPage, scheme).toBeGreaterThanOrEqual(3);
       expect(report.selectedTab, scheme).toBeGreaterThanOrEqual(3);
     }
-    // The accent follows the scheme instead of a hard-coded colour.
-    expect(accents.size).toBeGreaterThan(1);
+    // The accent follows core's scheme colour wherever core provides one.
+    expect(accents.size).toBe(coreAccents.size);
   } finally {
     wp(['user', 'meta', 'update', 'admin', 'admin_color', 'fresh']);
   }
