@@ -98,3 +98,19 @@ _Avoid_: Request ID (that names the single-use authentication nonce between Word
 
 **Superseded request**:
 A Support request that failed and that the Reporter sent again under a new Submission ID. It leaves the Reporter issue list once its replacement is accepted.
+
+## Privacy lifecycle
+
+**Reporter erasure**:
+Removing one Reporter subject's Support request data within one Slot. It starts from the Client's WordPress privacy tools, or from an Operator acting on the Client's instruction. It is complete only when the service's records are gone and the App-authored GitHub text is redacted.
+_Avoid_: Deletion, when GitHub is meant
+
+**Redaction**:
+Replacing the Reporter's text in an App-authored GitHub issue with an erasure notice. The issue itself, its correlation marker, and its pseudonymous attribution stay. The service never deletes GitHub issues.
+
+**Residual copy**:
+A copy of erased text that the service cannot remove, such as GitHub edit history, notification emails, or a Developer's quote in a comment. Residual copies are reported as exceptions and never described as erased.
+
+**Offboarding**:
+An Operator ending service for a Slot or a Client. The Slot's service records are purged after a grace period, and the GitHub issues stay in the Client's repository.
+_Avoid_: Disconnect, uninstall. A site admin can do either, but only local state is removed and service records remain.

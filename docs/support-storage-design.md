@@ -81,14 +81,14 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 | Data | Source of truth | Sensitivity | Retention | Rebuildable |
 |---|---|---|---|---|
-| Submitted text, subject, Submission ID, digest | D1 (the Reporter's submission) | Client content, pseudonymous subject | Kept until #16 decides; erasure goes through the ADR 0016 log | No |
+| Submitted text, subject, Submission ID, digest | D1 (the Reporter's submission) | Client content, pseudonymous subject | 12 months after last close ([privacy design](support-privacy-design.md)); erasure goes through the suppression ledger (ADR 0016) | No |
 | Repository and issue IDs | D1, set from the GitHub create response | Internal | With the request | Partly: marker reconciliation can find them again |
 | Status, ETag, observed time, tracking | GitHub | Low | With the request | Yes: sweep |
 | Delivery intent and bookkeeping | D1 | Internal | With the request | No |
 | `context_json` | D1 until delivered, then GitHub | Diagnostics (#14) | Dropped at a terminal state | No |
 | Repository suspension | GitHub | Internal | While mapped | Yes: write-time check |
 | Enrollment codes | D1 | Hash of a secret | Purged 24 h after expiry | No |
-| Keys and revocations | D1, with revocations also in the ADR 0016 log | Public keys | Kept until #16 | Revocations only |
+| Keys and revocations | D1, with revocations also in the ADR 0016 log | Public keys | Kept | Revocations only |
 | Replay rows | D1 | Low | Purged after the clock window | Not needed |
 
 ## Operations
