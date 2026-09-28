@@ -62,7 +62,7 @@ Clients do not receive GitHub repository access, issue URLs that grant access, G
 ## Issue and delivery semantics
 
 - The GitHub App creates one GitHub issue for each Support request, applies the agreed general client-origin label, and assigns an internal Developer.
-- The issue body contains the submitted report. A future field-to-issue-title rule should be explicit; the label and issue author are not Reporter identity.
+- The issue body contains the submitted report. The issue title is the Reporter's optional Summary; without one, it is the description's first line cut at a word boundary to about 80 characters. The label and issue author are not Reporter identity.
 - The Reporter projection includes the submitted issue text and authoritative `open`/`closed` status. It excludes comments, internal labels, assignments, and unrelated repository issues unless a later decision adds a field.
 - A report is not confirmed delivered just because WordPress accepted the browser request. Preserve the established delivery outcomes: `locally-unsent`, `accepted-pending`, `delivered`, `failed`, and `outcome-unknown`. Reconcile an ambiguous GitHub create before retrying.
 - GitHub issue creation is attributed to the GitHub App. The assigned Developer is responsible for handling it; do not use a developer's personal credential just to make that person appear as issue author.
@@ -77,11 +77,34 @@ Clients do not receive GitHub repository access, issue URLs that grant access, G
 
 This is an issue intake and status experience, not live chat or a threaded client conversation. The connection/setup page is an operator surface under `GETQUICK → Support`, separate from the Reporter launcher.
 
+## Reporter experience
+
+Decided in #13.
+
+- **Views.** One panel with two tabs. **New report** is the default. **My requests** lists items that expand in place to show the full text and status. There is no separate detail view. After a successful submit, the panel switches to My requests with the new item at the top.
+- **Form.** A required **Description** and an optional one-line **Summary**. The placeholder asks "What happened, and what did you expect?". There is no bug/feedback/question picker in the MVP; developers classify in GitHub. Environment context is added server-side; the fields are decided in #14.
+- **Status is read-only.** Reporters cannot close or reopen requests in the MVP. Status reflects what developers do in GitHub.
+- **Honest status wording.** Each list item shows one badge (table below). The launcher is hidden from Reporters on an unconfigured installation; operators see the notice on the setup page.
+
+| State | Reporter sees |
+|---|---|
+| Submitting | "Sending…", with the submit button disabled |
+| `accepted-pending` | "Received", with the hint "Our team will see it shortly" |
+| `delivered`, issue open or closed | "Open" or "Closed" |
+| `failed` or `locally-unsent` | "Not sent", with **Try again** and the draft restored |
+| `outcome-unknown` | "Checking…", with no resubmit while the service reconciles |
+| REST 401/403 or expired login | "Your session expired. Reload the page to continue." The draft is kept. |
+| Empty list | "No requests yet", with a link to New report |
+
+- **Drafts** live in memory only. They survive closing and reopening the panel and failed sends, and are lost on reload or navigation. With an unsent draft, the closed launcher shows a small indicator. No browser storage is used.
+- **Refresh.** The list loads when My requests is shown and when the Reporter presses refresh. There is no polling, and no work runs while the panel is closed.
+- **Accessibility.** The launcher is a `<button>` with `aria-expanded`. The panel is a non-modal dialog so the admin screen stays usable while the Reporter writes. Focus moves to the first field on open and returns to the launcher on close, and Escape closes the panel. Status changes and errors are announced through `wp.a11y.speak`. The panel respects `prefers-reduced-motion`, meets WCAG AA contrast in every admin colour scheme, and becomes a full-width sheet below the 782px admin breakpoint.
+- **Translations.** All strings go through `@wordpress/i18n` in the `gq-support` text domain, with `_n()` plurals and dates in the site timezone. RTL uses the generated `index-rtl.css`. A pt_PT smoke test runs in DDEV.
+
 ## Deferred or unresolved
 
-- Whether a Reporter may close or reopen a Support request; current agreement only establishes viewing issue status.
+- Reporter close/reopen (#28) is a post-MVP slice after ordered mutations (ADR 0006).
 - Whether each project has a fixed default Developer assignee or how a Developer is chosen.
-- The exact issue title rule if the submission form has only a report body.
 - Connection lifecycle, GitHub App installation verification, mapping ownership, and revocation handling; see [repository connection research](research/support-widget-and-repository-connection.md).
 - Privacy/retention of report text in the operational service while delivery is pending or being reconciled.
 - Any future client-visible response channel. Adding comments to the WordPress projection would require a new decision; repository comments remain internal by default.
