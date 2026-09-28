@@ -103,8 +103,9 @@ Decided in #13.
 
 ## Deferred or unresolved
 
+The Developer assignee (one default per WordPress project) and the connection lifecycle are decided in [support onboarding design](support-onboarding-design.md).
+
+
 - Reporter close/reopen (#28) is a post-MVP slice after ordered mutations (ADR 0006).
-- Whether each project has a fixed default Developer assignee or how a Developer is chosen.
-- Connection lifecycle, GitHub App installation verification, mapping ownership, and revocation handling; see [repository connection research](research/support-widget-and-repository-connection.md).
 - Privacy/retention of report text in the operational service while delivery is pending or being reconciled.
 - Any future client-visible response channel. Adding comments to the WordPress projection would require a new decision; repository comments remain internal by default.

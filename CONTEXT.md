@@ -62,7 +62,15 @@ An issue used for internal project work in the same Project repository. It is ne
 The approved association between a WordPress project/installation and its existing Project repository. Reporters cannot choose or change the mapping through the support experience.
 
 **Installation credential**:
-A revocable identity for one approved WordPress installation and environment when contacting the support service; it does not authorize another installation or an operator.
+A revocable identity for one approved WordPress installation and environment when contacting the support service; it does not authorize another installation or an operator. The installation holds it; the service knows only how to verify it.
+
+**Operator**:
+A GETQUICK staff member who approves Repository mappings, enrolls WordPress installations, and revokes their credentials. Operator authority never comes from a WordPress role or a site's credential.
+_Avoid_: Admin, when the WordPress Administrator role is meant
+
+**Enrollment code**:
+A single-use, short-lived code an Operator issues for one mapped installation and environment. Presenting it is the only way a WordPress installation gains an Installation credential.
+_Avoid_: Tenant ID, API key, pairing token
 
 **Operational record**:
 The durable mapping between a Support request, its Client, WordPress installation, verified Reporter, and GitHub issue identity, plus delivery and reconciliation information. It supports authorization and operations without replacing GitHub as the issue record.
