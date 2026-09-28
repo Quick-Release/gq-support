@@ -12,6 +12,8 @@ test.beforeAll(() => {
   wp(['eval', "update_option('gq_support_connection', array('status' => 'connected', 'installation_id' => get_option('gq_support_installation_id')));"]);
   wp(['user', 'update', 'admin', '--user_pass=launcher-test-password']);
   wp(['user', 'update', 'editor', '--user_pass=editor']);
+  // The block editor's welcome guide is a core modal that correctly covers the launcher; keep it closed.
+  wp(['eval', "update_user_option(get_user_by('login', 'admin')->ID, 'persisted_preferences', array('core/edit-post' => array('welcomeGuide' => false), '_modified' => gmdate('c')));"]);
 });
 test.afterAll(() => { wp(['option', 'delete', 'gq_support_connection']); });
 
