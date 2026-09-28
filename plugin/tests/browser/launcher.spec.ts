@@ -254,9 +254,9 @@ test('launcher and panel keep AA contrast in every admin colour scheme', async (
         };
         const contrast = (a: string, b: string) => { const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (l1 + 0.05) / (l2 + 0.05); };
         const css = (selector: string) => getComputedStyle(document.querySelector(selector)!);
-        // Resolve core's accent for this screen; WordPress 6.5 defines it per scheme only in the block editor.
+        // Resolve core's accent for this screen; WordPress 6.5 defines none on classic admin screens.
         const probe = document.body.appendChild(document.createElement('span'));
-        probe.style.color = 'var(--wp-admin-theme-color, #007cba)';
+        probe.style.color = 'var(--wp-admin-theme-color, #135e96)'; // The widget's own fallback.
         const coreAccent = getComputedStyle(probe).color;
         probe.remove();
         return {
