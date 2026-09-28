@@ -10,6 +10,7 @@ plugin/vendor/
 .DS_Store
 *.log
 *.tsbuildinfo
+test-results/
 .alchemy/
 .test-site/
 

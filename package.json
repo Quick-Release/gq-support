@@ -6,6 +6,7 @@
   "scripts": {
     "dev:app": "pnpm --filter gq-support-app dev",
     "build:app": "pnpm --filter gq-support-app build",
+    "test:browser": "playwright test --config plugin/tests/browser/playwright.config.ts",
     "dev:worker": "pnpm --filter gq-support-worker dev",
     "deploy:worker": "pnpm --filter gq-support-worker deploy",
     "wp:start": "ddev start gq-support-testsite && pnpm run wp:update",
@@ -20,6 +21,7 @@
     "analyse:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer analyse"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "lefthook": "^2.1.14"
   }
 }

@@ -15,7 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class GQ_Support_Lifecycle {
 
 	/** The current local schema, independent of the display version. */
-	private const SCHEMA_VERSION = 2;
+	private const SCHEMA_VERSION = 3;
 
 	/**
 	 * Activation only initializes the current site. Network sites initialize on first use.
@@ -56,6 +56,15 @@ final class GQ_Support_Lifecycle {
 		if ( $version < self::SCHEMA_VERSION ) {
 			// Migration 2: bind the existing identity to this site's current URL.
 			add_option( 'gq_support_installation_origin', $origin, '', false );
+			update_option( 'gq_support_schema_version', self::SCHEMA_VERSION, false );
+		}
+
+		if ( $version < 3 ) {
+			$administrator = get_role( 'administrator' );
+			if ( $administrator && ! $administrator->has_cap( 'gq_support_submit_requests' ) ) {
+				$administrator->add_cap( 'gq_support_submit_requests' );
+				add_option( 'gq_support_administrator_grant', 1, '', false );
+			}
 			update_option( 'gq_support_schema_version', self::SCHEMA_VERSION, false );
 		}
 

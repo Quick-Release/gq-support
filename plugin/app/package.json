@@ -8,8 +8,10 @@
     "build": "tsc -b && wp-scripts build --output-path=../assets/dist"
   },
   "dependencies": {
+    "@wordpress/a11y": "^4.56.0",
     "@wordpress/api-fetch": "^7.56.0",
-    "@wordpress/element": "^8.8.0"
+    "@wordpress/element": "^8.8.0",
+    "@wordpress/i18n": "^6.29.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

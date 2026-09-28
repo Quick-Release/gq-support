@@ -8,18 +8,27 @@ importers:
 
   .:
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.63.0
+        version: 1.63.0
       lefthook:
         specifier: ^2.1.14
         version: 2.1.14
 
   plugin/app:
     dependencies:
+      '@wordpress/a11y':
+        specifier: ^4.56.0
+        version: 4.56.0
       '@wordpress/api-fetch':
         specifier: ^7.56.0
         version: 7.56.0
       '@wordpress/element':
         specifier: ^8.8.0
         version: 8.8.0(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@wordpress/i18n':
+        specifier: ^6.29.0
+        version: 6.29.0
     devDependencies:
       '@types/react':
         specifier: ^18.3.12
@@ -3017,6 +3026,10 @@ packages:
       webpack-dev-server:
         optional: true
 
+  '@wordpress/a11y@4.56.0':
+    resolution: {integrity: sha512-pF17LuL8yPZhTZoA2Oz1MUlacQlizM0DRg6btfhFeuB/Bmx0TnbGp578Z+QDjS/j8WNOLhrHQWwDld/NIs8X7w==}
+    engines: {node: '>=18.12.0'}
+
   '@wordpress/api-fetch@7.56.0':
     resolution: {integrity: sha512-O8kK7brnBGD5NFoq9LQaHE5+hO9gMYV+Edj/83U2KIbF0+q6ycS4dNj1J9bI3zTlJw12iwvuIS+s+IpGfycKkA==}
     engines: {node: '>=18.12.0'}
@@ -3047,6 +3060,10 @@ packages:
 
   '@wordpress/deprecated@4.56.0':
     resolution: {integrity: sha512-to+VUihf/FGYPf74KXr6Yag+hTkaw8i8ZAa4x6Z3ZP3zMBu6pnxnc4QT0eZlWraeKdE2ZLbtT5tF7mkZSWzoFQ==}
+    engines: {node: '>=18.12.0'}
+
+  '@wordpress/dom-ready@4.56.0':
+    resolution: {integrity: sha512-zpnI/8cQn3RoDMxKxqti32CGtUuyGl96ghNRmBo0zLPviVIlFIqNFBzeAXvuyqcoEsjmaAzswr1P7dlaFzrP2Q==}
     engines: {node: '>=18.12.0'}
 
   '@wordpress/dom@4.56.0':
@@ -10454,6 +10471,11 @@ snapshots:
     optionalDependencies:
       webpack-dev-server: 5.2.6(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(webpack-cli@5.1.4)(webpack@5.111.1)
 
+  '@wordpress/a11y@4.56.0':
+    dependencies:
+      '@wordpress/dom-ready': 4.56.0
+      '@wordpress/i18n': 6.29.0
+
   '@wordpress/api-fetch@7.56.0':
     dependencies:
       '@wordpress/i18n': 6.29.0
@@ -10507,6 +10529,8 @@ snapshots:
   '@wordpress/deprecated@4.56.0':
     dependencies:
       '@wordpress/hooks': 4.56.0
+
+  '@wordpress/dom-ready@4.56.0': {}
 
   '@wordpress/dom@4.56.0':
     dependencies:
@@ -12372,7 +12396,7 @@ snapshots:
   gettext-parser@1.4.0:
     dependencies:
       encoding: 0.1.13
-      safe-buffer: 5.1.2
+      safe-buffer: 5.2.1
 
   glob-parent@5.1.2:
     dependencies:

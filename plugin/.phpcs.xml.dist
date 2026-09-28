@@ -6,6 +6,7 @@
 	<exclude-pattern>*/app/*</exclude-pattern>
 	<exclude-pattern>*/tests/phpstan/*</exclude-pattern>
 	<exclude-pattern>*/vendor/*</exclude-pattern>
+	<exclude-pattern>*/assets/dist/*</exclude-pattern>
 	<exclude-pattern>*/node_modules/*</exclude-pattern>
 
 	<arg value="sp"/>

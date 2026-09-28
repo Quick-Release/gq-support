@@ -16,7 +16,7 @@ switch ( $gq_support_scenario ) {
 		if ( ! is_plugin_active( 'gq-support/gq-support.php' ) && ! is_plugin_active_for_network( 'gq-support/gq-support.php' ) ) {
 			$gq_support_fail( 'Plugin not active.' );
 		}
-		if ( ! get_option( 'gq_support_installation_id' ) || 2 !== (int) get_option( 'gq_support_schema_version' ) ) {
+		if ( ! get_option( 'gq_support_installation_id' ) || 3 !== (int) get_option( 'gq_support_schema_version' ) ) {
 			$gq_support_fail( 'Missing installation identity or schema marker.' );
 		}
 		if ( wp_next_scheduled( 'gq_support_reconcile' ) ) {
@@ -48,13 +48,13 @@ switch ( $gq_support_scenario ) {
 		update_option( 'gq_support_schema_version', 1, false );
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
 		do_action( 'rest_api_init', rest_get_server() );
-		if ( 2 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id || ! get_option( 'gq_support_installation_origin' ) ) {
+		if ( 3 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id || ! get_option( 'gq_support_installation_origin' ) ) {
 			$gq_support_fail( 'Schema-1 upgrade did not preserve identity and bind the URL.' );
 		}
 		update_option( 'gq_support_schema_version', 0, false );
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Simulate WordPress REST context.
 		do_action( 'rest_api_init', rest_get_server() );
-		if ( 2 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id ) {
+		if ( 3 !== (int) get_option( 'gq_support_schema_version' ) || get_option( 'gq_support_installation_id' ) !== $gq_support_id ) {
 			$gq_support_fail( 'Upgrade failed or installation identity changed.' );
 		}
 		break;
