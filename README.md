@@ -59,11 +59,11 @@ Bedrock path shown above.
 
 ## Layout
 
-- `plugin/` — the WordPress plugin. `plugin/gq-support.php` is the
-  main plugin file installed into WordPress; it enqueues the built widget
-  from `plugin/assets/dist/`.
-- `plugin/app/` — the support widget frontend (React + TanStack Query), built
-  with Vite into `plugin/assets/dist/`.
+- `plugin/` — the WordPress plugin. `plugin/gq-support.php` is the main plugin
+  file installed into WordPress.
+- `plugin/app/` — the support app, using WordPress's React and REST packages.
+  `@wordpress/scripts` builds it into `plugin/assets/dist/` and emits the
+  dependency manifest for WordPress script loading.
 - `worker/` — a Cloudflare Worker backend, provisioned with
   [Alchemy](https://alchemy.run) and written with
   [Effect](https://effect.website). Currently a placeholder with no routes.
@@ -73,7 +73,7 @@ Bedrock path shown above.
 ```sh
 pnpm install
 
-# build the support widget bundle consumed by the WordPress plugin
+# build the WordPress-native support app assets
 pnpm build:app
 
 # run the Cloudflare worker locally

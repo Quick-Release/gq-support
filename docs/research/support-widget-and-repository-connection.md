@@ -1,9 +1,9 @@
 # Research: support launcher and project-repository connection
 
-- **Status:** Research supporting [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md); no code is implemented by this note.
+- **Status:** Research supporting [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md); its frontend build/runtime guidance is updated by [ADR 0011](../adr/0011-wordpress-native-react-runtime.md). This note itself contains no implementation.
 - **Research date:** 2026-09-27
 - **Confirmed product model:** Each WordPress project connects to its existing GitHub repository. The GitHub App creates a labeled issue and assigns an internal Developer. The Client has no GitHub access; WordPress lists only the authenticated Reporter's issues, showing submitted issue text and status, not comments.
-- **Earlier architecture research:** [`wordpress-github-support-widget.md`](wordpress-github-support-widget.md) predates this model; repository and client-conversation recommendations there are superseded by ADR 0009.
+- **Earlier architecture research:** [`wordpress-github-support-widget.md`](wordpress-github-support-widget.md) predates this model; repository and client-visibility recommendations there are superseded by ADR 0009, and its TanStack recommendation is superseded by ADR 0011.
 
 ## GETQUICK setup page
 
@@ -39,11 +39,43 @@ This creates a deliberate tradeoff: project-repository collaborators can read su
 
 ## Bottom-right launcher
 
-The current scaffold hooks into `admin_enqueue_scripts` and `admin_footer`, but loads the full React app on each eligible admin screen; `main.tsx` creates its Query client immediately. The React component is empty ([plugin bootstrap](../../plugin/includes/class-gq-support-plugin.php), [React entry](../../plugin/app/src/main.tsx), [App](../../plugin/app/src/App.tsx)).
+The frontend build now uses `@wordpress/scripts` dependency extraction and `@wordpress/element`; its manifest declares `wp-element`, and it does not use TanStack Query. The PHP bootstrap does not yet register launcher hooks or enqueue frontend assets. The launcher and click-time loader remain for implementation issue #23 ([plugin bootstrap](../../plugin/includes/class-gq-support-plugin.php), [build setup](../../plugin/app/package.json), [React entry](../../plugin/app/src/index.tsx), [App](../../plugin/app/src/App.tsx)).
 
 Keep the persistent affordance small: on approved site-admin screens, render an accessible fixed-position button at bottom right; on click, open a panel and lazy-load the form/list app. The panel submits a report and lists only the Reporter’s submitted text and status. It is an intake/status UI, not live chat. Follow the WAI-ARIA button/dialog interaction patterns for keyboard access and focus management ([Button pattern](https://www.w3.org/WAI/ARIA/apg/patterns/button/), [Dialog pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/)).
 
 Keep browser requests same-origin through WordPress REST with a `wp_rest` nonce. Re-check capabilities and visibility scope on every list/read/create route; forward authenticated intents to the Worker. Do not expose GitHub repo selection, App tokens, or service credentials in browser configuration. The current Worker is a placeholder with no routes; delivery and persistence remain unimplemented.
+
+### Loading lifecycle and failure recovery (ADR 0011)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Absent
+    Absent --> LauncherOnly: eligible Reporter on supported site-admin screen
+    Absent --> Absent: public, anonymous, unauthorized, or unsupported context
+    LauncherOnly --> Loading: explicit open
+    Loading --> Open: wp-element, app, and styles loaded; React mount succeeds
+    Loading --> Error: dependency, app, style, or mount failure
+    Error --> Loading: user retries
+    Open --> Closed: user closes panel
+    Closed --> Open: reopen with downloaded code cached
+    LauncherOnly --> Absent: navigate or reload
+    Closed --> Absent: navigate or reload
+    Open --> Absent: navigate or reload
+```
+
+Only the vanilla launcher is available before activation. On click, load the manifest's WordPress script dependencies in order, then the full app and its stylesheet; use the generated asset version for cache busting. Show loading and error status accessibly, offer an explicit retry after asset/runtime failure, and do not loop retries automatically. REST errors remain in the open app's request/form state; a 401/403 clears Reporter-specific memory and requires the server-side capability gate to be re-evaluated. Closing stops plugin-owned requests and background work but preserves an in-progress draft for the current page session. A full navigation tears down in-memory state; reopening the same page reuses downloaded code but starts no work until opened.
+
+The implementation validation plan is:
+
+| Scenario | Expected result |
+|---|---|
+| Public request, anonymous user, unauthorized user, unsupported admin context | No launcher root, plugin scripts/styles, React runtime, or REST requests. |
+| Eligible Reporter before opening | Only the tiny vanilla launcher and its scoped styles/bootstrap load; no `wp-element`, full app, or support-data request. |
+| Cold open | Load `wp-element` dependencies in manifest order, then app and app CSS; mount once and fetch only the authorized Reporter projection. |
+| Runtime/app/style load failure | Keep launcher usable, announce a retryable error, and make no duplicate mount or automatic retry. |
+| Close/reopen | Stop requests while closed, preserve the current-page draft, reuse loaded code, and fetch only after reopening/manual refresh or an explicit action. |
+| Navigation/reload | Tear down in-memory state; the next request re-runs the PHP eligibility gate. |
+| Logout, identity change, or REST 401/403 | Clear Reporter-specific in-memory state; REST authorization remains authoritative on every request. |
 
 ## Implementation sequence
 

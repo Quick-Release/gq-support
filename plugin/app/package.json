@@ -4,20 +4,19 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "dev": "wp-scripts start --output-path=../assets/dist",
+    "build": "tsc -b && wp-scripts build --output-path=../assets/dist"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.103.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "@wordpress/api-fetch": "^7.56.0",
+    "@wordpress/element": "^8.8.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "@wordpress/scripts": "^36.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2"
   }
 }

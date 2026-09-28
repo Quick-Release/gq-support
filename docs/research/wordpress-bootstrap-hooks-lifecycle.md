@@ -1,13 +1,13 @@
 # WordPress bootstrap, hooks, and plugin lifecycle
 
 - **Research target:** GitHub issue [#3](https://github.com/Quick-Release/gq-support/issues/3)
-- **Status:** WordPress lifecycle research; support-request semantics are superseded by [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md)
+- **Status:** WordPress lifecycle research; support-request semantics are superseded by [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md), and the frontend runtime/build choice is superseded by [ADR 0011](../adr/0011-wordpress-native-react-runtime.md).
 - **Access date:** 2026-09-18
 - **Repository:** `Quick-Release/gq-support`
 
 ## Scope and inputs
 
-> **Current model:** This research predates ADR 0009. Use [`support-domain-design.md`](../support-domain-design.md) for Reporter visibility, GitHub issue projections, and the current admin flows. The lifecycle and launcher-loading facts remain relevant; route and conversation examples below that expose client comments/replies are historical.
+> **Current model:** This research predates ADRs 0009 and 0011. Use [`support-domain-design.md`](../support-domain-design.md) for Reporter visibility and current admin flows, and ADR 0011 for the WordPress-native React runtime/build. Lifecycle and launcher-loading guidance remains relevant; route and conversation examples below that expose client comments/replies are historical.
 
 This note uses the repository's domain vocabulary from [`CONTEXT.md`](../../CONTEXT.md): **Client**, **WordPress project**, **WordPress installation**, **Environment**, **Reporter**, **Support request**, **Project repository**, **Visibility scope**, and **Delivery outcome**.
 
@@ -22,7 +22,7 @@ The checked-out repository does not contain copies of GitHub issue #2, #22, or #
 Use a **small, always-loadable PHP bootstrap** that only defines plugin constants, registers lifecycle callbacks, and registers lightweight context gates. Each gate loads its controller/service only when WordPress is serving that context:
 
 - **Frontend:** no GQ Support assets, REST controllers, provider calls, cron work, or conversation state. The plugin is active but inert on a normal public request.
-- **Admin:** a small launcher shell may be loaded for an eligible Reporter on supported site-admin screens. The full React/TanStack Query application is dynamically loaded only after opening the launcher. A dedicated page gets the full application only on its own screen.
+- **Admin:** a small vanilla launcher shell may be loaded for an eligible Reporter on supported site-admin screens. The full React app and WordPress React runtime are loaded only after opening the launcher. A dedicated operator page loads its own app only on that screen.
 - **REST:** routes are registered from `rest_api_init`; callbacks perform authentication, capability checks, and explicit Visibility scope checks. `is_admin()` is not used to decide whether REST routes exist or whether a Reporter is authorized.
 - **Cron:** no plugin-owned scheduled work in the MVP. If later accepted, use one or more uniquely prefixed hooks, schedule once, and clear by the exact hook/argument tuple on deactivation.
 - **WP-CLI:** load only a small command registration file when `defined( 'WP_CLI' ) && WP_CLI`; load the domain service inside command execution.
@@ -35,10 +35,10 @@ This preserves the existing decisions: no CPT, no local conversation table, no r
 A launcher on every supported WP-Admin screen and “do not load the whole app everywhere” are compatible only if the browser bundle is split:
 
 1. `launcher.js` is a small, capability-agnostic UI shell that can render the button/root.
-2. The click handler dynamically imports the full React application and query client.
+2. The click handler loads the dependency-extracted React application and its WordPress runtime dependencies.
 3. The full app makes same-origin requests to the GQ Support REST routes.
 
-This is a recommendation for implementation ticket #23, not a claim about the current scaffold. The current `plugin/app/src/main.tsx` creates the `QueryClient` at bundle startup, so it currently represents the full-app path rather than a split launcher.
+This is the direction for implementation ticket #23. The current `plugin/app/src/index.tsx` is only the app entry; it uses `@wordpress/element` and `@wordpress/scripts` emits its external dependency manifest. The launcher and click-time loader are not implemented yet.
 
 ## Source-backed facts versus recommendations
 
@@ -336,7 +336,7 @@ If a future migration needs every site in a network, expose an explicit WP-CLI/a
 | WP-Cron events | Plugin | Clear every GQ-owned hook with exact args | Clear again defensively |
 | Support request and Message conversation | GitHub Support repository | Never delete | Never delete from `uninstall.php` |
 | Delivery receipts, attempts, reconciliation state | Intake/delivery service | Service-owned retention policy; local uninstall cannot assume authority | Service deletion/erasure requires a separate authenticated service operation |
-| React/TanStack Query cache | Browser | No durable ownership | No server cleanup |
+| Reporter app in-memory state | Browser | No durable ownership | Clear on Reporter identity or capability change; no server cleanup |
 
 The current MVP has no WP-Cron event and no local outbox. If a later design introduces a plugin-owned maintenance event, use a stable hook such as `gq_support_reconcile` and stable argument identity, call `wp_next_scheduled()` before scheduling, and clear it with `wp_clear_scheduled_hook()` on deactivation. WordPress requires exact event arguments for clearing. ([`wp_schedule_event()`](https://developer.wordpress.org/reference/functions/wp_schedule_event/), [`wp_clear_scheduled_hook()`](https://developer.wordpress.org/reference/functions/wp_clear_scheduled_hook/))
 
@@ -402,23 +402,23 @@ plugin/
 
 ### Notes on the current PHP class
 
-`class-gq-support-plugin.php` currently constructs a singleton and registers `admin_enqueue_scripts` and `admin_footer`, with `edit_others_posts` as a scaffold capability. The implementation should either evolve that class into the tiny bootstrap or replace it with a prefixed bootstrap plus context modules. It should not become a god object containing admin rendering, REST, lifecycle, migrations, authorization, and the Worker client.
+`class-gq-support-plugin.php` currently registers `admin_init` and `rest_api_init` lifecycle work plus a WP-CLI initialization path; it does not enqueue or render the launcher. Keep the future asset gate small and separate from REST, lifecycle, authorization, and Worker responsibilities. The implementation should not turn this class into a god object.
 
 The current `plugin/composer.json` has development dependencies but no autoload section. For the first implementation, explicit `require_once` files are the lowest-risk extension of the scaffold. A later PSR-4 autoload decision is possible, but it should not make activation/uninstall or the main bootstrap depend on loading the whole application.
 
 ### React boundary
 
 ```text
-launcher.js
+launcher.js (vanilla)
   - finds #gq-support-root
-  - renders open button and loading/error shell
-  - loads full-app.js on user intent
+  - renders the open button and loading/error shell
+  - loads wp-element dependencies and the full app on user intent
 
 full-app.js
-  - QueryClientProvider
-  - request-list/detail projection
-  - create/reply/close/reopen mutations
-  - manual refresh
+  - @wordpress/element root
+  - @wordpress/api-fetch REST calls
+  - request list/create/status view with local React hooks
+  - manual refresh; no TanStack Query cache or polling
 ```
 
 The browser receives only a non-secret bootstrap object. It never receives GitHub credentials, a Worker service secret, repository selection, or an authorization claim that the REST route does not independently enforce. This follows the existing WordPress/GitHub research note and ADRs 0002–0004.
@@ -432,7 +432,7 @@ No benchmark was run for this research note. The following are **proposed accept
 - **0 GQ Support SQL queries** on anonymous and ordinary frontend requests.
 - **0 GQ Support remote HTTP requests.**
 - **0 GQ Support frontend assets.** The current MVP is admin-only.
-- **0 full React/TanStack Query initialization.**
+- **0 React runtime or full app initialization before explicit launcher activation.**
 - **0 scheduled delivery or reconciliation work.**
 - **No large autoloaded plugin option.** Site/network identity and configuration are accessed only in relevant contexts and should be created with autoload disabled where they are not needed on most requests. WordPress documents that rarely used options should not be autoloaded. ([`add_option()`](https://developer.wordpress.org/reference/functions/add_option/))
 - **Target regression:** median server wall-time delta no greater than 1% and p95 delta no greater than 5 ms versus the same site with the plugin inactive, measured over at least 100 warm requests per case. These are project budgets, not WordPress guarantees.
@@ -519,7 +519,7 @@ Record PHP wall time, memory, database query count/time, outbound HTTP count, re
 - Exact plugin capabilities (`gq_support_submit`, read/reply/state capabilities) and how they map to explicit Visibility scopes.
 - The supported-screen allowlist versus “all normal site-admin screens,” especially Customizer/iframe and unusual plugin screens.
 - Whether the dedicated page is needed in the first launcher ticket or follows the floating launcher.
-- The final browser bundle-size budget and whether Vite's dynamic import output is acceptable for the supported WordPress/browser matrix.
+- How the vanilla launcher dynamically loads the `@wordpress/scripts` app and its `wp-element` dependency in order, with retryable recovery, while keeping both absent until explicit activation.
 - Whether per-site identity is generated locally, provisioned by onboarding, or bound to a service-issued installation record.
 - Network-admin configuration surface and network/site option ownership.
 - The Worker authentication/replay contract, which remains an open decision in the existing research note.
@@ -609,4 +609,4 @@ All external sources below are official WordPress Developer Resources, the offic
 - [ADR 0007](../adr/0007-append-only-client-visible-support-conversation.md)
 - [ADR 0008](../adr/0008-one-support-repository-per-client-by-default.md)
 - [`docs/research/wordpress-github-support-widget.md`](wordpress-github-support-widget.md)
-- Current scaffold: [`plugin/gq-support.php`](../../plugin/gq-support.php), [`plugin/includes/class-gq-support-plugin.php`](../../plugin/includes/class-gq-support-plugin.php), [`plugin/uninstall.php`](../../plugin/uninstall.php), [`plugin/app/src/main.tsx`](../../plugin/app/src/main.tsx), [`plugin/app/src/App.tsx`](../../plugin/app/src/App.tsx), [`worker/src/worker.ts`](../../worker/src/worker.ts), [`README.md`](../../README.md)
+- Current scaffold: [`plugin/gq-support.php`](../../plugin/gq-support.php), [`plugin/includes/class-gq-support-plugin.php`](../../plugin/includes/class-gq-support-plugin.php), [`plugin/uninstall.php`](../../plugin/uninstall.php), [`plugin/app/src/index.tsx`](../../plugin/app/src/index.tsx), [`plugin/app/src/App.tsx`](../../plugin/app/src/App.tsx), [`worker/src/worker.ts`](../../worker/src/worker.ts), [`README.md`](../../README.md)

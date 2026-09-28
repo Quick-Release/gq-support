@@ -1,10 +1,10 @@
 # Architecture research: WordPress–GitHub support widget
 
-- **Status:** Historical architecture recommendation; superseded for repository and client-visibility semantics by [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md)
+- **Status:** Historical architecture recommendation; superseded for repository and client-visibility semantics by [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md), and for the Reporter app's React/data-layer choice by [ADR 0011](../adr/0011-wordpress-native-react-runtime.md).
 - **Research date:** 2026-09-18
 - **Scope:** An authenticated WordPress admin widget that submits client support requests to the project-configured, dedicated private GitHub support repository.
 
-> **Current model:** This research predates ADR 0009. Its dedicated Support repository and client-visible conversation recommendations are historical; use [`support-domain-design.md`](../support-domain-design.md) and ADR 0009 for current behavior. Non-conflicting WordPress REST, GitHub App, and delivery research may still be useful.
+> **Current model:** This research predates ADR 0009. Its dedicated Support repository and client-visible conversation recommendations are historical; use [`support-domain-design.md`](../support-domain-design.md) and ADR 0009 for current behavior. Its TanStack Query recommendation is superseded by ADR 0011. Non-conflicting WordPress REST, GitHub App, and delivery research may still be useful.
 
 This document is an implementation recommendation, not a replacement for the accepted domain decisions. The repository's terminology and boundaries are defined in [`CONTEXT.md`](../../CONTEXT.md), the support domain design in [`docs/support-domain-design.md`](../support-domain-design.md), and the relevant decisions in [`docs/adr/`](../adr/).
 
@@ -272,7 +272,7 @@ Classify failures before retrying:
 
 A retry must be bounded and observable. A known GitHub 4xx should not be converted to a duplicate attempt. A reconciliation query must always be constrained to the mapped private repository and verify the marker/content before associating a provider object.
 
-## 5. TanStack choices in the React app
+## 5. Historical TanStack recommendations (superseded by ADR 0011)
 
 ### Use TanStack Query
 
@@ -294,7 +294,7 @@ Do not persist the Query cache as a local outbox. The cache is a rendering aid a
 - **TanStack Store:** not needed for a small widget. Query already owns remote request state and React local state owns transient panel/form state. See [TanStack Store](https://tanstack.com/store/latest).
 - **TanStack Router:** not needed for a widget embedded in arbitrary admin screens. Use local selected-request state rather than changing the WordPress admin URL. See [TanStack Router](https://tanstack.com/router/latest).
 
-This keeps the client architecture shallow: React renders the widget, Query coordinates server state, and WordPress REST remains the browser contract.
+This section records the earlier TanStack recommendation for historical context. The current choice is WordPress's React integration plus `@wordpress/api-fetch` and React hooks, as recorded in ADR 0011.
 
 ## 6. Effect design in the Worker
 

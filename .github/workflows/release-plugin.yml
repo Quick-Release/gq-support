@@ -53,7 +53,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
           cache: pnpm
 
       - name: Install frontend dependencies
@@ -75,7 +75,10 @@ jobs:
           [ "$php_version" = "$VERSION" ] || { echo "Plugin header is $php_version, expected $VERSION" >&2; exit 1; }
           [ "$constant_version" = "$VERSION" ] || { echo "PHP constant is $constant_version, expected $VERSION" >&2; exit 1; }
           [ "$stable_tag" = "$VERSION" ] || { echo "Stable tag is $stable_tag, expected $VERSION" >&2; exit 1; }
-          test -s plugin/assets/dist/app.js
+          test -s plugin/assets/dist/index.js
+          test -s plugin/assets/dist/index.asset.php
+          grep -q "'wp-element'" plugin/assets/dist/index.asset.php
+          ! grep -q "'react-jsx-runtime'" plugin/assets/dist/index.asset.php
 
       - name: Assemble package tree
         env:
