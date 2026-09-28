@@ -1,0 +1,112 @@
+{
+  "anonymous": {
+    "ownRequests": [],
+    "htmlMentions": false
+  },
+  "idle": {
+    "idleMs": 60000,
+    "closedAll": [
+      "/wp-admin/admin-ajax.php"
+    ],
+    "closedOwn": 0,
+    "afterUseAll": [
+      "/wp-admin/admin-ajax.php"
+    ],
+    "afterUseOwn": 0,
+    "cyclesRequests": 0,
+    "heapDelta50Cycles": 619004
+  },
+  "closed": {
+    "sample": {
+      "template": 359,
+      "root": 378,
+      "inlineBootstrap": 209,
+      "html": 178894,
+      "ownRequests": 2,
+      "ownBytes": 4012,
+      "totalRequests": 91,
+      "ownUrls": [
+        "/wp-content/plugins/gq-support/assets/launcher.css?ver=0.1.3",
+        "/wp-content/plugins/gq-support/assets/launcher.js?ver=0.1.3"
+      ]
+    },
+    "runs": 20,
+    "totalRequests": {
+      "median": 91,
+      "p95": 91,
+      "min": 91,
+      "max": 91
+    },
+    "ownBytes": {
+      "median": 4012,
+      "p95": 4012,
+      "min": 4012,
+      "max": 4012
+    },
+    "html": {
+      "median": 178894,
+      "p95": 178894,
+      "min": 178894,
+      "max": 178894
+    }
+  },
+  "open": {
+    "sampleUrls": [
+      "/wp-content/plugins/gq-support/assets/dist/index.css?ver=9b62c9ab37876f283f1f",
+      "/wp-content/plugins/gq-support/assets/dist/index.js?ver=9b62c9ab37876f283f1f"
+    ],
+    "runs": 20,
+    "usableMs": {
+      "median": 123,
+      "p95": 127.09999999403954,
+      "min": 64.2000000178814,
+      "max": 127.30000001192093
+    },
+    "requests": {
+      "median": 2,
+      "p95": 2,
+      "min": 2,
+      "max": 2
+    },
+    "bytes": {
+      "median": 5630,
+      "p95": 5630,
+      "min": 5630,
+      "max": 5630
+    },
+    "scriptMs": {
+      "median": 3.4440000000000026,
+      "p95": 4.130000000000009,
+      "min": 2.37900000000002,
+      "max": 4.309999999999994
+    },
+    "taskMs": {
+      "median": 44.596999999999994,
+      "p95": 52.751999999999995,
+      "min": 34.497,
+      "max": 53.271999999999984
+    },
+    "heapDelta": {
+      "median": -2430320,
+      "p95": 2896968,
+      "min": -7072508,
+      "max": 2897012
+    },
+    "longTasks": {
+      "median": 0,
+      "p95": 0,
+      "min": 0,
+      "max": 0
+    },
+    "longestTask": {
+      "median": 0,
+      "p95": 0,
+      "min": 0,
+      "max": 0
+    }
+  },
+  "env": {
+    "chromium": "153.0.8010.12",
+    "site": "http://127.0.0.1:9471"
+  }
+}

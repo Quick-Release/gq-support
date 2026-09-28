@@ -1,0 +1,240 @@
+{"off":true,"uri":"\/","wall_ms":329,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":288,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":312,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":318,"mem":46108896,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":819,"mem":47126920,"queries":33,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":793,"mem":47134296,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":271,"mem":43066320,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":272,"mem":43074880,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":292,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":286,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":326,"mem":46108520,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":324,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":804,"mem":47133920,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":890,"mem":47125224,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":282,"mem":43074880,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":306,"mem":43066320,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":291,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":294,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":334,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":335,"mem":46108520,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":930,"mem":47124848,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":847,"mem":47133920,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":274,"mem":43066320,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43074880,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":289,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":306,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":371,"mem":46108520,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":328,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":815,"mem":47133920,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":783,"mem":47124848,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":296,"mem":43074880,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":291,"mem":43066320,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":350,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":292,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":389,"mem":46108520,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":850,"mem":47124848,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":875,"mem":47133920,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":280,"mem":43066320,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43074880,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":293,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":301,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":329,"mem":46108520,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":330,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":998,"mem":47133920,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":846,"mem":47124848,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":277,"mem":43074880,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":285,"mem":43066320,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":323,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":317,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":347,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":327,"mem":46108520,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":957,"mem":47124848,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":889,"mem":47133920,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":294,"mem":43066320,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":280,"mem":43074880,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":302,"mem":44671544,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":291,"mem":44662920,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":334,"mem":46108520,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46094624,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":843,"mem":47133920,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":811,"mem":47124848,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":279,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":346,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":344,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":329,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":328,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":931,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":890,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":297,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":280,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":294,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":293,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":324,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":324,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":877,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":825,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":278,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":278,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":286,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":291,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":383,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":356,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":893,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":866,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":302,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":276,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":291,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":286,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":332,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":796,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":905,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":276,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":319,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":292,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":320,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":323,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":874,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":838,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":277,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":277,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":286,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":286,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":330,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":319,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":865,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":915,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":277,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":290,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":287,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":323,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":355,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":787,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":961,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":288,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":289,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":323,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":319,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":805,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":845,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":292,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":289,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":298,"mem":44663176,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":288,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46094880,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":403,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":821,"mem":47125104,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":807,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":276,"mem":43066576,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":274,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":289,"mem":44671800,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":286,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":324,"mem":46108776,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":322,"mem":46094976,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":796,"mem":47134176,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":876,"mem":47125152,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":275,"mem":43075136,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43066736,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":288,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":290,"mem":44671944,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":361,"mem":46094992,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":880,"mem":47125296,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":796,"mem":47134368,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":277,"mem":43066736,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":275,"mem":43075296,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":303,"mem":44671944,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":363,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":351,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":322,"mem":46095040,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":859,"mem":47134368,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":873,"mem":47125296,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":288,"mem":43075296,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":272,"mem":43066736,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":288,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":287,"mem":44671944,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":319,"mem":46095040,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":324,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":811,"mem":47125296,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":880,"mem":47134368,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43066736,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43075296,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":289,"mem":44671944,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":305,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":339,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":320,"mem":46095040,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":870,"mem":47134368,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":808,"mem":47125296,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":338,"mem":43075296,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":310,"mem":43066736,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":289,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":285,"mem":44671944,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":321,"mem":46095040,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":348,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":873,"mem":47125296,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":868,"mem":47134368,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":284,"mem":43066736,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":271,"mem":43075296,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":289,"mem":44671944,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":287,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":324,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":320,"mem":46095040,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":885,"mem":47134368,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":798,"mem":47125296,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":274,"mem":43075296,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":272,"mem":43066736,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":290,"mem":44663320,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":288,"mem":44671944,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":319,"mem":46095040,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":323,"mem":46108936,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":816,"mem":47125680,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":982,"mem":47134752,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":275,"mem":43067120,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":280,"mem":43075680,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":298,"mem":44672328,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":289,"mem":44663704,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":336,"mem":46109320,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":320,"mem":46095424,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":799,"mem":47134752,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":799,"mem":47125680,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":274,"mem":43075680,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43067120,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":285,"mem":44663704,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":288,"mem":44672328,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":321,"mem":46095424,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":339,"mem":46109320,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":884,"mem":47125680,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":888,"mem":47134752,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":280,"mem":43067120,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":296,"mem":43075680,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":340,"mem":44672328,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":304,"mem":44663704,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46109320,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":379,"mem":46095424,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":940,"mem":47134752,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":869,"mem":47125680,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":278,"mem":43075680,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":272,"mem":43067120,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":285,"mem":44663704,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":287,"mem":44672328,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":318,"mem":46095424,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46109320,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":873,"mem":47125680,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":877,"mem":47134752,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":274,"mem":43067120,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":271,"mem":43075680,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/","wall_ms":284,"mem":44672328,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/","wall_ms":287,"mem":44663704,"queries":32,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/index.php","wall_ms":325,"mem":46109320,"queries":46,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_connection' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_id' LIMIT 1"],"http":0,"enqueued":true}
+{"off":true,"uri":"\/wp-admin\/index.php","wall_ms":324,"mem":46095424,"queries":42,"gq_q":[],"http":0,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/plugins.php","wall_ms":798,"mem":47134752,"queries":31,"gq_q":["SELECT option_value FROM wp_options WHERE option_name = 'gq_support_schema_version' LIMIT 1","SELECT option_value FROM wp_options WHERE option_name = 'gq_support_installation_origin' LIMIT 1"],"http":1,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/plugins.php","wall_ms":891,"mem":47125680,"queries":29,"gq_q":[],"http":1,"enqueued":false}
+{"off":false,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":277,"mem":43075680,"queries":9,"gq_q":[],"http":0,"enqueued":false}
+{"off":true,"uri":"\/wp-admin\/admin-ajax.php","wall_ms":273,"mem":43067120,"queries":9,"gq_q":[],"http":0,"enqueued":false}
