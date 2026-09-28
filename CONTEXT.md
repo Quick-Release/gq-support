@@ -75,3 +75,7 @@ An operational record of accepting or attempting to create a Support request in 
 
 **Delivery outcome**:
 The known state of an issue-creation intent: locally unsent, durably accepted and pending, delivered, failed, or outcome unknown. An outcome is separate from Support status.
+
+**Submission ID**:
+The Reporter-side identity of one issue-creation intent, reused on every retry of the same draft so a retry never creates a second Support request. It is scoped to the Reporter subject and WordPress installation, and it is not authority on its own.
+_Avoid_: Request ID (that names the single-use authentication nonce between WordPress and the service)

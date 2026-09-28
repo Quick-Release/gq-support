@@ -75,7 +75,7 @@ The following are design recommendations derived from those facts and from the a
 
 - Keep the main plugin file to constants, one-time `require_once` calls, lifecycle registration, and `GQ_Support_Bootstrap::boot()`. Do not instantiate the React app, REST controllers, HTTP client, GitHub adapter, or migration runner from the main file.
 - Treat context detection and authorization as different layers. Context chooses what code may be loaded; authorization is re-evaluated at the action boundary using the current Reporter and explicit Visibility scope.
-- Make `gq_support/v1` the REST namespace and keep provider/repository identifiers out of browser configuration and request parameters.
+- Make `gq-support/v1` the REST namespace and keep provider/repository identifiers out of browser configuration and request parameters.
 - Keep all WordPress-side persistent data to small site/network options and operational references. Do not introduce a CPT, local conversation table, rewrite rules, WooCommerce integration, or a WordPress outbox/job queue for this slice.
 
 ## Proposed initialization diagrams
@@ -147,7 +147,7 @@ flowchart TD
 flowchart TD
     A[Common bootstrap] --> B[rest_api_init]
     B --> C[Load route registrar]
-    C --> D[register_rest_route(gq_support/v1/...)]
+    C --> D[register_rest_route(gq-support/v1/...)]
     D --> E[Cookie + wp_rest nonce authentication]
     E --> F[permission_callback]
     F --> G{Capability + explicit Visibility scope}
@@ -245,7 +245,7 @@ flowchart TD
 | `admin_menu` | Admin menu construction | Register one optional GQ Support submenu under an existing top-level menu | Menu capability is a visibility hint; page callback rechecks capability and scope | **Use for dedicated page.** ([`admin_menu`](https://developer.wordpress.org/reference/hooks/admin_menu/), [`add_submenu_page()`](https://developer.wordpress.org/reference/functions/add_submenu_page/)) |
 | `network_admin_menu` | Network admin menu construction | Optional network configuration/diagnostic page only, if later accepted | Never treat network administrator status as Reporter support scope; no floating client launcher in network admin | **Separate from site-admin.** ([`add_submenu_page()`](https://developer.wordpress.org/reference/functions/add_submenu_page/)) |
 | `admin_bar_menu($wp_admin_bar)` | Admin bar node construction | Optional “Open Support” node linking to the launcher/dedicated page | Node is only a navigation affordance; it does not replace the root/assets or authorization checks | **Optional fallback, not primary.** ([`admin_bar_menu`](https://developer.wordpress.org/reference/hooks/admin_bar_menu/)) |
-| `rest_api_init($wp_rest_server)` | REST server preparation | Register `gq_support/v1` routes and only then load route/controller definitions | Each route has a `permission_callback`; callbacks re-check the current Reporter, installation mapping, and Visibility scope | **Required.** Do not condition registration on `is_admin()`. ([`rest_api_init`](https://developer.wordpress.org/reference/hooks/rest_api_init/), [Adding Custom Endpoints](https://developer.wordpress.org/rest-api/extending-the-rest-api/adding-custom-endpoints/)) |
+| `rest_api_init($wp_rest_server)` | REST server preparation | Register `gq-support/v1` routes and only then load route/controller definitions | Each route has a `permission_callback`; callbacks re-check the current Reporter, installation mapping, and Visibility scope | **Required.** Do not condition registration on `is_admin()`. ([`rest_api_init`](https://developer.wordpress.org/reference/hooks/rest_api_init/), [Adding Custom Endpoints](https://developer.wordpress.org/rest-api/extending-the-rest-api/adding-custom-endpoints/)) |
 | `admin_init` | Admin screen, `admin-ajax.php`, and `admin-post.php` initialization | Optional maintenance/migration check for admin-only work; no REST registration | Do not assume it means a normal screen; it also runs on admin endpoints | **Narrow use only.** ([`admin_init`](https://developer.wordpress.org/reference/hooks/admin_init/)) |
 | `wp_doing_cron()` / plugin-owned cron action | WP-Cron execution | No action in MVP; later bounded maintenance only | Schedule once with stable args; clear exact hook/args on deactivation/uninstall; never turn this into a local delivery queue | **No MVP cron.** ([`wp_doing_cron()`](https://developer.wordpress.org/reference/functions/wp_doing_cron/), [`wp_schedule_event()`](https://developer.wordpress.org/reference/functions/wp_schedule_event/), [`wp_clear_scheduled_hook()`](https://developer.wordpress.org/reference/functions/wp_clear_scheduled_hook/)) |
 | `defined('WP_CLI') && WP_CLI` / `WP_CLI::add_command()` | WP-CLI bootstrap and command registration | Register operator commands; load implementation on command execution | Command code must use server-side installation/mapping context and explicit operator policy | **Use for CLI only.** ([WP-CLI Commands Cookbook](https://make.wordpress.org/cli/handbook/guides/commands-cookbook/)) |
@@ -493,7 +493,7 @@ Record PHP wall time, memory, database query count/time, outbound HTTP count, re
    - Re-check capability in the page callback.
 
 4. **REST boundary**
-   - Register `gq_support/v1` from `rest_api_init`.
+   - Register `gq-support/v1` from `rest_api_init`.
    - Implement schemas and `permission_callback`s.
    - Separate WordPress cookie/nonce authentication, capability authorization, and explicit Visibility scope.
    - Keep Worker forwarding server-side and translate errors/outcomes to the accepted contract.
