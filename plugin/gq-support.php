@@ -3,7 +3,7 @@
  * Plugin Name:       GETQUICK Support
  * Plugin URI:         https://github.com/Quick-Release/gq-support
  * Description:        Adds an in-dashboard support widget for authenticated users to submit reports and view their status.
- * Version:            0.1.2
+ * Version:            0.1.3
  * Requires at least:  6.5
  * Requires PHP:       8.0
  * Requires Plugins:   getquick-design
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'GQ_SUPPORT_VERSION', '0.1.2' );
+define( 'GQ_SUPPORT_VERSION', '0.1.3' );
 define( 'GQ_SUPPORT_PLUGIN_FILE', __FILE__ );
 define( 'GQ_SUPPORT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GQ_SUPPORT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
