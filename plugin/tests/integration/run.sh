@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 mkdir -p .test-site/wp-content/plugins/getquick-design .test-site/wp-content/plugins
-ln -sfn ../../../plugin .test-site/wp-content/plugins/gq-support
+# GQ_SUPPORT_PLUGIN_DIR installs another tree, such as the release package, in place of plugin/.
+ln -sfn "../../../${GQ_SUPPORT_PLUGIN_DIR:-plugin}" .test-site/wp-content/plugins/gq-support
 printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > .test-site/wp-content/plugins/getquick-design/getquick-design.php
 ddev start
 wp() { ddev wp --path=.test-site "$@"; }

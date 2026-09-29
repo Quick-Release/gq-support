@@ -15,8 +15,61 @@ permissions:
   contents: write
 
 jobs:
+  performance-gates:
+    # The performance gates run against the assembled package, which publish then ships unchanged.
+    name: Performance gates on the package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up DDEV
+        uses: ddev/github-action-setup-ddev@v1
+        with:
+          version: 1.25.4
+          autostart: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Build and assemble the package
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:app
+          scripts/assemble-plugin-package.sh package-dist
+
+      - name: Size gate on the package
+        run: node plugin/tests/performance/size-gate.mjs package-dist
+
+      - name: Install the package on a disposable site
+        env:
+          GQ_SUPPORT_PLUGIN_DIR: package-dist
+        run: bash plugin/tests/integration/run.sh
+
+      - name: Counter gate on the package
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          ddev wp --path=.test-site plugin install woocommerce
+          pnpm exec playwright test --config plugin/tests/browser/playwright.config.ts performance.spec.ts
+
+      - name: Keep the tested package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-dist
+          path: package-dist/
+          if-no-files-found: error
+
   publish:
     name: Publish Composer package
+    needs: performance-gates
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Check out source
@@ -45,22 +98,11 @@ jobs:
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - name: Download the tested package
+        uses: actions/download-artifact@v4
         with:
-          version: 12
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build frontend assets
-        run: pnpm build:app
+          name: package-dist
+          path: package-dist
 
       - name: Verify release metadata and assets
         env:
@@ -75,33 +117,14 @@ jobs:
           [ "$php_version" = "$VERSION" ] || { echo "Plugin header is $php_version, expected $VERSION" >&2; exit 1; }
           [ "$constant_version" = "$VERSION" ] || { echo "PHP constant is $constant_version, expected $VERSION" >&2; exit 1; }
           [ "$stable_tag" = "$VERSION" ] || { echo "Stable tag is $stable_tag, expected $VERSION" >&2; exit 1; }
-          test -s plugin/assets/dist/index.js
-          test -s plugin/assets/dist/index.css
-          test -s plugin/assets/dist/index-rtl.css
-          test -s plugin/assets/launcher.js
-          test -s plugin/assets/launcher.css
-          test -s plugin/assets/dist/index.asset.php
-          grep -q "'wp-element'" plugin/assets/dist/index.asset.php
-          ! grep -q "'react-jsx-runtime'" plugin/assets/dist/index.asset.php
-
-      - name: Assemble package tree
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          rm -rf package-dist
-          mkdir -p package-dist/assets
-          cp plugin/gq-support.php package-dist/
-          cp plugin/uninstall.php package-dist/
-          cp plugin/readme.txt package-dist/
-          cp plugin/README.md package-dist/
-          cp plugin/composer.json package-dist/
-          cp -R plugin/includes package-dist/includes
-          cp plugin/assets/launcher.js plugin/assets/launcher.css package-dist/assets/
-          cp -R plugin/assets/dist package-dist/assets/dist
-          mkdir -p package-dist/languages
-          cp plugin/languages/*.json plugin/languages/*.mo package-dist/languages/
+          test -s package-dist/assets/dist/index.js
+          test -s package-dist/assets/dist/index.css
+          test -s package-dist/assets/dist/index-rtl.css
+          test -s package-dist/assets/launcher.js
+          test -s package-dist/assets/launcher.css
+          test -s package-dist/assets/dist/index.asset.php
+          grep -q "'wp-element'" package-dist/assets/dist/index.asset.php
+          ! grep -q "'react-jsx-runtime'" package-dist/assets/dist/index.asset.php
 
       - name: Publish package branch and tag
         env:

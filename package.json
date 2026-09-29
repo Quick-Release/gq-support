@@ -18,7 +18,8 @@
     "wp:check": "ddev exec -p gq-support-testsite wp plugin check gq-support",
     "lint:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcs",
     "lint:php:fix": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcbf",
-    "analyse:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer analyse"
+    "analyse:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer analyse",
+    "test:size": "node plugin/tests/performance/size-gate.mjs && node --test plugin/tests/performance/"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
