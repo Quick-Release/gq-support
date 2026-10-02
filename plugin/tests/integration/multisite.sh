@@ -7,7 +7,7 @@ if ! wp eval 'exit( is_multisite() ? 0 : 1 );' >/dev/null 2>&1; then
   wp plugin deactivate gq-support
   wp core multisite-convert --title='Lifecycle network' --subdomains=false
 fi
-wp plugin activate getquick-design --network
+wp plugin activate gq-design --network
 wp plugin activate gq-support --network
 wp eval-file plugin/tests/integration/lifecycle.php active
 wp eval-file plugin/tests/integration/lifecycle.php network

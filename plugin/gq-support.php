@@ -6,7 +6,7 @@
  * Version:            0.1.3
  * Requires at least:  6.5
  * Requires PHP:       8.0
- * Requires Plugins:   getquick-design
+ * Requires Plugins:   gq-design
  * Author:             GETQUICK
  * Author URI:         https://getquick.io
  * License:            GPL-2.0-or-later
