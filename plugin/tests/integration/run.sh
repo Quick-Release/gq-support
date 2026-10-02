@@ -2,10 +2,10 @@
 # Run from the repository root; creates an isolated disposable DDEV WordPress site.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
-mkdir -p .test-site/wp-content/plugins/getquick-design .test-site/wp-content/plugins
+mkdir -p .test-site/wp-content/plugins/gq-design .test-site/wp-content/plugins
 # GQ_SUPPORT_PLUGIN_DIR installs another tree, such as the release package, in place of plugin/.
 ln -sfn "../../../${GQ_SUPPORT_PLUGIN_DIR:-plugin}" .test-site/wp-content/plugins/gq-support
-printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > .test-site/wp-content/plugins/getquick-design/getquick-design.php
+printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > .test-site/wp-content/plugins/gq-design/gq-design.php
 ddev start
 wp() { ddev wp --path=.test-site "$@"; }
 if ! ddev exec test -f .test-site/wp-includes/version.php 2>/dev/null; then
@@ -23,7 +23,7 @@ if wp eval 'exit( is_multisite() ? 0 : 1 );' >/dev/null 2>&1; then
 fi
 wp theme install twentytwentyfour --activate
 if wp plugin is-active gq-support 2>/dev/null; then wp plugin deactivate gq-support; fi
-if wp plugin is-active getquick-design 2>/dev/null; then wp plugin deactivate getquick-design; fi
+if wp plugin is-active gq-design 2>/dev/null; then wp plugin deactivate gq-design; fi
 had_identity=0
 if wp option get gq_support_state >/dev/null 2>&1; then had_identity=1; fi
 if wp plugin activate gq-support >/dev/null 2>&1; then
@@ -34,7 +34,7 @@ if [[ "$had_identity" == 0 ]] && wp option get gq_support_state >/dev/null 2>&1;
   echo 'Activation without the dependency initialized local state.' >&2
   exit 1
 fi
-wp plugin activate getquick-design
+wp plugin activate gq-design
 wp plugin activate gq-support
 wp eval-file plugin/tests/integration/lifecycle.php active
 wp eval-file plugin/tests/integration/lifecycle.php upgrade
