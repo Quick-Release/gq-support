@@ -4,7 +4,7 @@ Tags: support, issue-tracking, bug-report
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.1.3
+Stable tag: 0.1.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,9 @@ Adds an in-dashboard support widget for authenticated users to submit reports an
 This plugin is under active development. Authorized Reporters on a connected installation see a Support launcher on supported admin screens; sending reports is not available yet.
 
 == Changelog ==
+
+= 0.1.4 =
+* Require the renamed GQ Design plugin slug, gq-design, so WordPress recognizes the installed dependency.
 
 = 0.1.3 =
 * Add the Support launcher on the Dashboard, post screens, and WooCommerce screens for authorized Reporters on a connected installation. The panel loads only on first open and keeps an in-memory draft; sending is not available yet.
