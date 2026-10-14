@@ -169,12 +169,12 @@ Three layers keep noise out of the pass/fail signal.
 
 ## Reproducing
 
-Build the app first with `pnpm build:app`. Then start a disposable Playground site. Replace `<dir>` in the command below with the directory that holds a copy of `gq-probe.php` in `mu/` and a `getquick-design/getquick-design.php` stub defining `GETQUICK_DESIGN_VERSION`:
+Build the app first with `pnpm build:app`. Then start a disposable Playground site. Replace `<dir>` in the command below with the directory that holds a copy of `gq-probe.php` in `mu/` and a `gq-design/gq-design.php` stub defining `GETQUICK_DESIGN_VERSION`:
 
 ```sh
 npx @wp-playground/cli@3.1.56 server --port=9471 \
   --mount=./plugin:/wordpress/wp-content/plugins/gq-support \
-  --mount=<dir>/getquick-design:/wordpress/wp-content/plugins/getquick-design \
+  --mount=<dir>/gq-design:/wordpress/wp-content/plugins/gq-design \
   --mount=<dir>/mu:/wordpress/wp-content/mu-plugins \
   --blueprint=docs/research/idle-performance-budgets/blueprint.json --login
 WT=$PWD RUNS=20 IDLE_MS=60000 SCREEN=index.php node docs/research/idle-performance-budgets/measure.cjs

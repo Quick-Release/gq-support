@@ -68,6 +68,25 @@ Bedrock path shown above.
   [Alchemy](https://alchemy.run) and written with
   [Effect](https://effect.website). Currently a placeholder with no routes.
 
+## Local WordPress playground
+
+This repository lives next to `../playground`, our shared Bedrock/DDEV test site.
+See [the playground guide](../playground/README.md) for resets and isolated tests.
+
+```sh
+pnpm wp:start                # starts the site and updates stable dependencies
+pnpm wp:open                 # https://gq-wp-playground.ddev.site
+pnpm wp plugin activate gq-design
+pnpm wp plugin activate gq-support
+pnpm wp:test                # resets the playground, then checks this plugin
+```
+
+Support requires the `gq-design` plugin (Composer package `getquick/gq-design`).
+`getquick-options` is gq-config's admin page slug, not a plugin slug.
+The local WordPress admin is `dev` / `dev`.
+The playground symlinks `plugin/`;
+build the widget before testing. Worker services are still developed separately.
+
 ## Development
 
 ```sh
