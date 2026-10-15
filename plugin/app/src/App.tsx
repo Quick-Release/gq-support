@@ -2,13 +2,15 @@
 /** @jsx createElement */
 import { createElement, useEffect, useRef, useState } from "@wordpress/element";
 import { __ } from "@wordpress/i18n";
+import { limits } from "./limits";
+import { useSubmission } from "./useSubmission";
 import { useSession } from "./useSession";
 import { speak } from "@wordpress/a11y";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 
 const textDomain = "gq-support";
-const maxDescriptionLength = 5000;
-const maxSummaryLength = 200;
+const maxDescriptionLength = limits.description;
+const maxSummaryLength = limits.summary;
 
 type Props = {
   /** Receives the launcher's click action for the current state: open or close. */
@@ -24,6 +26,7 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   const [description, setDescription] = useState("");
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
+  const submission = useSubmission(visible, session, () => { setDescription(""); setSummary(""); });
   const field = useRef<HTMLTextAreaElement>(null);
   const panel = useRef<HTMLElement>(null);
   const hasDraft = Boolean(description.trim() || summary.trim());
@@ -57,14 +60,19 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!await session.check()) return;
-    const message = !description.trim()
+    if (submission.locked) return;
+    const draft = { ...(summary.trim() ? { summary: summary.trim() } : {}), description: description.trim() };
+    const message = !draft.description
       ? __("Enter a description.", textDomain)
-      : description.length > maxDescriptionLength || summary.length > maxSummaryLength
+      : [...draft.description].length > maxDescriptionLength || [...summary.trim()].length > maxSummaryLength
         ? __("Your report is too long.", textDomain)
-        : __("Sending reports is not available yet.", textDomain);
+        : /[\r\n]/.test(summary.trim())
+          ? __("Summary must be one line.", textDomain)
+          : new TextEncoder().encode(JSON.stringify({ ...draft, submission_id: "00000000-0000-4000-8000-000000000000" })).length > limits.bodyBytes
+            ? __("Your report is too long.", textDomain) : "";
     setError(message);
-    speak(message, "assertive");
+    if (message) { speak(message, "assertive"); return; }
+    await submission.send(draft);
   };
   return (
     <section ref={panel} id="gq-support-panel" className="gq-support-panel" role="dialog" aria-modal="false" aria-labelledby="gq-support-title" hidden={!visible}>
@@ -79,13 +87,15 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
       <div id="gq-support-new" role="tabpanel" aria-labelledby="gq-support-new-tab" hidden={tab !== "new"}>
         <form onSubmit={submit} noValidate>
           <label htmlFor="gq-support-summary" className="gq-support-label">{__("Summary (optional)", textDomain)}</label>
-          <input id="gq-support-summary" className="gq-support-field" value={summary} onChange={(event) => setSummary(event.target.value)} />
+          <input id="gq-support-summary" className="gq-support-field" value={summary} disabled={submission.locked} onChange={(event) => { submission.edit(); setSummary(event.target.value); }} />
           <label htmlFor="gq-support-description" className="gq-support-label">{__("Description", textDomain)}</label>
-          <textarea id="gq-support-description" className="gq-support-field gq-support-description" ref={field} required placeholder={__("What happened, and what did you expect?", textDomain)} value={description} onChange={(event) => { setDescription(event.target.value); setError(""); }} />
+          <textarea id="gq-support-description" className="gq-support-field gq-support-description" ref={field} disabled={submission.locked} required placeholder={__("What happened, and what did you expect?", textDomain)} value={description} onChange={(event) => { submission.edit(); setDescription(event.target.value); setError(""); }} />
+          {submission.message && <p role="status">{submission.message}</p>}
+          {submission.checkAgain && <button type="button" disabled={submission.waiting || session.paused} onClick={() => { void submission.send(); }}>{__("Check again", textDomain)}</button>}
           {error && <p className="gq-support-error" role="alert">{error}</p>}
           {session.paused && <p className="gq-support-error" role="alert">{session.message}</p>}
           {session.paused && hasDraft && <button type="button" onClick={() => { void navigator.clipboard.writeText([summary, description].filter(Boolean).join("\n\n")); }}>{__("Copy draft", textDomain)}</button>}
-          <button type="submit" disabled={session.paused} className="gq-support-submit">{__("Send report", textDomain)}</button>
+          <button type="submit" disabled={session.paused || submission.locked || submission.waiting} className="gq-support-submit">{__("Send report", textDomain)}</button>
         </form>
       </div>
       <div id="gq-support-requests" role="tabpanel" aria-labelledby="gq-support-requests-tab" hidden={tab !== "requests"}>

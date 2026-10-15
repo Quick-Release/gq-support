@@ -24,6 +24,7 @@ async function logIn(page: Page, user = 'admin', password = 'launcher-test-passw
   await page.locator('#user_login').fill(user);
   await page.locator('#user_pass').fill(password);
   await page.locator('#wp-submit').click();
+  await page.waitForURL(/wp-admin/);
 }
 
 test('anonymous and unsupported admin screens receive no launcher assets', async ({ page }) => {
@@ -57,7 +58,7 @@ test('Reporter gets a deferred, keyboard-operable panel with an in-memory draft'
   await expect(description).toBeFocused();
   await dialog.getByRole('button', { name: 'Send report' }).click();
   await expect(dialog.getByRole('alert')).toContainText('Enter a description');
-  await description.fill('x'.repeat(5001));
+  await description.fill('x'.repeat(10001));
   await dialog.getByRole('button', { name: 'Send report' }).click();
   await expect(dialog.getByRole('alert')).toContainText('too long');
   await description.fill('A draft');

@@ -1,0 +1,22 @@
+[
+  {
+    "scenario": "anonymous",
+    "status": 401,
+    "code": "rest_not_logged_in"
+  },
+  {
+    "scenario": "cookie expired",
+    "status": 403,
+    "code": "rest_cookie_invalid_nonce"
+  },
+  {
+    "scenario": "grant missing",
+    "status": 403,
+    "code": "gq_support_forbidden"
+  },
+  {
+    "scenario": "not connected",
+    "status": 503,
+    "code": "gq_support_not_configured"
+  }
+]

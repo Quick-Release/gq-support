@@ -31,14 +31,18 @@ final class GQ_Support_REST {
 							'format'   => 'uuid',
 						),
 						'summary'       => array(
-							'type'      => 'string',
-							'maxLength' => 120,
+							'type'              => 'string',
+							'maxLength'         => GQ_Support_Limits::SUMMARY_CHARACTERS,
+							'validate_callback' => array( __CLASS__, 'validate_text' ),
+							'sanitize_callback' => array( __CLASS__, 'trim_text' ),
 						),
 						'description'   => array(
-							'type'      => 'string',
-							'required'  => true,
-							'minLength' => 1,
-							'maxLength' => 10000,
+							'type'              => 'string',
+							'required'          => true,
+							'minLength'         => 1,
+							'maxLength'         => GQ_Support_Limits::DESCRIPTION_CHARACTERS,
+							'validate_callback' => array( __CLASS__, 'validate_text' ),
+							'sanitize_callback' => array( __CLASS__, 'trim_text' ),
 						),
 					),
 				) + $common,
@@ -166,6 +170,9 @@ final class GQ_Support_REST {
 		}
 		$result = GQ_Support_Service_Client::request( $create ? 'POST' : 'GET', $path, $payload, new GQ_Support_Signer( $secret, $key_id, $state['installation_id'] ), $create ? 8 : 5 );
 		if ( is_wp_error( $result ) ) {
+			if ( 'gq_support_not_configured' === $result->get_error_code() ) {
+				return self::error( 'gq_support_not_configured', 503 );
+			}
 			return self::error( $create ? 'gq_support_outcome_unknown' : 'gq_support_unavailable', $create ? 504 : 503, $create ? $payload['submission_id'] : null );
 		}
 		if ( in_array( $result['status'], array( 401, 403 ), true ) ) {
@@ -176,12 +183,21 @@ final class GQ_Support_REST {
 		}
 		if ( ! in_array( $result['status'], $create ? array( 201, 202 ) : array( 200 ), true ) ) {
 			$codes = array(
+				400 => 'gq_support_invalid_request',
+				413 => 'gq_support_payload_too_large',
+				500 => 'gq_support_internal',
 				409 => 'gq_support_idempotency_conflict',
 				426 => 'gq_support_plugin_outdated',
 				429 => 'gq_support_rate_limited',
 				503 => $create ? 'gq_support_not_accepted' : 'gq_support_unavailable',
 			);
-			return self::error( $codes[ $result['status'] ] ?? ( $create ? 'gq_support_outcome_unknown' : 'gq_support_unavailable' ), isset( $codes[ $result['status'] ] ) ? $result['status'] : ( $create ? 504 : 503 ), $create ? $payload['submission_id'] : null );
+			$error = self::error( $codes[ $result['status'] ] ?? ( $create ? 'gq_support_outcome_unknown' : 'gq_support_unavailable' ), isset( $codes[ $result['status'] ] ) ? $result['status'] : ( $create ? 504 : 503 ), $create ? $payload['submission_id'] : null );
+			if ( preg_match( '/^[0-9]{1,8}$/', $result['retry_after'] ) || preg_match( '/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-9]{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT$/', $result['retry_after'] ) ) {
+				$response = rest_convert_error_to_response( $error );
+				$response->header( 'Retry-After', $result['retry_after'] );
+				return $response;
+			}
+			return $error;
 		}
 		$body = $result['body'];
 		if ( ! $create && ! $request['id'] ) {
@@ -209,11 +225,37 @@ final class GQ_Support_REST {
 				return self::error( $create ? 'gq_support_outcome_unknown' : 'gq_support_not_found', $create ? 504 : 404, $create ? $payload['submission_id'] : null );
 			}
 		}
+		if ( $create && ( ( 201 === $result['status'] ) !== ( 'delivered' === $body['delivery'] ) ) ) {
+			return self::error( 'gq_support_outcome_unknown', 504, $payload['submission_id'] );
+		}
+
 		$response = new WP_REST_Response( $body, $result['status'] );
 		if ( 201 === $result['status'] ) {
 			$response->header( 'Location', rest_url( 'gq-support/v1/requests/' . rawurlencode( $body['id'] ) ) );
 		}
 		return $response;
+	}
+
+	/**
+	 * Apply REST field schemas after trimming, as the contract requires.
+	 *
+	 * @param mixed           $value Field value.
+	 * @param WP_REST_Request $request Browser request.
+	 * @param string          $param Field name.
+	 * @return true|WP_Error
+	 */
+	public static function validate_text( $value, WP_REST_Request $request, string $param ) {
+		$schema = $request->get_attributes()['args'][ $param ];
+		return rest_validate_value_from_schema( is_string( $value ) ? trim( $value ) : $value, $schema, $param );
+	}
+
+	/**
+	 * Preserve plain text while normalizing the contract's surrounding whitespace.
+	 *
+	 * @param string|null $value Validated field value.
+	 */
+	public static function trim_text( ?string $value ): ?string {
+		return null === $value ? null : trim( $value );
 	}
 
 	/**
@@ -223,15 +265,15 @@ final class GQ_Support_REST {
 	 * @return true|WP_Error
 	 */
 	private static function validate_create( WP_REST_Request $request ) {
-		if ( strlen( $request->get_body() ) > 32768 ) {
+		if ( strlen( $request->get_body() ) > GQ_Support_Limits::BODY_BYTES ) {
 			return self::error( 'gq_support_payload_too_large', 413 );
 		}
 		$body = json_decode( (string) $request->get_body(), true );
 		if ( ! is_array( $body ) || array_diff( array_keys( $body ), array( 'submission_id', 'summary', 'description' ) )
 			|| ! isset( $body['submission_id'], $body['description'] ) || ! is_string( $body['submission_id'] )
 			|| ! preg_match( '/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i', $body['submission_id'] )
-			|| ! is_string( $body['description'] ) || '' === trim( $body['description'] ) || mb_strlen( trim( $body['description'] ) ) > 10000
-			|| ( isset( $body['summary'] ) && ( ! is_string( $body['summary'] ) || '' === trim( $body['summary'] ) || mb_strlen( trim( $body['summary'] ) ) > 120 || preg_match( '/[\r\n]/', trim( $body['summary'] ) ) ) ) ) {
+			|| ! is_string( $body['description'] ) || '' === trim( $body['description'] ) || mb_strlen( trim( $body['description'] ) ) > GQ_Support_Limits::DESCRIPTION_CHARACTERS
+			|| ( array_key_exists( 'summary', $body ) && ( ! is_string( $body['summary'] ) || '' === trim( $body['summary'] ) || mb_strlen( trim( $body['summary'] ) ) > GQ_Support_Limits::SUMMARY_CHARACTERS || preg_match( '/[\r\n]/', trim( $body['summary'] ) ) ) ) ) {
 			return self::error( 'gq_support_invalid_request', 400 );
 		}
 		return true;

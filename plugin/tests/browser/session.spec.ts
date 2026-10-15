@@ -16,6 +16,7 @@ for (const change of ['different account', 'new login session', 'revoked grant']
     await page.locator('#user_login').fill('admin');
     await page.locator('#user_pass').fill('launcher-test-password');
     await page.locator('#wp-submit').click();
+    await page.waitForURL(/wp-admin/);
     await page.goto(`${site}/wp-admin/`);
     await page.getByRole('button', { name: /^Support/ }).click();
     const description = page.getByRole('textbox', { name: 'Description' });
@@ -47,6 +48,7 @@ test('REST requires cookie plus nonce and sends private no-store errors', async 
   await page.locator('#user_login').fill('admin');
   await page.locator('#user_pass').fill('launcher-test-password');
   await page.locator('#wp-submit').click();
+  await page.waitForURL(/wp-admin/);
   await page.goto(`${site}/wp-admin/`);
   const binding = await page.evaluate(() => window.gqSupportLauncher);
   const refreshed = await page.request.get(`${binding.ajaxUrl}?action=gq_support_session&session=${binding.session}`);
