@@ -36,7 +36,9 @@ final class GQ_Support_Plugin {
 	public static function boot(): void {
 		add_action( 'init', array( __CLASS__, 'load_textdomain' ) );
 		add_action( 'admin_init', array( __CLASS__, 'maybe_initialize_admin' ) );
-		add_action( 'rest_api_init', array( GQ_Support_Lifecycle::class, 'ensure_site' ) );
+		add_action( 'rest_api_init', array( __CLASS__, 'register_rest' ) );
+		add_action( 'wp_ajax_gq_support_session', array( __CLASS__, 'check_session' ) );
+		add_action( 'wp_ajax_nopriv_gq_support_session', array( __CLASS__, 'check_session' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_launcher' ) );
 		add_action( 'admin_footer', array( __CLASS__, 'render_launcher' ) );
 		add_action( 'admin_print_footer_scripts', array( __CLASS__, 'render_deferred_assets' ), 20 );
@@ -51,6 +53,35 @@ final class GQ_Support_Plugin {
 			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-cli.php';
 			WP_CLI::add_command( 'gq-support', GQ_Support_CLI::class );
 		}
+	}
+
+	/** Load support controllers only when WordPress initializes REST. */
+	public static function register_rest(): void {
+		GQ_Support_Lifecycle::ensure_site();
+		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-rest.php';
+		GQ_Support_REST::register();
+	}
+
+	/**
+	 * Refresh a nonce only for the exact session that opened this tab.
+	 * This read-only AJAX operation also works when a REST nonce has expired.
+	 */
+	public static function check_session(): void {
+		nocache_headers();
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The session binding authorizes only a same-session nonce refresh; no mutation.
+		$expected = isset( $_GET['session'] ) && is_string( $_GET['session'] ) ? sanitize_text_field( wp_unslash( $_GET['session'] ) ) : '';
+		if ( ! is_user_logged_in() || get_current_user_id() !== wp_validate_auth_cookie( '', 'logged_in' ) || '' === wp_get_session_token() || ! hash_equals( GQ_Support_Access::session(), $expected ) ) {
+			wp_send_json( array( 'state' => 'changed' ) );
+		}
+		if ( ! GQ_Support_Access::can( 'gq_support_submit_requests' ) ) {
+			wp_send_json( array( 'state' => 'forbidden' ) );
+		}
+		wp_send_json(
+			array(
+				'state' => 'current',
+				'nonce' => wp_create_nonce( 'wp_rest' ),
+			)
+		);
 	}
 
 	/**
@@ -79,7 +110,7 @@ final class GQ_Support_Plugin {
 	 * Only an Enrollment exchange with the service connects a site.
 	 */
 	private static function eligible(): bool {
-		if ( ! is_admin() || is_network_admin() || is_user_admin() || wp_doing_ajax() || ! is_user_logged_in() || ! current_user_can( 'gq_support_submit_requests' ) ) {
+		if ( ! is_admin() || is_network_admin() || is_user_admin() || wp_doing_ajax() || ! is_user_logged_in() || ! GQ_Support_Access::can( 'gq_support_submit_requests' ) ) {
 			return false;
 		}
 
@@ -109,6 +140,8 @@ final class GQ_Support_Plugin {
 		wp_enqueue_style( 'gq-support-launcher', GQ_SUPPORT_PLUGIN_URL . 'assets/launcher.css', array(), GQ_SUPPORT_VERSION );
 		wp_enqueue_script( 'gq-support-launcher', GQ_SUPPORT_PLUGIN_URL . 'assets/launcher.js', array(), GQ_SUPPORT_VERSION, true );
 		$bootstrap = array(
+			'session' => GQ_Support_Access::session(),
+			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'loading' => __( 'Loading support…', 'gq-support' ),
 			'error'   => __( 'Support could not load. Press to retry.', 'gq-support' ),
 		);

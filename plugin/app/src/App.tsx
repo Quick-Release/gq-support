@@ -2,6 +2,7 @@
 /** @jsx createElement */
 import { createElement, useEffect, useRef, useState } from "@wordpress/element";
 import { __ } from "@wordpress/i18n";
+import { useSession } from "./useSession";
 import { speak } from "@wordpress/a11y";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 
@@ -18,6 +19,7 @@ type Props = {
 
 export function App({ registerToggle, onVisibilityChange }: Props) {
   const [visible, setVisible] = useState(true);
+  const session = useSession(visible);
   const [tab, setTab] = useState<"new" | "requests">("new");
   const [description, setDescription] = useState("");
   const [summary, setSummary] = useState("");
@@ -26,6 +28,10 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   const panel = useRef<HTMLElement>(null);
   const hasDraft = Boolean(description.trim() || summary.trim());
 
+  useEffect(() => {
+    if (session.changed) { setDescription(""); setSummary(""); setError(""); }
+  }, [session.changed]);
+  useEffect(() => onVisibilityChange(visible, hasDraft), [hasDraft]);
   const open = () => { setTab("new"); setVisible(true); };
   const close = () => setVisible(false);
   useEffect(() => registerToggle(visible ? close : open));
@@ -49,8 +55,9 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     setTab(next);
     document.getElementById(`gq-support-${next}-tab`)?.focus();
   };
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!await session.check()) return;
     const message = !description.trim()
       ? __("Enter a description.", textDomain)
       : description.length > maxDescriptionLength || summary.length > maxSummaryLength
@@ -76,7 +83,9 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
           <label htmlFor="gq-support-description" className="gq-support-label">{__("Description", textDomain)}</label>
           <textarea id="gq-support-description" className="gq-support-field gq-support-description" ref={field} required placeholder={__("What happened, and what did you expect?", textDomain)} value={description} onChange={(event) => { setDescription(event.target.value); setError(""); }} />
           {error && <p className="gq-support-error" role="alert">{error}</p>}
-          <button type="submit" className="gq-support-submit">{__("Send report", textDomain)}</button>
+          {session.paused && <p className="gq-support-error" role="alert">{session.message}</p>}
+          {session.paused && hasDraft && <button type="button" onClick={() => { void navigator.clipboard.writeText([summary, description].filter(Boolean).join("\n\n")); }}>{__("Copy draft", textDomain)}</button>}
+          <button type="submit" disabled={session.paused} className="gq-support-submit">{__("Send report", textDomain)}</button>
         </form>
       </div>
       <div id="gq-support-requests" role="tabpanel" aria-labelledby="gq-support-requests-tab" hidden={tab !== "requests"}>

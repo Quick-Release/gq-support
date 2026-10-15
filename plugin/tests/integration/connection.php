@@ -386,7 +386,15 @@ switch ( $gq_support_scenario ) {
 			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress uninstall guard.
 			define( 'WP_UNINSTALL_PLUGIN', 'gq-support/gq-support.php' );
 		}
+		global $wpdb;
+		$gq_support_subject_key = $wpdb->get_blog_prefix() . 'gq_support_reporter_uninstall-test';
+		update_user_meta( 1, $gq_support_subject_key, 'owned-subject' );
+		update_user_meta( 1, 'gq_support_independent_meta', 'keep' );
 		require dirname( __DIR__, 2 ) . '/uninstall.php';
+		if ( '' !== get_user_meta( 1, $gq_support_subject_key, true ) || 'keep' !== get_user_meta( 1, 'gq_support_independent_meta', true ) ) {
+			$gq_support_fail( 'Uninstall did not remove exactly this site\'s Reporter mappings.' );
+		}
+		delete_user_meta( 1, 'gq_support_independent_meta' );
 		if ( false !== get_option( 'gq_support_state' ) || false !== get_option( 'gq_support_signing_key' ) ) {
 			$gq_support_fail( 'Uninstall kept plugin options.' );
 		}

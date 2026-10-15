@@ -49,6 +49,7 @@ wp eval-file plugin/tests/integration/lifecycle.php active
 for scenario in state no-remote-calls legacy-upgrade enroll interrupted-setup test-connection disconnect clone no-key-exposure constants; do
   wp eval-file plugin/tests/integration/connection.php "$scenario"
 done
+wp eval-file plugin/tests/integration/access.php
 # Verify actual public and admin HTTP responses, not hook registrations.
 page_id=$(wp post create --post_type=page --post_title='Lifecycle page' --post_status=publish --post_content='Lifecycle body' --porcelain)
 page_url=$(wp post url "$page_id")

@@ -32,6 +32,7 @@ require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-signer.php';
 require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-service-client.php';
 require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-connection.php';
 require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-lifecycle.php';
+require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-access.php';
 require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-plugin.php';
 
 register_activation_hook( __FILE__, array( GQ_Support_Lifecycle::class, 'activate' ) );

@@ -11,6 +11,7 @@ wp plugin activate gq-design --network
 wp plugin activate gq-support --network
 wp eval-file plugin/tests/integration/lifecycle.php active
 wp eval-file plugin/tests/integration/lifecycle.php network
+wp eval-file plugin/tests/integration/access.php
 # Each site enrolls separately with its own installation ID and key; --url picks the site.
 subsite_id=$(wp site create --slug=gq-support-connect --porcelain)
 subsite_url=$(wp site list --site__in="$subsite_id" --field=url)
