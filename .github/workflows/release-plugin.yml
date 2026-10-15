@@ -71,6 +71,8 @@ jobs:
     name: Publish Composer package
     needs: performance-gates
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      tag: v${{ steps.version.outputs.version }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -145,3 +147,15 @@ jobs:
           git -C "$package_repo" remote add origin "https://x-access-token:$GH_TOKEN@github.com/$REPOSITORY.git"
           git -C "$package_repo" push --force origin HEAD:refs/heads/composer
           git -C "$package_repo" push origin "v$VERSION"
+
+  dispatch-registry:
+    name: Rebuild Composer registry after release
+    needs: publish
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    permissions: {}
+    # Tags pushed by publish's GITHUB_TOKEN do not trigger push workflows.
+    uses: ./.github/workflows/dispatch-registry.yml
+    with:
+      ref: ${{ needs.publish.outputs.tag }}
+    secrets:
+      REGISTRY_DISPATCH_TOKEN: ${{ secrets.REGISTRY_DISPATCH_TOKEN }}
