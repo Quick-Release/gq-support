@@ -36,7 +36,7 @@ beforeAll(async () => {
 });
 afterAll(() => stage.dispose());
 beforeEach(async () => {
-  await db.batch(["intake_debit", "delivery_intent", "support_request", "replay", "enrollment_rate", "enrollment_code", "installation_key"]
+  await db.batch(["request_rate", "intake_debit", "delivery_intent", "support_request", "replay", "enrollment_rate", "enrollment_code", "installation_key"]
     .map((table) => db.prepare(`DELETE FROM ${table}`)));
   production = await clients.enroll("acme-shop/production", "installation-a");
   staging = await clients.enroll("acme-shop/staging", "installation-b");
@@ -390,5 +390,86 @@ describe("intake quotas", () => {
     const unknown = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body2, production.keyId, "installation-a"), unresolved, mappings);
     expect(unknown.status).toBe(504);
     expect(await unknown.json()).toEqual({ code: "gq_support_outcome_unknown" });
+  });
+});
+
+describe("request budget", () => {
+  // Every list, read and create spends from it, so same-key lookups stay bounded.
+  const T0 = Date.UTC(2026, 9, 16, 12, 5);
+  const windowStart = Date.UTC(2026, 9, 16, 12);
+  const spent = (subject: string, requests: number, slot = "acme-shop/production") =>
+    db.prepare("INSERT INTO request_rate (slot, subject, window_start, requests) VALUES (?, ?, ?, ?)")
+      .bind(slot, subject, windowStart, requests).run();
+
+  it("allows 120 requests per Reporter in a ten-minute window, then 429 until it ends", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: T0 });
+    await spent(REPORTER_1, 119);
+    expect((await list(production)).status).toBe(200);
+    const limited = await list(production);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBe("300");
+    expect(await limited.json()).toEqual({ code: "gq_support_rate_limited" });
+    expect((await read(production, "req_00000000000000000000000000")).status).toBe(429);
+    expect((await list(production, REPORTER_2)).status).toBe(200);
+    vi.setSystemTime(windowStart + 600_000);
+    expect((await list(production)).status).toBe(200);
+  });
+
+  it("counts same-key create replays and rejects new creates over budget without accepting them", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: T0 });
+    expect((await submit(production)).status).toBe(202);
+    await db.prepare("UPDATE request_rate SET requests = 120 WHERE subject = ?").bind(REPORTER_1).run();
+    expect((await submit(production)).status).toBe(429);
+    expect((await submit(production, { submission_id: submissionId(3) })).status).toBe(429);
+    expect(await rows("support_request")).toBe(1);
+    expect(await rows("intake_debit")).toBe(2);
+  });
+
+  it("allows 600 requests per Slot across Reporters, without affecting other Slots", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: T0 });
+    await spent("", 599);
+    expect((await list(production, REPORTER_2, "site")).status).toBe(200);
+    expect((await list(production)).status).toBe(429);
+    expect((await list(staging)).status).toBe(200);
+  });
+
+  it("keeps serving reads when the request counter is unavailable", async () => {
+    const failing = {
+      prepare: (sql: string) => {
+        if (sql.includes("request_rate")) throw new Error("counter unavailable");
+        return db.prepare(sql);
+      },
+      batch: db.batch.bind(db),
+    };
+    const path = `/v1/requests?${query({ reporter_subject: REPORTER_1, scope: "mine", per_page: "20" })}`;
+    const response = await handleRequest(await signed(production.pair, "GET", path, "", production.keyId, "installation-a"), failing, mappings);
+    expect(response.status).toBe(200);
+  });
+});
+
+describe("key rotation races", () => {
+  it("accepts in-flight creates with the old key either fully or not at all, and the new key sees every accepted one", async () => {
+    const creates = Array.from({ length: 12 }, (_, n) =>
+      submit(production, { submission_id: submissionId(n), description: `Report ${n}` }, `00000000-0000-4000-8000-00000000000${n % 4}`));
+    const [rotated, ...results] = await Promise.all([clients.enroll("acme-shop/production", "installation-a"), ...creates]);
+    const statuses = results.map((response) => response.status);
+    expect(statuses.filter((status) => status !== 202 && status !== 403)).toEqual([]);
+    const accepted = statuses.filter((status) => status === 202).length;
+    expect(await rows("support_request")).toBe(accepted);
+    expect(await rows("delivery_intent")).toBe(accepted);
+    expect(await ids(await list(rotated, REPORTER_1, "site", { per_page: "50" }))).toHaveLength(accepted);
+    expect((await list(production)).status).toBe(403);
+  });
+
+  it("leaves exactly one active key when two enrollments into one Slot race", async () => {
+    const [a, b] = await Promise.all([
+      clients.enroll("acme-shop/production", "installation-a"),
+      clients.enroll("acme-shop/production", "installation-a"),
+    ]);
+    const active = await db.prepare("SELECT key_id FROM installation_key WHERE slot = 'acme-shop/production' AND revoked_at IS NULL").all<{ key_id: string }>();
+    expect(active.results).toHaveLength(1);
+    const winner = active.results[0]!.key_id === a.keyId ? a : b;
+    const loser = winner === a ? b : a;
+    expect([(await list(winner)).status, (await list(loser)).status, (await list(production)).status]).toEqual([200, 403, 403]);
   });
 });

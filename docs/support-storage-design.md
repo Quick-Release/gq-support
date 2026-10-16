@@ -70,7 +70,7 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 ### Delivery extensions decided after the initial schema
 
-[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`); the others are not yet provided. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
+[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`) and `0004` the per-call request budget (`request_rate`); the others are not yet provided. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
 
 ### `repository_state`: rebuildable
 

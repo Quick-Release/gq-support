@@ -28,8 +28,12 @@ const TEN_MINUTES = 600_000;
 const DAY = 86_400_000;
 export const REPORTER_QUOTAS: readonly Quota[] = [{ windowMs: TEN_MINUTES, limit: 5 }, { windowMs: DAY, limit: 20 }];
 export const SLOT_QUOTAS: readonly Quota[] = [{ windowMs: TEN_MINUTES, limit: 20 }, { windowMs: DAY, limit: 100 }];
-/** The intake debit subject for the Slot's own budget, as opposed to a Reporter's. */
+/** The subject of the Slot's own budget, as opposed to a Reporter's. */
 const SLOT_BUDGET = "";
+// Fixed ten-minute budgets for every call, so same-key lookups and reads stay
+// bounded. Chosen for #32, not by a design decision: revisit after load testing.
+export const REPORTER_REQUESTS = 120;
+export const SLOT_REQUESTS = 600;
 
 const UUID4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -155,6 +159,8 @@ const quotaWait = async (storage: SlotStorage, subject: string, now: number): Pr
 const create = async (storage: SlotStorage, caller: Caller, body: string, now: number): Promise<Response> => {
   const input = parseCreate(body);
   if (!input) return invalid();
+  const limited = await throttle(storage, input.reporter_subject, now);
+  if (limited) return limited;
   const digest = await sha256(JSON.stringify([input.summary, input.description]));
   const replay = (row: Row) => row.body_digest === digest ? known(row, caller) : error("gq_support_idempotency_conflict", 409);
   const id = `req_${ulid(now)}`;
@@ -192,6 +198,32 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
   return json(resource(accepted, caller), 202);
 };
 
+/**
+ * Spend one request from the Reporter's and the Slot's budgets: a 429 once
+ * either is used up. A counter outage lets the call through: reads are safe,
+ * and creates still fail closed on their own intake quota.
+ */
+const throttle = async (storage: SlotStorage, subject: string, now: number): Promise<Response | null> => {
+  const windowStart = Math.floor(now / TEN_MINUTES) * TEN_MINUTES;
+  const spend = (key: string) => storage.statement(`INSERT INTO request_rate (slot, subject, window_start, requests)
+    VALUES (?1, ?2, ?3, 1) ON CONFLICT (slot, subject) DO UPDATE SET
+      requests = CASE WHEN window_start < excluded.window_start THEN 1 ELSE requests + 1 END,
+      window_start = excluded.window_start RETURNING requests`, key, windowStart);
+  let results;
+  try {
+    results = await storage.batch([
+      spend(subject), spend(SLOT_BUDGET),
+      storage.statement("DELETE FROM request_rate WHERE slot = ?1 AND window_start < ?2", windowStart),
+    ]);
+  } catch {
+    return null;
+  }
+  const [reporter, slot] = results.map((result) => (result.results[0] as { requests: number } | undefined)?.requests ?? 0);
+  return (reporter ?? 0) > REPORTER_REQUESTS || (slot ?? 0) > SLOT_REQUESTS
+    ? error("gq_support_rate_limited", 429, { "Retry-After": String(Math.ceil((windowStart + TEN_MINUTES - now) / 1000)) })
+    : null;
+};
+
 /** Exactly the allowed query keys, each at most once, including every required one. */
 const queryOf = (url: URL, allowed: readonly string[], required: readonly string[]): Map<string, string> | null => {
   const params = new Map<string, string>();
@@ -220,7 +252,7 @@ const decodeCursor = (cursor: string): [number, string] | null => {
   }
 };
 
-const list = async (storage: SlotStorage, caller: Caller, url: URL): Promise<Response> => {
+const list = async (storage: SlotStorage, caller: Caller, url: URL, now: number): Promise<Response> => {
   const params = queryOf(url, ["reporter_subject", "scope", "per_page", "cursor"], ["reporter_subject", "scope"]);
   const scope = params && attested(params);
   if (!params || !scope) return invalid();
@@ -230,6 +262,8 @@ const list = async (storage: SlotStorage, caller: Caller, url: URL): Promise<Res
   const before = cursor === undefined ? [Number.MAX_SAFE_INTEGER, ""] as const
     : cursor.length <= CURSOR_CHARACTERS ? decodeCursor(cursor) : null;
   if (!before) return invalid();
+  const limited = await throttle(storage, scope.subject, now);
+  if (limited) return limited;
   const page = `AND r.superseded_at IS NULL AND (r.created_at, r.id) < (?2, ?3)`;
   const rows = scope.site
     ? await storage.all<Row>(`${COLUMNS} ${page} ORDER BY r.created_at DESC, r.id DESC LIMIT ?4`, ...before, Number(perPage) + 1)
@@ -242,10 +276,12 @@ const list = async (storage: SlotStorage, caller: Caller, url: URL): Promise<Res
   }, 200);
 };
 
-const read = async (storage: SlotStorage, caller: Caller, url: URL, id: string): Promise<Response> => {
+const read = async (storage: SlotStorage, caller: Caller, url: URL, id: string, now: number): Promise<Response> => {
   const params = queryOf(url, ["reporter_subject", "scope"], ["reporter_subject", "scope"]);
   const scope = params && attested(params);
   if (!scope) return invalid();
+  const limited = await throttle(storage, scope.subject, now);
+  if (limited) return limited;
   if (!new RegExp(`^${SUPPORT_REQUEST_ID}$`).test(id)) return notFound();
   const row = await storage.first<Row>(`${COLUMNS} AND r.id = ?2`, id);
   // Unknown and out-of-scope requests look the same.
@@ -259,5 +295,5 @@ export const handleSupportRequests = (request: Request, url: URL, body: string, 
   if (request.method === "POST") return url.search ? Promise.resolve(invalid()) : create(storage, caller, body, now);
   if (body !== "") return Promise.resolve(invalid());
   const id = /^\/v1\/requests\/([^/]+)$/.exec(url.pathname)?.[1];
-  return id === undefined ? list(storage, caller, url) : read(storage, caller, url, id);
+  return id === undefined ? list(storage, caller, url, now) : read(storage, caller, url, id, now);
 };

@@ -96,7 +96,8 @@ ledger alone is not evidence that a restored database is safe to serve traffic.
   the existing request (`201` once delivered) without a debit; another body is
   409. Quotas, scope and failure codes are listed in the
   [security design](../docs/support-security-design.md#implemented-installation-authentication-32).
-  Delivery to GitHub is not implemented yet: intents stay `pending`.
+  Every call also spends a request budget (120 per Reporter and 600 per Slot per
+  ten minutes). Delivery to GitHub is not implemented yet: intents stay `pending`.
 - TLS is required. Unknown, expired and conflicting codes return the same 400
   error; rate limits return 429. Internal failures return generic 503 errors.
   Responses use `Cache-Control: no-store`; errors and request bodies are not logged.
@@ -117,6 +118,7 @@ pnpm exec alchemy deploy --help
 pnpm typecheck
 pnpm exec vitest run test/enrollment.test.ts
 pnpm test
+pnpm load-test   # about 90 s; LOAD_SLOTS / LOAD_REPORTERS / LOAD_CONCURRENCY scale it
 ```
 
 Tests exercise the HTTP handler and operator command interface against workerd
