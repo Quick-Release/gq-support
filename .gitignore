@@ -17,3 +17,6 @@ test-results/
 __pycache__/
 *.pyc
 package-dist/
+
+/worker/revocations.lock
+/worker/revocations.json.tmp
