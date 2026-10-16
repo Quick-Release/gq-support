@@ -4,7 +4,7 @@ Tags: support, issue-tracking, bug-report
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.1.7
+Stable tag: 0.1.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,9 @@ Adds an in-dashboard support widget for authenticated users to submit reports an
 This plugin is under active development. Authorized Reporters on a connected installation see a Support launcher on supported admin screens; sending reports is not available yet.
 
 == Changelog ==
+
+= 0.1.8 =
+* Update the support service to Alchemy beta.83 and Effect 4.0.5, including HTTP API compatibility fixes.
 
 = 0.1.7 =
 * Fix release checks with WooCommerce's first-request initialization.
