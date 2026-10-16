@@ -6,6 +6,29 @@ Client, WordPress project, authoritative environment, numeric GitHub repository
 ID and default Developer. Deploy mapping changes through Alchemy. Removing an
 entry denies its keys after deployment; request payloads cannot override it.
 
+## Cloudflare credentials
+
+Use the Tipme account recorded in `AGENTS.md`. The account-owned API token
+`GETQUICK Support Alchemy` grants Workers Scripts Write, D1 Write, and Secrets
+Store Write within that account. It has no token-management grant and expires
+on January 14, 2027. Its token ID is `48f5559e9daad1e3e324771d3708468f`.
+
+The credential is stored at `https://secrets.getquick.io` in the **GQ Support**
+project (`01M52TXAYNKP6QGHR8PZYYDEY6`), environment `dev`, as
+`CLOUDFLARE_API_TOKEN`; `CLOUDFLARE_ACCOUNT_ID` is stored alongside it.
+The `preview` and `prod` Sigillo environments are empty.
+
+The current workstation has an Alchemy profile named `gq-support` configured
+with this token. Select it with `--profile gq-support`; choose the deployment
+stage explicitly when a deployment is authorized. This machine-local profile
+is not included in a checkout. On another workstation, inject the credential
+from Sigillo and configure the profile with Alchemy's `--set apiToken=env:CLOUDFLARE_API_TOKEN`
+input. Keep values out of command arguments and logs.
+
+The token manager remains in EKIS's Sigillo `ops` environment as
+`CLOUDFLARE_TOKEN_MANAGER_API_TOKEN`. Use it only to mint or rotate the Support
+credential; application and deployment processes receive the child token.
+
 ## Operator commands
 
 Use the database ID from the intended Alchemy stage's outputs and the GETQUICK
