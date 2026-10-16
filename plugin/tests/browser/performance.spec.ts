@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 // Deterministic counter gate (docs/research/idle-performance-budgets.md, B1, B4, B11, B12).
@@ -71,8 +71,18 @@ async function publicCost(page: Page, violation?: string) {
     expect(counters, 'the probe reported no counters').not.toBeNull();
     return { html: await response.text(), counters };
   };
+  // Finish third-party first-request setup (WooCommerce's Jetpack cron registration)
+  // with Support disabled. The comparison still measures Support's first enabled request.
+  await fetchPage('gq_off=1');
   const off = await fetchPage('gq_off=1');
   const on = await fetchPage(violationParam(violation));
+  if (!violation && on.html !== off.html) {
+    for (const [name, html] of [['public-off.html', off.html], ['public-on.html', on.html]]) {
+      const path = test.info().outputPath(name);
+      writeFileSync(path, html);
+      await test.info().attach(name, { path, contentType: 'text/html' });
+    }
+  }
   return { htmlDiffers: on.html !== off.html, ...on.counters };
 }
 
@@ -158,6 +168,8 @@ for (const woo of wooInstalled ? [false, true] : [false]) {
     test.beforeAll(() => { if (wooInstalled) wp(['plugin', woo ? 'activate' : 'deactivate', 'woocommerce']); });
 
     test('B1: a public request costs the plugin no bytes, SQL, HTTP or cron', async ({ page }) => {
+      // Reproduce the release fixture's cold Jetpack state without booting WooCommerce in CLI.
+      if (woo) wp(['cron', 'event', 'delete', 'jetpack_clean_nonces', '--skip-plugins=woocommerce']);
       expect(await publicCost(page)).toEqual({ htmlDiffers: false, sql: 0, http: 0, cron: 0 });
       expect((await publicCost(page, 'bytes')).htmlDiffers, 'negative control: bytes').toBe(true);
       for (const counter of ['sql', 'http', 'cron']) {

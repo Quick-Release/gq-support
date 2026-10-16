@@ -60,6 +60,14 @@ jobs:
           ddev wp --path=.test-site plugin install woocommerce
           pnpm exec playwright test --config plugin/tests/browser/playwright.config.ts performance.spec.ts
 
+      - name: Keep failed browser test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-browser-test-results
+          path: test-results/
+          if-no-files-found: ignore
+
       - name: Keep the tested package
         uses: actions/upload-artifact@v4
         with:
