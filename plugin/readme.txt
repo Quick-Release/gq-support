@@ -4,7 +4,7 @@ Tags: support, issue-tracking, bug-report
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.1.5
+Stable tag: 0.1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,10 @@ Adds an in-dashboard support widget for authenticated users to submit reports an
 This plugin is under active development. Authorized Reporters on a connected installation see a Support launcher on supported admin screens; sending reports is not available yet.
 
 == Changelog ==
+
+= 0.1.6 =
+* Add capability checks and Reporter-scoped support REST routes.
+* Add report submission and retry reconciliation, with draft recovery when the session expires.
 
 = 0.1.5 =
 * Update dependency documentation and Playground fixtures to use gq-design.
