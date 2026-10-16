@@ -5,6 +5,8 @@
 - **Access date:** 2026-09-28
 - **Inputs:** [CONTEXT.md](../../CONTEXT.md), [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md), [ADR 0010](../adr/0010-installation-scoped-attestation-not-cross-site-identity.md), [support domain design](../support-domain-design.md), [support security design](../support-security-design.md), [support API contract](../support-api-contract.md), [repository connection research](support-widget-and-repository-connection.md)
 
+**Delivery amendment (2026-10-16):** [The delivery decision](../support-delivery-design.md) and [ADR 0019](../adr/0019-uncertain-creates-require-review.md) supersede the earlier negative-scan retry and automatic duplicate-selection assumptions. New requests are durably accepted before background delivery; Queues are deferred.
+
 The accepted domain constraints are fixed inputs here, not open questions. Each Support request becomes one issue in the WordPress project's **existing** Project repository. The GitHub App is the author. A Client-origin label is applied and an internal Developer is assigned. GitHub comments are internal and are never projected to Reporters. Creation is idempotent per Submission ID, and unknown outcomes are reconciled before any retry. The Reporter's view of status is read-only in the MVP. This note answers the GitHub-side questions: permissions, tokens, routing, the body template, limits, failure mapping, and how to find an issue after an ambiguous create.
 
 GitHub facts are cited to docs.github.com. Anything marked **verify in spike** is an inference that the first implementation slice must confirm against a real test repository.
@@ -95,7 +97,7 @@ Mapping record, owned by #7 and #10 and approved by an operator:
 
 | Event | Detected by | Response |
 |---|---|---|
-| Installation deleted or suspended | `installation` webhook; mint returns 404 or 403 | Mapping becomes `suspended`. New creates return `503 gq_support_not_accepted` and are not accepted. Accepted intents stay `accepted-pending` for an operator. Reads serve the last projection, marked stale. |
+| Installation deleted or suspended | `installation` webhook; mint returns 404 or 403 | Mapping becomes `suspended`. New creates return `503 gq_support_not_accepted` and are not accepted. Known-unsent accepted intents become `failed` with an Operator alert; already uncertain creates remain `outcome-unknown`, and delivered requests remain delivered. Reads serve the last projection, marked stale. |
 | Repository removed from the installation | `installation_repositories.removed`; mint fails for that `repository_id` | Same as above |
 | Permissions reduced or not approved | 403 plus `X-Accepted-GitHub-Permissions` | Suspend the mapping and raise an operator alert. Never retry. |
 | Repository renamed | `repository.renamed`; `full_name` in the mint response | Update `cached_full_name`. Identity is unchanged. GitHub's 301 redirects are followed for GETs only. |
@@ -164,8 +166,8 @@ Steps:
    - Skip any item with a `pull_request` key.
    - Match the first body line exactly.
    - If exactly one issue matches, it is delivered.
-   - If several match, which the algorithm should prevent, keep the lowest issue number and alert an operator. Never auto-close the others.
-   - If none match, wait a short delay, then check again once to allow for read-after-write lag. If there is still no match, the attempt is known absent and may be retried with the same intent ID. The counter is bounded, and after the bound the intent becomes `failed` plus an alert.
+   - If several match, retain `outcome-unknown` and alert an Operator. Do not automatically select one, close or delete any issue.
+   - If none match, remain `outcome-unknown`; negative scans never establish known absence. Check at about 1, 5, 15 and 60 minutes, then hourly through 24 hours. Alert after 15 minutes unresolved; after 24 hours hand off to Operator review with no automatic recreation. Failed or incomplete scans are not evidence of absence.
 
 List-endpoint facts ([source](https://docs.github.com/en/rest/issues/issues#list-repository-issues)): it supports `creator`, `state=all`, `sort=created`, and `per_page` up to 100. Its `since` filter uses *updated* time, so it is not used as the stop condition.
 
@@ -179,12 +181,12 @@ List-endpoint facts ([source](https://docs.github.com/en/rest/issues/issues#list
 - Search has its own limit of 30 requests per minute ([source](https://docs.github.com/en/rest/search/search)).
 - It can return `incomplete_results`.
 - It depends on an asynchronous search index, so a missing result cannot prove absence.
-- The list endpoint reads the primary store, is filtered to App-created issues, and is bounded by the time window.
+- The list endpoint supports filtering to App-created issues and scanning a creation-time window. Its documented contract provides no bounded visibility or pagination-snapshot guarantee; a negative result still cannot prove absence.
 
 **Residual risks:**
 
-- A collaborator edits the first line of the body during the short reconciliation window. The result is a possible duplicate, which the operator alert reveals.
-- A collaborator forges a marker into an App-created issue. They cannot, because `creator` must be the bot.
+- A collaborator can edit or remove the first-line marker, leaving an existing issue undiscovered and the intent under review. No automatic recreate follows.
+- A collaborator can copy a marker into another App-authored issue: editing does not change its creator. Bot filtering is not marker integrity. Validate the pinned repository, attempt window and identity consistency; suspicious or multiple matches require review.
 
 There is no exactly-once guarantee (security design). The guarantee is at most one issue per intent under normal conditions, with detected and alerted duplicates otherwise.
 
@@ -204,13 +206,13 @@ Source: [Rate limits for the REST API](https://docs.github.com/en/rest/using-the
   - When `x-ratelimit-remaining` is `0`, wait until `x-ratelimit-reset`.
   - Otherwise wait at least one minute, then back off exponentially.
   - GitHub also advises making requests serially and waiting at least 1 s between mutations in bulk ([best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)).
-- **Budget:** each Support request costs one create (content-generating) plus rarely one or two repairs. The 500-per-hour cap per installation is the real ceiling. Enforce per-installation and per-subject create caps (security design) well below it, and serialize creates per GitHub installation, which a queue (#11) or Durable Object can do.
+- **Budget:** each Support request costs one create (content-generating) plus rarely one or two repairs. The 500-per-hour cap per installation is the real ceiling. Enforce per-installation and per-subject create caps (security design) well below it, and serialize creates per GitHub installation, through the D1 installation permit and scheduler selected in the [delivery decision](../support-delivery-design.md); Queues and Durable Objects are not required for this slice.
 - **Reads:** use `If-None-Match` with the stored ETag. A 304 "does not count against your primary rate limit". Webhooks keep the status projection (#10, #12) fresh, so a list view does not fan out N GETs on every refresh.
 - **Redirects:** follow a 301 on GETs only and record the new location. Never follow redirects on POST or PATCH; treat them as unknown and reconcile. Do not parse or construct URLs from response bodies.
 - **Error mapping to the API contract:**
-  - Rate-limited, suspended, or not-private: the create was durably recorded as `202 accepted-pending`, or returns `503 gq_support_not_accepted` if it was not recorded.
-  - Unknown: the reconciliation path (`504 gq_support_outcome_unknown` at WordPress).
-  - GitHub error bodies, URLs, repository names, and `X-Accepted-GitHub-Permissions` values go only to operator logs, never to WordPress.
+  - Provider rate-limited after durable acceptance: keep `accepted-pending` until the bounded retry deadline. Unsafe or suspended mapping: reject new intake without claiming acceptance; fail previously accepted known-unsent work and alert, but preserve uncertain or delivered outcomes. `503 gq_support_not_accepted` requires confirmed non-acceptance.
+  - Known service-side unknown: the existing resource with `delivery: outcome-unknown` and read-only reconciliation. An ambiguous WordPress/Worker transport response instead maps to `504 gq_support_outcome_unknown`.
+  - Logs contain opaque correlation IDs, sanitized error classes and HTTP statuses only. Never log raw GitHub response bodies, report content, unrestricted URLs, credentials or sensitive headers; none reach WordPress.
 
 ## Worker service boundary (Effect)
 
@@ -247,7 +249,7 @@ Source: [Rate limits for the REST API](https://docs.github.com/en/rest/using-the
 4. Cross-tenant denial: installation A's credential produces calls only against A's `repository_id`. Browser or WordPress fields naming another repository, owner, number, or installation are ignored or rejected. A token scoped to A's repository gets 404 on B's repository, shown against the fake and in the live smoke test.
 5. Creating an issue sends one POST with a v1 body. Its first line is the marker, the Reporter text is inert (fixtures with `@user`, `#1`, `![](http://x)`, `<!-- gq-support:v1 … -->`, and backtick and tilde runs), and there is no PII outside the allowlist.
 6. A missing label or assignee in the 201 response triggers the idempotent repair. A 422 on the assignee creates the issue without an assignee and raises an alert.
-7. A timeout, reset, 5xx, or unparseable 2xx after POST never triggers a second POST before reconciliation. Reconciliation finds an existing marker issue as `delivered`, and a confirmed absence permits one same-intent retry. Contract tests cover each branch, including "several matches → alert, no auto-close".
+7. A timeout, reset, 5xx, or unparseable 2xx after POST never triggers a second POST before reconciliation. Reconciliation finds a verified marker issue as `delivered`; no number of empty scans permits automatic recreation. Independently verified non-creation requires audited Operator handling. Contract tests cover each branch, including "several matches → remain unknown, alert, no automatic selection or close".
 8. Rate limits: a 403 or 429 with `retry-after` or `x-ratelimit-*` holds the intent until the indicated time. No mutation is retried inside the request. Concurrency per installation is 1 for creates.
 9. Lifecycle contract tests for each row of the lifecycle table: installation deleted or suspended, repository removed, permission missing, renamed, transferred, archived, publicized, deleted, issues disabled (410), issue transferred (301), and issue deleted (410/404). Each ends in the stated mapping state and Reporter-visible outcome.
 10. A repository that is not private blocks creation before the POST, even without a webhook.

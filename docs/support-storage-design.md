@@ -4,7 +4,7 @@ Decision record for [issue #10](https://github.com/Quick-Release/gq-support/issu
 
 ## Decision
 
-Use D1 for this state. There is no alternative store: KV and Durable Objects stay rejected (ADR 0013), and WordPress keeps no cache or copy of Support requests (API contract). Every query goes through `storageFor(slot)`. Mappings (Slot → Client, WordPress project, environment, repository ID, default Developer) are code, not rows.
+Use D1 for this state. There is no alternative store: KV and Durable Objects stay rejected (ADR 0013), and WordPress keeps no cache or copy of Support requests (API contract). Slot-owned request queries go through `storageFor(slot)`; narrow named queries handle cross-Slot scheduling and credentials as described below. Mappings (Slot → Client, WordPress project, environment, repository ID, default Developer) are code, not rows.
 
 ## Out of scope
 
@@ -66,7 +66,11 @@ Constraints and indexes:
 
 Index `due (next_attempt_at) WHERE state IN ('pending', 'outcome_unknown')` and `leases (lease_expires_at) WHERE state = 'in_flight'`.
 
-The API `delivery` field comes from the create intent: `pending` and `in_flight` → `accepted-pending`, and every other state maps to the value of the same name.
+The API `delivery` field comes from the create intent: `pending` and `in_flight` → `accepted-pending`, `outcome_unknown` → `outcome-unknown`, and `delivered`/`failed` keep their names.
+
+### Delivery extensions decided after the initial schema
+
+[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0001` does not yet provide these. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
 
 ### `repository_state`: rebuildable
 
@@ -82,7 +86,7 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 | Data | Source of truth | Sensitivity | Retention | Rebuildable |
 |---|---|---|---|---|
-| Submitted text, subject, Submission ID, digest | D1 (the Reporter's submission) | Client content, pseudonymous subject | 12 months after last close ([privacy design](support-privacy-design.md)); erasure goes through the suppression ledger (ADR 0016) | No |
+| Submitted text, subject, Submission ID, digest | D1 (the Reporter's submission) | Client content, pseudonymous subject | 12 months after last close if delivered; never-delivered text at most 12 months from acceptance ([privacy design](support-privacy-design.md)); erasure goes through the suppression ledger (ADR 0016) | No |
 | Repository and issue IDs | D1, set from the GitHub create response | Internal | With the request | Partly: marker reconciliation can find them again |
 | Status, ETag, observed time, tracking | GitHub | Low | With the request | Yes: sweep |
 | Delivery intent and bookkeeping | D1 | Internal | With the request | No |
@@ -94,7 +98,7 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 ## Operations
 
-**Accept** (one `batch()`): insert `support_request` and its create `delivery_intent` (`pending`). If `supersedes_id` is given, also set `superseded_at` on that request, but only where it has the same `slot` and `reporter_subject` and its create intent is `failed`. If the unique key conflicts, read the existing row: the same digest returns it with its current code, and a different digest returns 409. If the batch fails, the response is `503 gq_support_not_accepted`.
+**Accept** (one `batch()`): insert `support_request` and its create `delivery_intent` (`pending`), with the atomic quota debit from the [delivery decision](support-delivery-design.md). If `supersedes_id` is given, also set `superseded_at` on that request, but only where it has the same `slot` and `reporter_subject` and its create intent is `failed`. If the unique key conflicts, read the existing row: the same digest returns it with its current code, and a different digest returns 409. Confirmed rollback/non-acceptance returns `503 gq_support_not_accepted`. If the D1 commit outcome is itself ambiguous, do a same-key primary lookup; if still unresolved return `504 gq_support_outcome_unknown`, never claim known non-acceptance. The next same-key retry resolves it.
 
 **List** (`scope=mine`):
 
@@ -116,10 +120,10 @@ The query uses `list_mine` (an index search, not a scan), and rows read are abou
 
 ## Invariants for #11 and #12
 
-1. Acceptance is the single `batch()` above. A Queue message, if #11 adds Queues, is only a wake-up and never the only record.
-2. Before any POST, an attempt moves the intent from `pending` to `in_flight` with a conditional update (`WHERE state = 'pending'`), which acts as the lease. Only the process that wins the update may POST.
-3. A lease that expires while `in_flight` becomes `outcome_unknown`. `outcome_unknown` is reconciled by its marker, never re-POSTed blindly.
-4. Only one create per Slot is `in_flight` at a time (GitHub research).
+1. Acceptance is the single `batch()` above and returns `202`. Prompt background work and a minute sweep read the D1 outbox; Queues are deferred. Any future queue is only a wake-up, never the only record.
+2. Before any POST, atomically claim the intent and GitHub App installation permit with an owner/generation. Record `in_flight` before dispatch; only the current owner may authorize a POST or update the outcome. Test all dependent writes for ownership, expiry and suppression.
+3. A lease that expires while `in_flight` becomes `outcome_unknown`. Reconcile read-only by marker; no negative scan count proves absence or permits automatic recreation. Reject stale writes and drain the old execution before reusing its installation permit.
+4. Serialize service-authorized create dispatch per **GitHub App installation**, across all its Slots. A drained uncertain attempt stays unknown but does not indefinitely block unrelated requests. This does not fence an already-running GitHub server-side operation.
 5. Webhook handling is fetch-and-overwrite, so duplicate and out-of-order deliveries do no harm. Correctness never depends on a webhook arriving.
 6. Sweeps and fetches use the repository pinned on the row, never the current mapping.
 7. After a restore (ADR 0016), every intent that is not `delivered` becomes `outcome_unknown`, and the revocation and erasure log is replayed before the Worker serves traffic.

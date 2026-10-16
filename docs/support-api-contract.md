@@ -74,7 +74,7 @@ The Submission ID is a reference, not authority. The Worker scopes it to (instal
 
 | Outcome | Response | Reporter sees (see domain design) |
 |---|---|---|
-| GitHub issue created synchronously | `201` + `Location`, `delivery: delivered` | "Open" |
+| Same-key replay of an already delivered request | `201` + `Location`, `delivery: delivered` | "Open" |
 | Intent durably recorded, not yet delivered | `202`, `delivery: accepted-pending` | "Received" |
 | Repeat of a known Submission ID with the same body | The existing resource with its current code (`201`/`202`), and no second issue | per `delivery` |
 | Same Submission ID, different body | `409 gq_support_idempotency_conflict` | "Not sent", and the draft gets a new key |
@@ -86,7 +86,7 @@ Rules:
 
 - Success is never inferred from `blocking => false`, from a transport return without a parseable body, or from a 2xx without a valid resource.
 - **Re-POSTing with the same Submission ID is the reconciliation path.** The Worker either finds the existing intent or creates it exactly once. "Checking…" retries the same key automatically, at most 3 times with backoff and only while the panel is open, and then offers a "Check again" button. It never sends the report as a new issue (ADR 0003, ADR 0006).
-- `201` versus `202` is left open for #11 to decide between synchronous and durable delivery. The browser handles both.
+- [The delivery decision](support-delivery-design.md) selects durable intake: new requests return `202` immediately after the atomic D1 acceptance. Delivery happens in background; a same-key replay returns `201` if already delivered and `202` for other recorded outcomes, with the current `delivery` field. A known resource with `delivery: outcome-unknown` is distinct from an ambiguous transport response (`504`).
 
 ## Error catalogue
 

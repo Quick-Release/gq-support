@@ -1,6 +1,6 @@
 # Support privacy design
 
-Decision record for [issue #16](https://github.com/Quick-Release/gq-support/issues/16). It covers what personal data the plain-text MVP holds, where it goes, how long each store keeps it, and how export and Reporter erasure work across WordPress, the Worker and GitHub. [ADR 0016](adr/0016-restores-never-rewind-revocations-or-deliveries.md) covers restores and the suppression ledger. [ADR 0017](adr/0017-d1-in-the-eu-jurisdiction.md) sets the D1 jurisdiction. [ADR 0018](adr/0018-erasure-redacts-github-and-reports-residual-copies.md) decides erasure in GitHub. Terms are defined in [CONTEXT.md](../CONTEXT.md). These are engineering requirements, not a compliance certification. This is a design, not a claim that it is implemented.
+Decision record for [issue #16](https://github.com/Quick-Release/gq-support/issues/16). It covers what personal data the plain-text MVP holds, where it goes, how long each store keeps it, and how export and Reporter erasure work across WordPress, the Worker and GitHub. [ADR 0016](adr/0016-restores-never-rewind-revocations-or-deliveries.md) covers restores and the suppression ledger. [ADR 0017](adr/0017-d1-in-the-eu-jurisdiction.md) sets the D1 jurisdiction. [ADR 0018](adr/0018-erasure-redacts-github-and-reports-residual-copies.md) decides erasure in GitHub. Terms are defined in [CONTEXT.md](../CONTEXT.md). [The delivery decision](support-delivery-design.md) amends never-delivered retention and uncertain-create erasure handling. These are engineering requirements, not a compliance certification. This is a design, not a claim that it is implemented.
 
 ## Roles
 
@@ -21,7 +21,7 @@ This covers the **plain-text MVP** only: Submitted text, Support status and Deli
 |---|---|---|---|---|---|
 | Draft Summary and Description | Browser memory | Composing a request | The Reporter | Until reload, navigation or user switch. Never persisted | Browser |
 | Reporter subject | WordPress user meta for that site | Pseudonymous ownership key | WordPress server | Until the user is deleted | WordPress (user deletion triggers erasure, see below) |
-| Submitted text, Reporter subject, Submission ID, digest | D1 `support_request` | Reporter list, idempotency | Worker, scoped by Slot | Until **12 months after the last observed close**. Open requests are kept; a reopen resets the clock | Service purge job; erasure |
+| Submitted text, Reporter subject, Submission ID, digest | D1 `support_request` | Reporter list, idempotency | Worker, scoped by Slot | Delivered: **12 months after the last observed close**; open delivered requests are kept and reopen resets the clock. Never confirmed delivered: text at most **12 months from acceptance**, unless erased sooner | Service purge job; erasure |
 | Repository and issue IDs, status projection | D1 `support_request` | Delivery, status sync | Worker | With the request | As above |
 | Delivery intent and bookkeeping | D1 `delivery_intent` | Delivery outbox | Worker | With the request | As above |
 | `context_json` | D1 `delivery_intent` | Server context for the issue body (#14) | Worker | Set to `NULL` at a terminal state | Delivery |
@@ -29,7 +29,7 @@ This covers the **plain-text MVP** only: Submitted text, Support status and Deli
 | Pseudonymous attribution (environment, installation reference, short subject hash) | GitHub issue body | Letting Developers ask an Operator about a request | Project collaborators | With the issue | Not personal data by itself; kept by redaction |
 | GitHub notification emails | Mailboxes of watchers and assignees | GitHub behaviour | Recipients | Outside our control | **Residual copy** |
 | Enrollment codes, keys, revocations, replay rows | D1 | Installation authentication | Worker, Operators | As in [storage design](support-storage-design.md). Keys and revocations are kept | Service |
-| Suppression ledger | Separate D1 per stage, never restored with the main one | Stopping restores from bringing erased data back | Worker, Operators | **45 days**, then compacted | Service |
+| Suppression ledger | Separate D1 per stage, never restored with the main one | Stopping restores from bringing erased data back | Worker, Operators | **45 days** for resolved tombstones; unresolved remote cleanup retains only minimal reconciliation/suppression state until resolved or an explicit Operator exception, with erasure still incomplete | Service |
 | Worker logs | Workers Logs | Operations | Operators | Workers Logs default; no Logpush in the MVP | Cloudflare. Out of erasure scope because logs hold no subject or text |
 | D1 Time Travel history | Cloudflare | Recovery | Operators | 30 days (Paid plan) | Cloudflare; guarded by the ledger |
 
@@ -76,7 +76,7 @@ The Operator CLI has `erase <slot> --subject-hash <h>` for erasures the Client a
 | Create intent state | Action |
 |---|---|
 | `pending`, `failed` | Cancel the intent so it never POSTs, then purge the row |
-| `in_flight`, `outcome_unknown` | Wait for marker reconciliation. If an issue is found, redact it and then purge. If none exists, purge |
+| `in_flight`, `outcome_unknown` | Suppress new creates, drain active execution, then purge service-held text. Keep only restricted reconciliation/redaction metadata. A discovered issue is redacted; an empty scan never completes erasure. Unresolved remote outcome remains `needs_review` |
 | `delivered` | Redact the issue, then purge the row |
 | Tracking `lost` (issue deleted or transferred away) | Purge, and record a residual-copy note if the issue was transferred |
 
@@ -130,7 +130,7 @@ The WordPress page number maps to the Worker cursor, which is stored in a short-
 
 ## Deleted WordPress users
 
-The Reporter subject is stored in user meta, so it disappears when the user is deleted. On `delete_user` (and `wpmu_delete_user` on multisite), the plugin reads the subject **before** deletion and sends a best-effort signed `POST /v1/erasures`. If that fails, it is queued for one retry in the plugin lifecycle. After that, the records still fall under the 12-month retention. No email-derived lookup is kept. Removing a user from one site of a multisite network does **not** trigger erasure, because the user may be re-added.
+The Reporter subject is stored in user meta, so it disappears when the user is deleted. On `delete_user` (and `wpmu_delete_user` on multisite), the plugin reads the subject **before** deletion and sends a best-effort signed `POST /v1/erasures`. If that fails, it is queued for one retry in the plugin lifecycle. After that, the records still fall under the 12-month retention. No email-derived lookup is kept. Removing a user from one site of a multisite network does **not** trigger erasure, because the user may be re-added. Never-confirmed-delivered reports have the separate 12-month-from-acceptance text limit defined above.
 
 ## Offboarding, disconnect and uninstall
 
@@ -149,8 +149,14 @@ None of these touches another Slot's records, the Project repository itself, or 
 - **Restore:** before serving traffic after a restore, the Worker replays the suppression ledger (ADR 0016). Each tombstone purges the matching rows again, and redaction runs again for any issue listed.
 - **Webhooks and sweeps** fetch GitHub and overwrite status only. When a lookup by `(repository_id, issue_id)` finds no row, the event is dropped. They never create a row.
 - **Delivery:** an intent whose request `id` is in the ledger never POSTs.
-- **Tombstones** hold the request `id`, `(repository_id, issue_id)`, the intent `id` and the erasure time. They hold no text and no subject. After **45 days**, beyond the 30-day Time Travel window, they are compacted away.
+- **Tombstones** hold the request `id`, `(repository_id, issue_id)`, the intent `id` and the erasure time. They hold no text and no subject. Resolved tombstones are compacted after **45 days**, beyond the 30-day Time Travel window. An unresolved remote erasure additionally keeps the pinned repository/installation and attempt time needed for reconciliation; its minimal record cannot be compacted merely because 45 days elapsed. Start the tombstone window after resolution. An Operator exception is recorded explicitly and does not make incomplete erasure complete.
 - **Retention purges** do not go to the ledger. A restore that brings back a request purged for age only brings back data the Client would have kept anyway, and the next purge run removes it again.
+
+### Uncertain-create cleanup amendment
+
+The [delivery decision](support-delivery-design.md) rejects a negative marker scan as proof of non-creation. Erasure immediately prevents new creates. Once active attempts no longer need it, purge Summary, Description, derived title, context and unnecessary subject/Submission-ID/digest data. Keep a restricted record containing only opaque request/intent IDs, pinned provider mapping, attempt window, discovered issue IDs and suppression/erasure progress needed to find and redact a possible issue. Erasure stays incomplete while that outcome is unresolved, including after the 24-hour automatic reconciliation window. If a late-discovered issue cannot have its title safely compared because the original title/digest was already purged, redact the report body and require Operator review of the title; do not retain erased text to preserve that comparison.
+
+Never-confirmed-delivered reports reaching 12 months from acceptance also lose their Submitted text. Uncertain cases retain only restricted remote-outcome review metadata, not report content. Offboarding still purges Slot content after its 30-day grace period and leaves Client GitHub issues untouched; it must suppress future creates and track already uncertain delivery. Do not use an empty scan, retention purge or tombstone expiry to claim successful remote erasure.
 
 ## GitHub and provider limitations
 
