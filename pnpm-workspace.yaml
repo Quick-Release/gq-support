@@ -1,6 +1,13 @@
 packages:
   - "plugin/app"
   - "worker"
+# Alchemy beta.77 uses the Config API from rc.112; rc.113 renamed its constructors.
+# Keep its transitive Effect packages on the same API as the Worker.
+overrides:
+  '@effect/platform-node-shared': 4.0.0-rc.112
+  'alchemy>@effect/sql-d1': 4.0.0-rc.112
+  'alchemy>@effect/sql-sqlite-do': 4.0.0-rc.112
+  'alchemy>@effect/vitest': 4.0.0-rc.112
 allowBuilds:
   '@parcel/watcher': true
   core-js: false

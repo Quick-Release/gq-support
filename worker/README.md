@@ -74,7 +74,13 @@ provisioning is established by these changes.
 
 ## Verification
 
+Alchemy beta.77 requires Effect's `rc.112` Config API. Keep the Worker pins and
+the transitive Effect overrides in `pnpm-workspace.yaml` together when upgrading;
+`rc.113` renamed the Config constructors and prevents this Alchemy CLI from
+starting. CI checks CLI startup as well as the application tests.
+
 ```sh
+pnpm exec alchemy deploy --help
 pnpm typecheck
 pnpm exec vitest run test/enrollment.test.ts
 pnpm test
