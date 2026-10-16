@@ -134,7 +134,7 @@ final class GQ_Support_REST {
 		}
 		$state  = GQ_Support_State::get();
 		$secret = GQ_Support_Signing_Key::active();
-		$key_id = defined( 'GQ_SUPPORT_KEY_ID' ) ? (string) constant( 'GQ_SUPPORT_KEY_ID' ) : (string) $state['key_id'];
+		$key_id = GQ_Support_State::key_id( $state );
 		if ( 'connected' !== $state['connection'] || null === $secret || '' === $key_id ) {
 			return self::error( 'gq_support_not_configured', 503 );
 		}

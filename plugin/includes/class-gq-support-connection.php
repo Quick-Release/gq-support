@@ -83,6 +83,10 @@ final class GQ_Support_Connection {
 	 * @return array<string, mixed>|WP_Error The redacted status, or why the test could not run.
 	 */
 	public static function test() {
+		$state = GQ_Support_State::get();
+		if ( GQ_Support_State::holds_credential( $state ) && GQ_Support_State::key_id_mismatch( $state ) ) {
+			return new WP_Error( 'gq_support_key_id_mismatch', __( 'GQ_SUPPORT_KEY_ID does not match the enrolled key. Update wp-config.php with the enrolled key ID.', 'gq-support' ) );
+		}
 		$signer = self::signer();
 		if ( null === $signer ) {
 			return new WP_Error( 'gq_support_not_connected', __( 'This site is not connected.', 'gq-support' ) );
@@ -164,7 +168,7 @@ final class GQ_Support_Connection {
 	private static function signer(): ?GQ_Support_Signer {
 		$state  = GQ_Support_State::get();
 		$secret = GQ_Support_Signing_Key::active();
-		$key_id = defined( 'GQ_SUPPORT_KEY_ID' ) ? (string) constant( 'GQ_SUPPORT_KEY_ID' ) : (string) $state['key_id'];
+		$key_id = GQ_Support_State::key_id( $state );
 		if ( null === $secret || '' === $key_id || ! GQ_Support_State::holds_credential( $state ) ) {
 			return null;
 		}

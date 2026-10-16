@@ -70,7 +70,7 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 ### Delivery extensions decided after the initial schema
 
-[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0001` does not yet provide these. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
+[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`); the others are not yet provided. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
 
 ### `repository_state`: rebuildable
 
@@ -80,7 +80,7 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 - `enrollment_code`: `code_hash` PK, `slot`, `expires_at`, `consumed_at`, `consumed_public_key`.
 - `installation_key`: `key_id` PK, `slot`, `installation_id`, `origin`, `public_key`, `enrolled_at`, `revoked_at`. `UNIQUE (slot) WHERE revoked_at IS NULL`, so a Slot has at most one active key.
-- `replay`: `(key_id, request_id)` PK, `expires_at`. An insert that conflicts rejects the request. #32 sets the window.
+- `replay`: `(key_id, request_id)` PK, `expires_at`. An insert that conflicts rejects the request. Rows live 10 minutes, longer than the 5-minute clock window.
 
 ## Data ownership
 
@@ -130,7 +130,7 @@ The query uses `list_mine` (an index search, not a scan), and rows read are abou
 
 ## Isolation
 
-The Slot → Client relation lives in code, so D1 cannot enforce it with a foreign key. `storageFor(slot)` (`worker/src/storage.ts`) is the only query path for Slot-owned tables: it binds the Slot as `?1` and rejects any statement that does not AND `slot = ?1` for every table it reads or writes. Cross-Slot work (the delivery sweep, webhook lookups by issue, credential lookups before a Slot is known) uses narrow, named queries outside the seam. A Client moved to its own database (ADR 0013) is routed there by the same seam. Acceptance checks that `repository_id` equals the Slot's mapping at that moment. A transfer that updates a row is accepted only within the same Client. Cross-Slot tests are mandatory (ADR 0013), and they include:
+The Slot → Client relation lives in code, so D1 cannot enforce it with a foreign key. `storageFor(slot)` (`worker/src/storage.ts`) is the only query path for Slot-owned tables: it binds the Slot as `?1` and rejects any statement that does not AND `slot = ?1` for every table it reads or writes. Cross-Slot work (the delivery sweep, webhook lookups by issue, credential lookups before a Slot is known) uses narrow, named queries outside the seam. The one exception inside the seam is `debitIntake`, the atomic intake quota debit: its counting subqueries cannot pass the checker, so its fixed SQL lives in `storage.ts`, bound to the Slot and scoped by hand. A Client moved to its own database (ADR 0013) is routed there by the same seam. Acceptance checks that `repository_id` equals the Slot's mapping at that moment. A transfer that updates a row is accepted only within the same Client. Cross-Slot tests are mandatory (ADR 0013), and they include:
 
 - the same Submission ID used from two Reporters and from two Slots;
 - a production and a staging Slot that share one repository;

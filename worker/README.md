@@ -81,13 +81,22 @@ ledger alone is not evidence that a restored database is safe to serve traffic.
 - Enrollment is limited to 10 attempts per IP per fixed 10-minute window, before
   proof verification. The edge's `CF-Connecting-IP` is hashed; raw IPs are not
   stored. A missing edge IP is denied and counter failure returns 503. Requests
-  are bounded to 8 KiB, including bodies without Content-Length.
+  are bounded to 8 KiB (creates to 128 KiB), including bodies without Content-Length.
 - The existing PHP canonical string is preserved: `gq-support-v1`, method,
   path/query, key ID, installation ID, epoch-second timestamp, request ID,
   RFC 9530 SHA-256 Content-Digest, separated by newlines without a trailing newline.
   Timestamps allow 5 minutes of skew; signed installation requests consume a
-  nonce retained for 10 minutes, with bounded indexed cleanup. #32 still owns
-  shared PHP/Worker fixtures and the remaining Reporter authorization surface.
+  nonce retained for 10 minutes, with bounded indexed cleanup.
+  `contract/fixtures/signing.json` pins this string for PHP and the Worker.
+- `POST /v1/requests`, `GET /v1/requests` and `GET /v1/requests/{id}` require a
+  signed request and an attested `reporter_subject` and `scope`. The key selects
+  the Slot; Slot-owned rows are reached only through `createStorageFor`. A create
+  records the request, its `create` intent and the Reporter and Slot quota debits
+  in one D1 batch and returns `202 accepted-pending`. A same-key retry returns
+  the existing request (`201` once delivered) without a debit; another body is
+  409. Quotas, scope and failure codes are listed in the
+  [security design](../docs/support-security-design.md#implemented-installation-authentication-32).
+  Delivery to GitHub is not implemented yet: intents stay `pending`.
 - TLS is required. Unknown, expired and conflicting codes return the same 400
   error; rate limits return 429. Internal failures return generic 503 errors.
   Responses use `Cache-Control: no-store`; errors and request bodies are not logged.

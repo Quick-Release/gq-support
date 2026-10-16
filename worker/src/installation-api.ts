@@ -2,6 +2,8 @@ import revocations from "../revocations.json";
 import type { CredentialDatabase } from "./operator.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256, verifySignature } from "./signature.ts";
+import { createStorageFor } from "./storage.ts";
+import { CREATE_BODY_BYTES, handleSupportRequests } from "./support-requests.ts";
 
 interface InstallationKey {
   key_id: string;
@@ -12,6 +14,7 @@ interface InstallationKey {
   enrolled_at: number;
   revoked_at: number | null;
 }
+const BODY_BYTES = 8192;
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const revocationRecords: readonly { keyId: string }[] = revocations;
 const recordedRevocation = (keyId: string) => revocationRecords.some((record) => record.keyId === keyId);
@@ -22,7 +25,7 @@ const binding = (key: InstallationKey, mapping: RepositoryMapping) => ({
 });
 
 // Streaming limit also bounds bodies without Content-Length.
-const readBody = async (request: Request): Promise<string | null> => {
+const readBody = async (request: Request, limit: number): Promise<string | null> => {
   if (!request.body) return "";
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -31,7 +34,7 @@ const readBody = async (request: Request): Promise<string | null> => {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > 8192) { await reader.cancel(); return null; }
+    if (size > limit) { await reader.cancel(); return null; }
     chunks.push(value);
   }
   const bytes = new Uint8Array(size);
@@ -85,7 +88,9 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     if (url.protocol !== "https:") return rejected();
     const enrollment = request.method === "POST" && url.pathname === "/v1/enroll" && !url.search;
     const installation = ["GET", "DELETE"].includes(request.method) && url.pathname === "/v1/installation" && !url.search;
-    if (!enrollment && !installation) return json({ code: "not_found" }, 404);
+    const create = request.method === "POST" && url.pathname === "/v1/requests";
+    const requests = create || (request.method === "GET" && /^\/v1\/requests(?:\/[^/]+)?$/.test(url.pathname));
+    if (!enrollment && !installation && !requests) return json({ code: "not_found" }, 404);
     const now = Date.now();
     if (enrollment) {
       // Cloudflare overwrites this header at the edge; never use X-Forwarded-For.
@@ -105,7 +110,7 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
       db.prepare("DELETE FROM enrollment_rate WHERE rowid IN (SELECT rowid FROM enrollment_rate WHERE window_start < ? LIMIT 100)")
         .bind(now - 600_000),
     ]);
-    const body = await readBody(request);
+    const body = await readBody(request, create ? CREATE_BODY_BYTES : BODY_BYTES);
     if (body === null) return json({ code: "request_too_large" }, 413);
     if (enrollment) return await enroll(request, body, db, mappings, now);
     const keyId = request.headers.get("GQ-Support-Key-Id");
@@ -130,6 +135,12 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     ]);
     if (results[0].meta.changes !== 1 || results[1].results.length !== 1) return rejected();
     if (request.method === "DELETE") return json({ revoked: true });
+    if (requests) {
+      // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
+      const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
+      return await handleSupportRequests(request, url, body, storageFor(key.slot),
+        { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId }, now);
+    }
     return json({ ...binding(key, mapping), mapping_state: results[1].results[0].suspended_reason ? "suspended" : "active" });
   } catch {
     // Neither SQL errors nor request data (including Enrollment codes) enter logs/responses.

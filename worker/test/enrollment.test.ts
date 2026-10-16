@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleRequest } from "../src/installation-api.ts";
 import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
+import { keyPair, signed } from "./installation-client.ts";
 import { localStage } from "./local-d1.ts";
 
 const mappings: readonly RepositoryMapping[] = [{
@@ -11,29 +12,6 @@ const mappings: readonly RepositoryMapping[] = [{
   slot: "shop/staging", client: "client-a", project: "shop", environment: "staging",
   repositoryId: 123, defaultDeveloper: "developer",
 }];
-
-// Independently spells the existing PHP signer's wire format, rather than importing the verifier.
-const signed = async (pair: CryptoKeyPair, method: string, path: string, body = "", keyId = "", installationId = "installation-a") => {
-  const digest = `sha-256=:${Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body))).toString("base64")}:`;
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const requestId = crypto.randomUUID();
-  const canonical = ["gq-support-v1", method, path, keyId, installationId, timestamp, requestId, digest].join("\n");
-  const signature = await crypto.subtle.sign("Ed25519", pair.privateKey, new TextEncoder().encode(canonical));
-  return new Request(`https://support.example${path}`, {
-    method, body: body || undefined,
-    headers: {
-      "GQ-Support-Key-Id": keyId, "GQ-Support-Installation-Id": installationId,
-      "GQ-Support-Timestamp": timestamp, "GQ-Support-Request-Id": requestId,
-      "Content-Digest": digest, "GQ-Support-Signature": Buffer.from(signature).toString("base64"),
-      "CF-Connecting-IP": "192.0.2.1",
-    },
-  });
-};
-const keyPair = async (): Promise<CryptoKeyPair> => {
-  const pair = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
-  if (!("privateKey" in pair)) throw new Error("Expected an Ed25519 key pair");
-  return pair;
-};
 
 describe("installation enrollment at the Worker boundary", () => {
   let stage: Awaited<ReturnType<typeof localStage<"shared">>>;

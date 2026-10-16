@@ -455,6 +455,41 @@ final class GQ_Support_Contract_Test extends TestCase {
 		self::assertCount( 0, $this->calls );
 	}
 
+	/**
+	 * Shared signing cases, also verified by the Worker.
+	 *
+	 * @return array
+	 */
+	public static function signing_cases(): array {
+		$fixtures = array();
+		foreach ( self::fixtures( 'signing' )['cases'] as $fixture ) {
+			$fixtures[ $fixture['name'] ] = array( $fixture );
+		}
+		return $fixtures;
+	}
+
+	/**
+	 * Produce exactly the headers, canonical string and signature the Worker verifies.
+	 *
+	 * @dataProvider signing_cases
+	 * @param array $fixture Shared signing case.
+	 */
+	public function test_signer_matches_shared_fixture( array $fixture ): void {
+		$keys    = self::fixtures( 'signing' );
+		$secret  = sodium_base642bin( $keys['secret_key'], SODIUM_BASE64_VARIANT_ORIGINAL );
+		$signer  = new GQ_Support_Signer( $secret, $fixture['headers']['GQ-Support-Key-Id'], $fixture['headers']['GQ-Support-Installation-Id'] );
+		$headers = $signer->headers( $fixture['method'], $fixture['path'], $fixture['body'], (int) $fixture['headers']['GQ-Support-Timestamp'], $fixture['headers']['GQ-Support-Request-Id'] );
+		self::assertSame(
+			$fixture['headers'] + array(
+				'Content-Digest'       => $fixture['content_digest'],
+				'GQ-Support-Signature' => $fixture['signature'],
+			),
+			$headers
+		);
+		self::assertSame( $fixture['canonical'], GQ_Support_Signer::canonical( $fixture['method'], $fixture['path'], $fixture['body'], $headers ) );
+		self::assertSame( $keys['public_key'], GQ_Support_Signing_Key::encode( GQ_Support_Signing_Key::public_key( $secret ) ) );
+	}
+
 	/** The adapter must reject even a complete JSON value at the truncation boundary. */
 	public function test_oversized_response_is_ambiguous(): void {
 		$stub = static function () {

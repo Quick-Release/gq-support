@@ -77,6 +77,25 @@ final class GQ_Support_State {
 	}
 
 	/**
+	 * The key ID to sign with, or '' when there is none. `GQ_SUPPORT_KEY_ID`
+	 * must name the key the service enrolled; on a mismatch nothing is signed.
+	 *
+	 * @param array{key_id: string|null} $state A state.
+	 */
+	public static function key_id( array $state ): string {
+		return self::key_id_mismatch( $state ) ? '' : (string) $state['key_id'];
+	}
+
+	/**
+	 * Whether `GQ_SUPPORT_KEY_ID` names a key other than the enrolled one.
+	 *
+	 * @param array{key_id: string|null} $state A state.
+	 */
+	public static function key_id_mismatch( array $state ): bool {
+		return defined( 'GQ_SUPPORT_KEY_ID' ) && ! hash_equals( (string) $state['key_id'], (string) constant( 'GQ_SUPPORT_KEY_ID' ) );
+	}
+
+	/**
 	 * Fields that describe a connection, reset whenever it ends.
 	 *
 	 * @param string $connection The new connection state.

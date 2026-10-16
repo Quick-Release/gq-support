@@ -11,12 +11,21 @@ export interface SlotConfig {
 
 export type SlotRegistry = ReadonlyMap<string, SlotConfig>;
 
+/** The part of a D1 binding that storage uses. */
+export type QueryDatabase = Pick<D1Database, "prepare" | "batch">;
+
 export interface StorageConfig {
   readonly slots: SlotRegistry;
   /** The stage's shared database (ADR 0013). */
-  readonly shared: D1Database;
+  readonly shared: QueryDatabase;
   /** Per-Client databases, the ADR 0013 escalation path, keyed by Client. */
-  readonly dedicated: Readonly<Record<string, D1Database>>;
+  readonly dedicated: Readonly<Record<string, QueryDatabase>>;
+}
+
+/** At most `limit` debits in any `windowMs`. */
+export interface Quota {
+  readonly windowMs: number;
+  readonly limit: number;
 }
 
 /** A statement already bound to its Slot. Only its own storage can run it. */
@@ -41,7 +50,7 @@ export class SlotStorage {
   /** @internal */
   constructor(
     readonly slot: string,
-    private readonly db: D1Database,
+    private readonly db: QueryDatabase,
   ) {}
 
   statement(sql: string, ...params: unknown[]): ScopedStatement {
@@ -59,6 +68,22 @@ export class SlotStorage {
 
   run(sql: string, ...params: unknown[]): Promise<D1Result> {
     return this.statement(sql, ...params).prepared.run();
+  }
+
+  /**
+   * One intake debit for `subject` ('' for the Slot's own budget), checked
+   * against every quota inside the statement. Over quota, it inserts a NULL
+   * `debited_at`, so the NOT NULL constraint fails the whole batch it joins.
+   * Its subqueries cannot pass {@link assertSlotScoped}, so the SQL is fixed
+   * here and scoped by hand: every subquery is `slot = ?1 AND subject = ?2`.
+   */
+  debitIntake(subject: string, now: number, quotas: readonly Quota[]): ScopedStatement {
+    const within = quotas.map((_, index) => `(SELECT COUNT(*) FROM intake_debit
+      WHERE slot = ?1 AND subject = ?2 AND debited_at > ?3 - ?${4 + 2 * index}) < ?${5 + 2 * index}`);
+    const sql = `INSERT INTO intake_debit (slot, subject, debited_at)
+      VALUES (?1, ?2, CASE WHEN ${within.join(" AND ")} THEN ?3 END)`;
+    const params = quotas.flatMap((quota) => [quota.windowMs, quota.limit]);
+    return new ScopedStatement(this, this.db.prepare(sql).bind(this.slot, subject, now, ...params));
   }
 
   /** D1's only transaction: all statements commit, or none do. */
