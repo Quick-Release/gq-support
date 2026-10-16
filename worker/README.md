@@ -97,10 +97,11 @@ provisioning is established by these changes.
 
 ## Verification
 
-Alchemy beta.77 requires Effect's `rc.112` Config API. Keep the Worker pins and
-the transitive Effect overrides in `pnpm-workspace.yaml` together when upgrading;
-`rc.113` renamed the Config constructors and prevents this Alchemy CLI from
-starting. CI checks CLI startup as well as the application tests.
+The Worker pins Alchemy `2.0.0-beta.83` and Effect / `@effect/platform-node`
+`4.0.5`. Its Vite 8 and Vitest 5 development dependencies satisfy Alchemy and
+Effect's peer requirements. Effect 4's HTTP modules use the `effect/http/*`
+exports. The old `rc.112` transitive overrides are no longer needed.
+CI checks CLI startup as well as the application tests.
 
 ```sh
 pnpm exec alchemy deploy --help

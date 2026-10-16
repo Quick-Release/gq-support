@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { URL } from "node:url";
 import { parseArgs } from "node:util";
 import { runOperator } from "../src/operator.ts";
 import { repositoryMappings } from "../src/repository-mappings.ts";

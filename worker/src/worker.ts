@@ -1,10 +1,10 @@
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Effect from "effect/Effect";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as Result from "effect/Result";
 import { handleRequest } from "./installation-api.ts";
 import { repositoryMappings } from "./repository-mappings.ts";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { SupportDB } from "./support-db.ts";
 
 export default Cloudflare.Worker(
