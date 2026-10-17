@@ -15,12 +15,9 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { cpus, release, type } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
+import { adminPassword, logIn, probe, probeSource, repository as root, site, sync, testSite, wp } from './test-site.cjs';
 import { buildReport, markdown } from './timing-stats.mjs';
 
-const root = resolve(import.meta.dirname, '..', '..', '..');
-const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
-const testSite = join(root, '.test-site');
-const probe = join(testSite, 'wp-content', 'mu-plugins', 'gq-support-probe.php');
 const baseLink = join(testSite, 'wp-content', 'plugins', 'gq-support-base');
 const wpConfig = join(testSite, 'wp-config.php');
 const base = process.env.GQ_BENCH_BASE ? resolve(root, process.env.GQ_BENCH_BASE) : null;
@@ -28,14 +25,10 @@ const phpRounds = Number(process.env.GQ_BENCH_PHP_ROUNDS ?? 50);
 const browserRounds = Number(process.env.GQ_BENCH_BROWSER_ROUNDS ?? 20);
 const warmup = 5;
 const out = resolve(root, process.env.GQ_BENCH_OUT ?? 'benchmark-results');
-const password = 'launcher-test-password';
 
 // The same environment as core's performance workflow (reusable-performance-test-v2.yml).
 const FLAGS = { WP_DEBUG: 'false', SCRIPT_DEBUG: 'false', SAVEQUERIES: 'false', DISABLE_WP_CRON: 'true', WP_HTTP_BLOCK_EXTERNAL: 'true' };
 
-const shellQuote = (arg) => `'${arg.replace(/'/g, `'\\''`)}'`;
-const wp = (args) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.test-site', ['wp', ...args].map(shellQuote).join(' ')], { encoding: 'utf8' }).trim();
-const sync = () => { if (process.platform === 'darwin') execFileSync('ddev', ['mutagen', 'sync']); };
 
 const variants = ['off', ...(base ? ['base'] : []), 'head'];
 const QUERY = { off: 'gq_off=1', base: 'gq_variant=base', head: '' };
@@ -60,7 +53,7 @@ async function setUp() {
   if (base && !existsSync(join(base, 'assets', 'dist', 'index.asset.php'))) throw new Error(`${base} has no built app; run pnpm build:app there first`);
   const config = readFileSync(wpConfig, 'utf8');
   mkdirSync(dirname(probe), { recursive: true });
-  copyFileSync(join(import.meta.dirname, 'gq-probe.php'), probe);
+  copyFileSync(probeSource, probe);
   rmSync(baseLink, { force: true });
   if (base) symlinkSync(relative(dirname(baseLink), base), baseLink);
   sync();
@@ -76,7 +69,7 @@ async function setUp() {
     for (const [name, value] of Object.entries(FLAGS)) wp(['config', 'set', name, value, '--raw', '--type=constant']);
     wp(['plugin', 'activate', 'gq-support']);
     wp(['eval', "GQ_Support_State::update( array( 'connection' => 'connected' ) );"]);
-    wp(['user', 'update', 'admin', `--user_pass=${password}`]);
+    wp(['user', 'update', 'admin', `--user_pass=${adminPassword}`]);
   } catch (error) {
     tearDown();
     throw error;
@@ -110,16 +103,6 @@ function metadata(browser) {
     variants,
     samples: { warmup, phpRounds, browserRounds },
   };
-}
-
-async function logIn(context) {
-  const page = await context.newPage();
-  await page.goto(`${site}/wp-login.php`);
-  await page.locator('#user_login').fill('admin');
-  await page.locator('#user_pass').fill(password);
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(/wp-admin/);
-  await page.close();
 }
 
 /** T1/M1 and T2/M2: one anonymous public request and one dashboard request per variant per round. */
@@ -188,7 +171,9 @@ async function main() {
     samples.T3 = Object.fromEntries(opened.map((variant) => [variant, []]));
 
     const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
-    await logIn(adminContext);
+    const loginPage = await adminContext.newPage();
+    await logIn(loginPage);
+    await loginPage.close();
     const storageState = await adminContext.storageState();
     const anonymous = await request.newContext({ ignoreHTTPSErrors: true });
     await samplePhp(anonymous, adminContext.request, samples);

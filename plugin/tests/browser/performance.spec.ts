@@ -1,20 +1,13 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
+import { adminPassword, logIn, probe, probeSource, site, sync, wp } from '../performance/test-site.cjs';
 
 // Deterministic counter gate (docs/research/idle-performance-budgets.md, B1, B4, B8, B10–B13).
 // Every probe runs with and without its negative control: gq-probe.php injects one violation,
 // and the probe must catch it. Timings are report-only, in plugin/tests/performance/timing-benchmark.mjs.
 
-const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
-const testSite = join(__dirname, '..', '..', '..', '.test-site');
-const probe = join(testSite, 'wp-content', 'mu-plugins', 'gq-support-probe.php');
-// `ddev exec` hands its arguments to a shell, so quote each one. (`ddev wp` is far slower on macOS.)
-const shellQuote = (arg: string) => `'${arg.replace(/'/g, `'\\''`)}'`;
-const wp = (args: string[]) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.test-site', ['wp', ...args].map(shellQuote).join(' ')], { encoding: 'utf8' }).trim();
-const sync = () => { if (process.platform === 'darwin') execFileSync('ddev', ['mutagen', 'sync']); };
 const setConnection = (connection: string) => wp(['eval', `GQ_Support_State::update( array( 'connection' => '${connection}' ) );`]);
 
 // Requests the plugin owns: its files, its REST routes, AJAX actions and the Worker.
@@ -36,11 +29,11 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(() => {
   mkdirSync(dirname(probe), { recursive: true });
-  copyFileSync(join(__dirname, '..', 'performance', 'gq-probe.php'), probe);
+  copyFileSync(probeSource, probe);
   sync();
   wp(['plugin', 'activate', 'gq-support']);
   setConnection('connected');
-  wp(['user', 'update', 'admin', '--user_pass=launcher-test-password']);
+  wp(['user', 'update', 'admin', `--user_pass=${adminPassword}`]);
 });
 
 test.afterAll(() => {
@@ -49,14 +42,6 @@ test.afterAll(() => {
   setConnection('not_connected');
   if (wooInstalled) wp(['plugin', wooWasActive ? 'activate' : 'deactivate', 'woocommerce']);
 });
-
-async function logIn(page: Page) {
-  await page.goto(`${site}/wp-login.php`);
-  await page.locator('#user_login').fill('admin');
-  await page.locator('#user_pass').fill('launcher-test-password');
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(/wp-admin/);
-}
 
 /** The query flag that makes gq-probe.php inject one violation. */
 function violationParam(violation?: string) {
