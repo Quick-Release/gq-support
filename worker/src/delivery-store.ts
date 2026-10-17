@@ -122,11 +122,15 @@ export const deliveryStore = (db: QueryDatabase) => {
       // Check ownership separately for EVERY dependent write. The intent update
       // is last so a zero-row result never permits an unfenced request write.
       await db.batch([
-        ...(issue ? [statement(`UPDATE support_request SET issue_id = ?, issue_number = ?, issue_node_id = ?,
-          status = ?, status_observed_at = ? WHERE id = ? AND slot = ? AND (issue_id IS NULL OR issue_id = ?)
-          AND EXISTS (SELECT 1 FROM delivery_intent WHERE id = ? AND slot = ? AND owner = ? AND generation = ? AND lease_expires_at > ?)`,
-          issue.id, issue.number, issue.nodeId, issue.state, now, row.request_id, row.slot, issue.id,
-          row.id, row.slot, row.owner, row.generation, now)] : []),
+        // A status observation never replaces a newer one, such as a sweep's.
+        ...(issue ? [statement(`UPDATE support_request SET issue_id = ?1, issue_number = ?2, issue_node_id = ?3,
+          status = CASE WHEN status_source_updated_at IS NULL OR status_source_updated_at <= ?4 THEN ?5 ELSE status END,
+          status_observed_at = CASE WHEN status_source_updated_at IS NULL OR status_source_updated_at <= ?4 THEN ?6 ELSE status_observed_at END,
+          status_source_updated_at = MAX(COALESCE(status_source_updated_at, ?4), ?4)
+          WHERE id = ?7 AND slot = ?8 AND (issue_id IS NULL OR issue_id = ?1)
+          AND EXISTS (SELECT 1 FROM delivery_intent WHERE id = ?9 AND slot = ?8 AND owner = ?10 AND generation = ?11 AND lease_expires_at > ?6)`,
+          issue.id, issue.number, issue.nodeId, Date.parse(issue.updatedAt), issue.state, now, row.request_id, row.slot,
+          row.id, row.owner, row.generation)] : []),
         statement(`UPDATE delivery_attempt SET outcome = ? WHERE intent_id = ? AND generation = ? AND owner = ?
           AND EXISTS (SELECT 1 FROM delivery_intent WHERE id = ? AND owner = ? AND generation = ? AND lease_expires_at > ?)`,
           outcome.error ?? outcome.state, row.id, row.generation, row.owner, row.id, row.owner, row.generation, now),

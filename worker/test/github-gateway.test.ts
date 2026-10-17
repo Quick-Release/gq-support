@@ -6,8 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as TestClock from "effect/testing/TestClock";
-import { describe, expect, it } from "vitest";
-import { GitHubGateway, type GitHubTarget } from "../src/github-gateway.ts";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { GitHubGateway, GitHubReader, type GitHubTarget } from "../src/github-gateway.ts";
 import { CLIENT_ID, makeFakeGitHub, SLUG, type FakeGitHub } from "./fake-github.ts";
 
 const target: GitHubTarget = { installationId: 7, repositoryId: 42 };
@@ -190,7 +190,7 @@ describe("GitHubGateway", () => {
     const issue = await run(github, create);
     expect(issue).toEqual({
       id: expect.any(Number), nodeId: expect.any(String), number: 1, title: newIssue.title, body: newIssue.body,
-      state: "open", createdAt: "2026-10-17T10:00:00Z", creator: "getquick-support-staging[bot]",
+      state: "open", createdAt: "2026-10-17T10:00:00Z", updatedAt: "2026-10-17T10:00:00Z", creator: "getquick-support-staging[bot]",
       labels: ["client-support"], assignees: ["developer"],
     });
     expect(posts(github)).toHaveLength(1);
@@ -400,5 +400,52 @@ describe("GitHubGateway", () => {
       github.update(42, { installationId: 8 });
       expect(yield* failureOf(gateway.readIssue(target, 404))).toEqual({ _tag: "RepositoryUnavailable", reason: "not-accessible" });
     }));
+  });
+});
+
+describe("GitHubReader", () => {
+  const read = <A, E>(github: FakeGitHub, effect: Effect.Effect<A, E, GitHubReader>) =>
+    Effect.runPromise(Effect.gen(function* () {
+      yield* TestClock.setTime(START);
+      return yield* effect;
+    }).pipe(
+      Effect.provide(GitHubReader.layer({ clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem })
+        .pipe(Layer.provide(github.layer))),
+      Effect.provide(TestClock.layer()),
+    ));
+  const appIssue = (number: number, updatedAt: string, login = "getquick-support-staging[bot]") => ({
+    id: 100 + number, node_id: `I_${number}`, number, title: `Report ${number}`, body: "Body", state: "open" as const,
+    created_at: "2026-10-17T09:00:00Z", updated_at: updatedAt, user: { login, type: "Bot" }, labels: [], assignees: [], repositoryId: 42,
+  });
+
+  it("mints read-only tokens scoped to one repository and lists App issues updated since a time, oldest change first", async () => {
+    const github = setup();
+    github.issues.push(appIssue(1, "2026-10-17T09:59:00Z"), appIssue(2, "2026-10-17T09:58:00Z"),
+      appIssue(3, "2026-10-17T09:30:00Z"), appIssue(4, "2026-10-17T09:59:30Z", "developer"),
+      { ...appIssue(5, "2026-10-17T09:59:40Z"), pull_request: { url: "https://api.github.com/repos/Quick-Release/acme-shop/pulls/5" } });
+    const page = await read(github, GitHubReader.use((reader) => reader.listIssuesSince(target, Date.parse("2026-10-17T09:45:00.750Z"), 1)));
+    expect(page).toEqual({ hasNextPage: false, issues: [
+      expect.objectContaining({ number: 2, updatedAt: "2026-10-17T09:58:00Z" }),
+      expect.objectContaining({ number: 1, updatedAt: "2026-10-17T09:59:00Z" }),
+    ] });
+    const mint = github.requests.find((request) => request.path === "/app/installations/7/access_tokens")!;
+    expect(mint.body).toEqual({ repository_ids: [42], permissions: { issues: "read", metadata: "read" } });
+    const list = github.requests.find((request) => request.method === "GET" && request.path.endsWith("/issues"))!;
+    expect(Object.fromEntries(list.query)).toEqual({ creator: "getquick-support-staging[bot]", state: "all", sort: "updated",
+      direction: "asc", since: "2026-10-17T09:45:00Z", per_page: "100", page: "1" });
+  });
+
+  it("fails closed when GitHub grants more than read access", async () => {
+    const widened = setup();
+    widened.next((request) => Response.json({ token: "ghs_widened", expires_at: "2026-10-17T11:00:00Z",
+      permissions: { issues: "write", metadata: "read" }, repositories: [{ id: 42, full_name: "Quick-Release/acme-shop" }] },
+      { status: request.path.endsWith("/access_tokens") ? 201 : 500 }));
+    const failure = await read(widened, GitHubReader.use((reader) => reader.repository(target)).pipe(Effect.flip));
+    expect(failure._tag).toBe("PermissionMissing");
+  });
+
+  it("exposes no mutating method", () => {
+    // Checked by the type checker: the sweep's view cannot create, label or assign.
+    expectTypeOf<keyof GitHubReader["Service"]>().toEqualTypeOf<"repository" | "listIssuesSince" | "readIssue">();
   });
 });

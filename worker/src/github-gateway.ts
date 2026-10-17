@@ -122,6 +122,8 @@ export interface GitHubIssue {
   readonly body: string | null;
   readonly state: "open" | "closed";
   readonly createdAt: string;
+  /** GitHub's last-change time, at second resolution. Orders status observations. */
+  readonly updatedAt: string;
   readonly creator: string;
   readonly labels: readonly string[];
   readonly assignees: readonly string[];
@@ -134,7 +136,10 @@ export type IssueRead =
 const API = "https://api.github.com";
 /** Pinned; without it GitHub defaults to 2022-11-28. */
 const API_VERSION = "2026-03-10";
-const PERMISSIONS = { issues: "write", metadata: "read" } as const;
+type Permissions = Readonly<Record<"issues" | "metadata", "read" | "write">>;
+const WRITE: Permissions = { issues: "write", metadata: "read" };
+/** The sweep's narrower set; #8 grants the App no more than WRITE. */
+const READ: Permissions = { issues: "read", metadata: "read" };
 /** GitHub's ceiling is ten minutes; `iat` is backdated for clock skew. */
 const JWT_LIFETIME_SECONDS = 540;
 const JWT_BACKDATE_SECONDS = 60;
@@ -194,13 +199,14 @@ const issueFrom = (value: unknown): GitHubIssue | undefined => {
       typeof value.node_id !== "string" || typeof value.title !== "string" ||
       (value.body !== null && typeof value.body !== "string") ||
       (value.state !== "open" && value.state !== "closed") || typeof value.created_at !== "string" ||
+      typeof value.updated_at !== "string" || !Number.isFinite(Date.parse(value.updated_at)) ||
       !isRecord(value.user) || typeof value.user.login !== "string") return undefined;
   const labels = logins(value.labels, "name");
   const assignees = logins(value.assignees, "login");
   if (!labels || !assignees) return undefined;
   return {
     id: value.id as number, nodeId: value.node_id, number: value.number as number, title: value.title,
-    body: value.body as string | null, state: value.state, createdAt: value.created_at,
+    body: value.body as string | null, state: value.state, createdAt: value.created_at, updatedAt: value.updated_at,
     creator: value.user.login, labels, assignees,
   };
 };
@@ -229,229 +235,263 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
     Layer.provide(Layer.succeed(FetchHttpClient.RequestInit, { redirect: "manual" })),
   );
 
-  static readonly layer = (config: GitHubAppConfig) => Layer.effect(GitHubGateway, Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const bot = `${config.slug}[bot]`;
-    const key = yield* Effect.cached(Effect.tryPromise({
-      try: () => importKey(config.privateKeyPem),
-      catch: () => new AppAuthenticationFailed(),
-    }));
+  static readonly layer = (config: GitHubAppConfig) => Layer.effect(GitHubGateway, connect(config, WRITE));
+}
 
-    /** Sends one request and reads a bounded body. Never retries. */
-    const send = (request: HttpClientRequest.HttpClientRequest, authorization: Redacted.Redacted<string>) =>
-      client.execute(request.pipe(
-        HttpClientRequest.setHeaders({
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": API_VERSION,
-          "User-Agent": config.slug,
-        }),
-        HttpClientRequest.bearerToken(Redacted.value(authorization)),
-      )).pipe(
-        Effect.flatMap((response) => readBody(response).pipe(Effect.map((body) => ({ response, body })))),
-        Effect.timeoutOption(REQUEST_TIMEOUT_MS),
-        Effect.flatMap(Option.match({ onNone: () => Effect.fail(new NoResponse()), onSome: Effect.succeed })),
-        // Transport errors carry the request, headers included: drop them.
-        Effect.mapError(() => new NoResponse()),
-      );
+/**
+ * The status sweep's view of GitHub. Its tokens are minted with Issues read
+ * and Metadata read only, and it has no method that writes: the sweep cannot
+ * change an issue, so GitHub activity can never echo back into GitHub.
+ */
+export class GitHubReader extends Context.Service<GitHubReader, {
+  readonly repository: (target: GitHubTarget) => Effect.Effect<RepositoryState, GatewayError>;
+  /**
+   * One page of App-created issues updated at or after `since` (epoch ms),
+   * oldest change first, pull requests excluded.
+   */
+  readonly listIssuesSince: (target: GitHubTarget, since: number, page: number) =>
+    Effect.Effect<{ readonly issues: readonly GitHubIssue[]; readonly hasNextPage: boolean }, GatewayError>;
+  readonly readIssue: (target: GitHubTarget, number: number, etag?: string) => Effect.Effect<IssueRead, ReadIssueError>;
+}>()("GitHubReader") {
+  static readonly live = (config: GitHubAppConfig) => GitHubReader.layer(config).pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.succeed(FetchHttpClient.RequestInit, { redirect: "manual" })),
+  );
 
-    const mint = (cacheKey: string) => Effect.gen(function* () {
-      const [installationId, repositoryId] = cacheKey.split("/").map(Number) as [number, number];
-      const now = yield* Clock.currentTimeMillis;
-      const jwt = yield* key.pipe(Effect.flatMap((cryptoKey) => Effect.tryPromise({
-        try: () => signJwt(cryptoKey, config.clientId, now),
-        catch: () => new AppAuthenticationFailed(),
-      })));
-      // A token scoped to one repository cannot reach another, even if routing is wrong.
-      const { response, body } = yield* send(
-        HttpClientRequest.post(`${API}/app/installations/${installationId}/access_tokens`).pipe(
-          HttpClientRequest.bodyJsonUnsafe({ repository_ids: [repositoryId], permissions: PERMISSIONS }),
-        ),
-        Redacted.make(jwt),
-      ).pipe(Effect.mapError(() => new ProviderUnavailable({ status: null })));
-      if (response.status !== 201) {
-        return yield* Effect.fail(
-          rateLimit(response.status, response.headers, body, now) ??
-          (response.status === 401 ? new AppAuthenticationFailed()
-          : response.status === 403 || response.status === 404 ? new InstallationUnavailable()
-          // The repository does not exist or is not in this installation.
-          : response.status === 422 ? new RepositoryUnavailable({ reason: "not-accessible" })
-          : new ProviderUnavailable({ status: response.status })),
-        );
-      }
-      const minted = isRecord(body) ? body : {};
-      const repositories = Array.isArray(minted.repositories) ? minted.repositories : [];
-      const repository = repositories.length === 1 && isRecord(repositories[0]) ? repositories[0] : {};
-      const expiresAt = typeof minted.expires_at === "string" ? Date.parse(minted.expires_at) : Number.NaN;
-      if (typeof minted.token !== "string" || repository.id !== repositoryId ||
-          typeof repository.full_name !== "string" || !FULL_NAME.test(repository.full_name) ||
-          !Number.isFinite(expiresAt)) {
-        return yield* Effect.fail(new ProviderUnavailable({ status: response.status }));
-      }
-      // Fail closed unless GitHub granted exactly what was requested.
-      if (!isRecord(minted.permissions) ||
-          JSON.stringify(Object.entries(minted.permissions).sort()) !== JSON.stringify(Object.entries(PERMISSIONS).sort())) {
-        return yield* Effect.fail(new PermissionMissing({ accepted: null }));
-      }
-      return {
-        token: Redacted.make(minted.token),
-        fullName: repository.full_name,
-        mintedAt: now,
-        refreshAt: expiresAt - REFRESH_MARGIN_MS,
-      } satisfies InstallationToken;
-    });
+  static readonly layer = (config: GitHubAppConfig) => Layer.effect(GitHubReader, connect(config, READ).pipe(
+    Effect.map(({ repository, listIssuesSince, readIssue }) => ({ repository, listIssuesSince, readIssue })),
+  ));
+}
 
-    // Isolate memory only: tokens are never persisted.
-    const tokens = yield* Cache.makeWith(mint, {
-      capacity: 1024,
-      // Only successful mints are reused, and only until shortly before expiry.
-      timeToLive: (exit) => Exit.isSuccess(exit) ? Math.max(0, exit.value.refreshAt - exit.value.mintedAt) : 0,
-    });
-    const keyOf = (target: GitHubTarget) => `${target.installationId}/${target.repositoryId}`;
+/** Every GitHub call, over tokens minted with exactly `permissions`. */
+const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient;
+  const bot = `${config.slug}[bot]`;
+  const key = yield* Effect.cached(Effect.tryPromise({
+    try: () => importKey(config.privateKeyPem),
+    catch: () => new AppAuthenticationFailed(),
+  }));
 
-    /** One installation-token request against the target's own repository. */
-    const call = (
-      target: GitHubTarget,
-      build: (repository: string) => HttpClientRequest.HttpClientRequest,
-      authorize: Effect.Effect<void, OutcomeUnknown> = Effect.void,
-    ) => Effect.gen(function* () {
-      const token = yield* Cache.get(tokens, keyOf(target));
-      yield* authorize;
-      const result = yield* send(build(`${API}/repos/${token.fullName}`), token.token);
-      const status = result.response.status;
-      // A rejected token is dropped so the next call re-mints.
-      if (status === 401) yield* Cache.invalidate(tokens, keyOf(target));
-      return { status, headers: result.response.headers, body: result.body, now: yield* Clock.currentTimeMillis };
-    });
-    /** Reads and additive repairs can be repeated safely after a missing response. */
-    const idempotentCall = (target: GitHubTarget, build: (repository: string) => HttpClientRequest.HttpClientRequest) =>
-      call(target, build).pipe(Effect.catchTags({
-        NoResponse: () => Effect.fail(new ProviderUnavailable({ status: null })),
-        OutcomeUnknown: () => Effect.fail(new ProviderUnavailable({ status: null })),
-      }));
-
-    const repository = (target: GitHubTarget) => idempotentCall(target, HttpClientRequest.get).pipe(
-      Effect.tap(({ status }) =>
-        // Renamed, transferred or gone since the mint: re-minting refreshes the name or reports the loss.
-        status === 301 || status === 404 ? Cache.invalidate(tokens, keyOf(target)) : Effect.void),
-      Effect.flatMap(({ status, headers, body, now }) => {
-        if (status !== 200) return Effect.fail(failure(status, headers, body, now));
-        const state = repositoryFrom(body);
-        return state && state.id === target.repositoryId
-          ? Effect.succeed(state)
-          : Effect.fail(new ProviderUnavailable({ status }));
+  /** Sends one request and reads a bounded body. Never retries. */
+  const send = (request: HttpClientRequest.HttpClientRequest, authorization: Redacted.Redacted<string>) =>
+    client.execute(request.pipe(
+      HttpClientRequest.setHeaders({
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": API_VERSION,
+        "User-Agent": config.slug,
       }),
+      HttpClientRequest.bearerToken(Redacted.value(authorization)),
+    )).pipe(
+      Effect.flatMap((response) => readBody(response).pipe(Effect.map((body) => ({ response, body })))),
+      Effect.timeoutOption(REQUEST_TIMEOUT_MS),
+      Effect.flatMap(Option.match({ onNone: () => Effect.fail(new NoResponse()), onSome: Effect.succeed })),
+      // Transport errors carry the request, headers included: drop them.
+      Effect.mapError(() => new NoResponse()),
     );
 
-    const createIssue = (target: GitHubTarget, issue: NewIssue, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
+  const mint = (cacheKey: string) => Effect.gen(function* () {
+    const [installationId, repositoryId] = cacheKey.split("/").map(Number) as [number, number];
+    const now = yield* Clock.currentTimeMillis;
+    const jwt = yield* key.pipe(Effect.flatMap((cryptoKey) => Effect.tryPromise({
+      try: () => signJwt(cryptoKey, config.clientId, now),
+      catch: () => new AppAuthenticationFailed(),
+    })));
+    // A token scoped to one repository cannot reach another, even if routing is wrong.
+    const { response, body } = yield* send(
+      HttpClientRequest.post(`${API}/app/installations/${installationId}/access_tokens`).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ repository_ids: [repositoryId], permissions }),
+      ),
+      Redacted.make(jwt),
+    ).pipe(Effect.mapError(() => new ProviderUnavailable({ status: null })));
+    if (response.status !== 201) {
+      return yield* Effect.fail(
+        rateLimit(response.status, response.headers, body, now) ??
+        (response.status === 401 ? new AppAuthenticationFailed()
+        : response.status === 403 || response.status === 404 ? new InstallationUnavailable()
+        // The repository does not exist or is not in this installation.
+        : response.status === 422 ? new RepositoryUnavailable({ reason: "not-accessible" })
+        : new ProviderUnavailable({ status: response.status })),
+      );
+    }
+    const minted = isRecord(body) ? body : {};
+    const repositories = Array.isArray(minted.repositories) ? minted.repositories : [];
+    const repository = repositories.length === 1 && isRecord(repositories[0]) ? repositories[0] : {};
+    const expiresAt = typeof minted.expires_at === "string" ? Date.parse(minted.expires_at) : Number.NaN;
+    if (typeof minted.token !== "string" || repository.id !== repositoryId ||
+        typeof repository.full_name !== "string" || !FULL_NAME.test(repository.full_name) ||
+        !Number.isFinite(expiresAt)) {
+      return yield* Effect.fail(new ProviderUnavailable({ status: response.status }));
+    }
+    // Fail closed unless GitHub granted exactly what was requested.
+    if (!isRecord(minted.permissions) ||
+        JSON.stringify(Object.entries(minted.permissions).sort()) !== JSON.stringify(Object.entries(permissions).sort())) {
+      return yield* Effect.fail(new PermissionMissing({ accepted: null }));
+    }
+    return {
+      token: Redacted.make(minted.token),
+      fullName: repository.full_name,
+      mintedAt: now,
+      refreshAt: expiresAt - REFRESH_MARGIN_MS,
+    } satisfies InstallationToken;
+  });
+
+  // Isolate memory only: tokens are never persisted.
+  const tokens = yield* Cache.makeWith(mint, {
+    capacity: 1024,
+    // Only successful mints are reused, and only until shortly before expiry.
+    timeToLive: (exit) => Exit.isSuccess(exit) ? Math.max(0, exit.value.refreshAt - exit.value.mintedAt) : 0,
+  });
+  const keyOf = (target: GitHubTarget) => `${target.installationId}/${target.repositoryId}`;
+
+  /** One installation-token request against the target's own repository. */
+  const call = (
+    target: GitHubTarget,
+    build: (repository: string) => HttpClientRequest.HttpClientRequest,
+    authorize: Effect.Effect<void, OutcomeUnknown> = Effect.void,
+  ) => Effect.gen(function* () {
+    const token = yield* Cache.get(tokens, keyOf(target));
+    yield* authorize;
+    const result = yield* send(build(`${API}/repos/${token.fullName}`), token.token);
+    const status = result.response.status;
+    // A rejected token is dropped so the next call re-mints.
+    if (status === 401) yield* Cache.invalidate(tokens, keyOf(target));
+    return { status, headers: result.response.headers, body: result.body, now: yield* Clock.currentTimeMillis };
+  });
+  /** Reads and additive repairs can be repeated safely after a missing response. */
+  const idempotentCall = (target: GitHubTarget, build: (repository: string) => HttpClientRequest.HttpClientRequest) =>
+    call(target, build).pipe(Effect.catchTags({
+      NoResponse: () => Effect.fail(new ProviderUnavailable({ status: null })),
+      OutcomeUnknown: () => Effect.fail(new ProviderUnavailable({ status: null })),
+    }));
+
+  const repository = (target: GitHubTarget) => idempotentCall(target, HttpClientRequest.get).pipe(
+    Effect.tap(({ status }) =>
+      // Renamed, transferred or gone since the mint: re-minting refreshes the name or reports the loss.
+      status === 301 || status === 404 ? Cache.invalidate(tokens, keyOf(target)) : Effect.void),
+    Effect.flatMap(({ status, headers, body, now }) => {
+      if (status !== 200) return Effect.fail(failure(status, headers, body, now));
+      const state = repositoryFrom(body);
+      return state && state.id === target.repositoryId
+        ? Effect.succeed(state)
+        : Effect.fail(new ProviderUnavailable({ status }));
+    }),
+  );
+
+  const createIssue = (target: GitHubTarget, issue: NewIssue, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
+    const state = yield* repository(target);
+    if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
+    if (state.archived) return yield* Effect.fail(new RepositoryArchived());
+    const result = yield* call(target, (repository) => HttpClientRequest.post(`${repository}/issues`).pipe(
+      HttpClientRequest.bodyJsonUnsafe(issue),
+    // Sent, but no complete answer: GitHub may have created the issue.
+    ), authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new OutcomeUnknown())));
+    const { status, headers, body, now } = result;
+    if (status === 201) {
+      const created = issueFrom(body);
+      return created && created.creator === bot && created.title === issue.title && created.body === issue.body
+        ? created : yield* Effect.fail(new OutcomeUnknown());
+    }
+    const limited = rateLimit(status, headers, body, now);
+    if (limited) return yield* Effect.fail(limited);
+    const message = isRecord(body) && typeof body.message === "string" ? body.message : "";
+    if (status === 400 || status === 422) {
+      const errors = isRecord(body) && Array.isArray(body.errors) ? body.errors : [];
+      const fields = errors.flatMap((error) =>
+        isRecord(error) && typeof error.field === "string" && /^[a-z_]{1,32}$/.test(error.field) ? [error.field] : []);
+      return yield* Effect.fail(new ValidationRejected({ status, fields: [...new Set(fields)] }));
+    }
+    if (status === 410) return yield* Effect.fail(new RepositoryUnavailable({ reason: "issues-disabled" }));
+    if (status === 403 && /archived/i.test(message)) return yield* Effect.fail(new RepositoryArchived());
+    // These statuses prove the issue was not created; anything else might have.
+    if (status === 401 || status === 403 || status === 404) return yield* Effect.fail(failure(status, headers, body, now));
+    return yield* Effect.fail(new OutcomeUnknown());
+  });
+
+  const listIssues = (target: GitHubTarget, params: Record<string, string>) => idempotentCall(target, (repository) =>
+    HttpClientRequest.get(`${repository}/issues`).pipe(HttpClientRequest.setUrlParams({
+      creator: bot, state: "all", ...params, per_page: String(PER_PAGE),
+    })),
+  ).pipe(Effect.flatMap(({ status, headers, body, now }) => {
+    if (status !== 200) return Effect.fail(failure(status, headers, body, now));
+    const items = Array.isArray(body) ? body : undefined;
+    // Pull requests share the issues endpoint.
+    const issues = items?.filter((item) => !(isRecord(item) && "pull_request" in item)).map(issueFrom);
+    if (!issues || issues.some((issue) => issue === undefined)) return Effect.fail(new ProviderUnavailable({ status }));
+    return Effect.succeed({
+      issues: issues as GitHubIssue[],
+      hasNextPage: /<[^>]+>;\s*rel="next"/.test(headers.link ?? ""),
+    });
+  }));
+  const listAppIssues = (target: GitHubTarget, page: number) =>
+    listIssues(target, { sort: "created", direction: "desc", page: String(page) });
+  const listIssuesSince = (target: GitHubTarget, since: number, page: number) =>
+    listIssues(target, { sort: "updated", direction: "asc", since: new Date(since).toISOString().replace(/\.\d{3}Z$/, "Z"), page: String(page) });
+
+  const readIssue = (target: GitHubTarget, number: number, etag?: string) => idempotentCall(target, (repository) => {
+    const request = HttpClientRequest.get(`${repository}/issues/${number}`);
+    return etag === undefined ? request : request.pipe(HttpClientRequest.setHeader("If-None-Match", etag));
+  }).pipe(Effect.flatMap(({ status, headers, body, now }): Effect.Effect<IssueRead, ReadIssueError> => {
+    if (status === 304) return Effect.succeed({ _tag: "NotModified" });
+    if (status === 301) {
+      const location = headers.location ?? "";
+      return location.startsWith(`${API}/`)
+        ? Effect.fail(new IssueMoved({ location }))
+        : Effect.fail(new ProviderUnavailable({ status }));
+    }
+    if (status === 410) return Effect.fail(new IssueGone());
+    // 404 is a missing issue, or one moved out of reach, only if the repository is still reachable.
+    if (status === 404) return repository(target).pipe(Effect.andThen(Effect.fail(new IssueGone())));
+    if (status !== 200) return Effect.fail(failure(status, headers, body, now));
+    const issue = issueFrom(body);
+    return issue && issue.number === number
+      ? Effect.succeed({ _tag: "Fresh", issue, etag: headers.etag ?? null })
+      : Effect.fail(new ProviderUnavailable({ status }));
+  }));
+
+  const repair = (target: GitHubTarget, number: number, field: "labels" | "assignees", values: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
+    Effect.gen(function* () {
       const state = yield* repository(target);
       if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
       if (state.archived) return yield* Effect.fail(new RepositoryArchived());
-      const result = yield* call(target, (repository) => HttpClientRequest.post(`${repository}/issues`).pipe(
-        HttpClientRequest.bodyJsonUnsafe(issue),
-      // Sent, but no complete answer: GitHub may have created the issue.
-      ), authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new OutcomeUnknown())));
-      const { status, headers, body, now } = result;
-      if (status === 201) {
-        const created = issueFrom(body);
-        return created && created.creator === bot && created.title === issue.title && created.body === issue.body
-          ? created : yield* Effect.fail(new OutcomeUnknown());
-      }
-      const limited = rateLimit(status, headers, body, now);
-      if (limited) return yield* Effect.fail(limited);
-      const message = isRecord(body) && typeof body.message === "string" ? body.message : "";
-      if (status === 400 || status === 422) {
-        const errors = isRecord(body) && Array.isArray(body.errors) ? body.errors : [];
-        const fields = errors.flatMap((error) =>
-          isRecord(error) && typeof error.field === "string" && /^[a-z_]{1,32}$/.test(error.field) ? [error.field] : []);
-        return yield* Effect.fail(new ValidationRejected({ status, fields: [...new Set(fields)] }));
-      }
-      if (status === 410) return yield* Effect.fail(new RepositoryUnavailable({ reason: "issues-disabled" }));
-      if (status === 403 && /archived/i.test(message)) return yield* Effect.fail(new RepositoryArchived());
-      // These statuses prove the issue was not created; anything else might have.
-      if (status === 401 || status === 403 || status === 404) return yield* Effect.fail(failure(status, headers, body, now));
-      return yield* Effect.fail(new OutcomeUnknown());
+      const { status, headers, body, now } = yield* call(target, (repository) =>
+        HttpClientRequest.post(`${repository}/issues/${number}/${field}`).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ [field]: values }),
+        ), authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new ProviderUnavailable({ status: null }))));
+      if (status === 200 && (field === "labels" ? logins(body, "name") !== undefined : issueFrom(body) !== undefined)) return;
+      if (status === 400 || status === 422) return yield* Effect.fail(new ValidationRejected({ status, fields: [field] }));
+      if (status === 410) return yield* Effect.fail(new IssueGone());
+      // Do not follow mutation redirects, even within GitHub.
+      return yield* Effect.fail(failure(status, headers, body, now));
     });
 
-    const listAppIssues = (target: GitHubTarget, page: number) => idempotentCall(target, (repository) =>
-      HttpClientRequest.get(`${repository}/issues`).pipe(HttpClientRequest.setUrlParams({
-        creator: bot, state: "all", sort: "created", direction: "desc",
-        per_page: String(PER_PAGE), page: String(page),
-      })),
-    ).pipe(Effect.flatMap(({ status, headers, body, now }) => {
-      if (status !== 200) return Effect.fail(failure(status, headers, body, now));
-      const items = Array.isArray(body) ? body : undefined;
-      // Pull requests share the issues endpoint.
-      const issues = items?.filter((item) => !(isRecord(item) && "pull_request" in item)).map(issueFrom);
-      if (!issues || issues.some((issue) => issue === undefined)) return Effect.fail(new ProviderUnavailable({ status }));
-      return Effect.succeed({
-        issues: issues as GitHubIssue[],
-        hasNextPage: /<[^>]+>;\s*rel="next"/.test(headers.link ?? ""),
-      });
+  /** Logs the failure's tag and safe fields only: no URL, header, body or credential. */
+  const logged = <Args extends unknown[], A, E extends { readonly _tag: string }>(
+    operation: string,
+    f: (...args: Args) => Effect.Effect<A, E>,
+  ) => (...args: Args) => f(...args).pipe(Effect.tapError((error) => {
+    const fields = error as { status?: unknown; kind?: unknown; until?: unknown; accepted?: unknown; reason?: unknown };
+    return Effect.logWarning("GitHub request failed").pipe(Effect.annotateLogs({
+      operation,
+      error: error._tag,
+      ...(typeof fields.status === "number" ? { status: fields.status } : {}),
+      ...(typeof fields.kind === "string" ? { kind: fields.kind, until: fields.until } : {}),
+      ...(typeof fields.accepted === "string" ? { accepted: fields.accepted } : {}),
+      ...(typeof fields.reason === "string" ? { reason: fields.reason } : {}),
     }));
-
-    const readIssue = (target: GitHubTarget, number: number, etag?: string) => idempotentCall(target, (repository) => {
-      const request = HttpClientRequest.get(`${repository}/issues/${number}`);
-      return etag === undefined ? request : request.pipe(HttpClientRequest.setHeader("If-None-Match", etag));
-    }).pipe(Effect.flatMap(({ status, headers, body, now }): Effect.Effect<IssueRead, ReadIssueError> => {
-      if (status === 304) return Effect.succeed({ _tag: "NotModified" });
-      if (status === 301) {
-        const location = headers.location ?? "";
-        return location.startsWith(`${API}/`)
-          ? Effect.fail(new IssueMoved({ location }))
-          : Effect.fail(new ProviderUnavailable({ status }));
-      }
-      if (status === 410) return Effect.fail(new IssueGone());
-      // 404 is a missing issue, or one moved out of reach, only if the repository is still reachable.
-      if (status === 404) return repository(target).pipe(Effect.andThen(Effect.fail(new IssueGone())));
-      if (status !== 200) return Effect.fail(failure(status, headers, body, now));
-      const issue = issueFrom(body);
-      return issue && issue.number === number
-        ? Effect.succeed({ _tag: "Fresh", issue, etag: headers.etag ?? null })
-        : Effect.fail(new ProviderUnavailable({ status }));
-    }));
-
-    const repair = (target: GitHubTarget, number: number, field: "labels" | "assignees", values: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
-      Effect.gen(function* () {
-        const state = yield* repository(target);
-        if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
-        if (state.archived) return yield* Effect.fail(new RepositoryArchived());
-        const { status, headers, body, now } = yield* call(target, (repository) =>
-          HttpClientRequest.post(`${repository}/issues/${number}/${field}`).pipe(
-            HttpClientRequest.bodyJsonUnsafe({ [field]: values }),
-          ), authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new ProviderUnavailable({ status: null }))));
-        if (status === 200 && (field === "labels" ? logins(body, "name") !== undefined : issueFrom(body) !== undefined)) return;
-        if (status === 400 || status === 422) return yield* Effect.fail(new ValidationRejected({ status, fields: [field] }));
-        if (status === 410) return yield* Effect.fail(new IssueGone());
-        // Do not follow mutation redirects, even within GitHub.
-        return yield* Effect.fail(failure(status, headers, body, now));
-      });
-
-    /** Logs the failure's tag and safe fields only: no URL, header, body or credential. */
-    const logged = <Args extends unknown[], A, E extends { readonly _tag: string }>(
-      operation: string,
-      f: (...args: Args) => Effect.Effect<A, E>,
-    ) => (...args: Args) => f(...args).pipe(Effect.tapError((error) => {
-      const fields = error as { status?: unknown; kind?: unknown; until?: unknown; accepted?: unknown; reason?: unknown };
-      return Effect.logWarning("GitHub request failed").pipe(Effect.annotateLogs({
-        operation,
-        error: error._tag,
-        ...(typeof fields.status === "number" ? { status: fields.status } : {}),
-        ...(typeof fields.kind === "string" ? { kind: fields.kind, until: fields.until } : {}),
-        ...(typeof fields.accepted === "string" ? { accepted: fields.accepted } : {}),
-        ...(typeof fields.reason === "string" ? { reason: fields.reason } : {}),
-      }));
-    }));
-
-    return {
-      repository: logged("repository", repository),
-      createIssue: logged("createIssue", createIssue),
-      listAppIssues: logged("listAppIssues", listAppIssues),
-      readIssue: logged("readIssue", readIssue),
-      addLabels: logged("addLabels", (target, number, labels, authorize) => repair(target, number, "labels", labels, authorize)),
-      addAssignees: logged("addAssignees", (target, number, assignees, authorize) => repair(target, number, "assignees", assignees, authorize)),
-    };
   }));
-}
+
+  return {
+    repository: logged("repository", repository),
+    createIssue: logged("createIssue", createIssue),
+    listAppIssues: logged("listAppIssues", listAppIssues),
+    readIssue: logged("readIssue", readIssue),
+    addLabels: logged("addLabels", (target: GitHubTarget, number: number, labels: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
+      repair(target, number, "labels", labels, authorize)),
+    addAssignees: logged("addAssignees", (target: GitHubTarget, number: number, assignees: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
+      repair(target, number, "assignees", assignees, authorize)),
+    listIssuesSince: logged("listIssuesSince", listIssuesSince),
+  };
+});
 
 /** Reads at most MAX_RESPONSE_BYTES, stopping the stream once exceeded. */
 const readBody = (response: HttpClientResponse.HttpClientResponse) =>

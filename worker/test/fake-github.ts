@@ -31,6 +31,7 @@ export interface FakeIssue {
   body: string | null;
   state: "open" | "closed";
   created_at: string;
+  updated_at: string;
   user: { login: string; type: string };
   labels: { name: string }[];
   assignees: { login: string }[];
@@ -61,13 +62,14 @@ export const makeFakeGitHub = () => {
   const installations = new Map<number, { suspended: boolean }>();
   const repositories = new Map<number, FakeRepository>();
   const issues: FakeIssue[] = [];
-  const tokens = new Map<string, { installationId: number; repositoryIds: number[]; expiresAt: number }>();
+  const tokens = new Map<string, { installationId: number; repositoryIds: number[]; expiresAt: number; permissions: Record<string, string> }>();
   const requests: Recorded[] = [];
   const scripts: Script[] = [];
   const minted: string[] = [];
   let sequence = 0;
   let afterCreate: ((issue: FakeIssue) => Response | undefined) | undefined;
 
+  const iso = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, "Z");
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
     Response.json(body, { status, headers: { "x-github-request-id": "FAKE:REQUEST", ...headers } });
   const message = (status: number, text: string, headers: Record<string, string> = {}) =>
@@ -122,12 +124,13 @@ export const makeFakeGitHub = () => {
       }
       const token = `ghs_fake${String(++sequence).padStart(4, "0")}SECRETTOKENVALUE`;
       const expiresAt = now + 3_600_000;
-      tokens.set(token, { installationId, repositoryIds: ids, expiresAt });
+      const permissions = body.permissions ?? { issues: "write", metadata: "read" };
+      tokens.set(token, { installationId, repositoryIds: ids, expiresAt, permissions });
       minted.push(token);
       return json({
         token,
         expires_at: new Date(expiresAt).toISOString().replace(/\.\d{3}Z$/, "Z"),
-        permissions: body.permissions ?? { issues: "write", metadata: "read" },
+        permissions,
         repository_selection: "selected",
         repositories: scoped.map((repository) => repositoryJson(repository!)),
       }, 201);
@@ -142,6 +145,7 @@ export const makeFakeGitHub = () => {
         repository.installationId !== token.installationId ||
         installations.get(repository.installationId)?.suspended) return message(404, "Not Found");
     const rest = match[3] ?? "";
+    if (request.method !== "GET" && token.permissions.issues !== "write") return message(403, "Resource not accessible by integration");
 
     if (rest === "" && request.method === "GET") return json(repositoryJson(repository));
     if (rest === "/issues" && request.method === "POST") {
@@ -161,7 +165,8 @@ export const makeFakeGitHub = () => {
         title: body.title,
         body: body.body ?? null,
         state: "open",
-        created_at: new Date(now).toISOString().replace(/\.\d{3}Z$/, "Z"),
+        created_at: iso(now),
+        updated_at: iso(now),
         user: { login: BOT, type: "Bot" },
         labels: (body.labels ?? []).map((name) => ({ name })),
         assignees: (body.assignees ?? []).map((login) => ({ login })),
@@ -172,11 +177,15 @@ export const makeFakeGitHub = () => {
     }
     if (rest === "/issues" && request.method === "GET") {
       const creator = request.query.get("creator");
+      const since = request.query.get("since");
+      const field = request.query.get("sort") === "updated" ? "updated_at" : "created_at";
+      const direction = request.query.get("direction") === "asc" ? 1 : -1;
       const perPage = Number(request.query.get("per_page") ?? 30);
       const page = Number(request.query.get("page") ?? 1);
       const all = issues
-        .filter((issue) => issue.repositoryId === repository.id && !issue.deleted && (!creator || issue.user.login === creator))
-        .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.number - a.number);
+        .filter((issue) => issue.repositoryId === repository.id && !issue.deleted && (!creator || issue.user.login === creator) &&
+          (!since || Date.parse(issue.updated_at) >= Date.parse(since)))
+        .sort((a, b) => direction * (a[field].localeCompare(b[field]) || a.number - b.number));
       const slice = all.slice((page - 1) * perPage, page * perPage);
       const headers: Record<string, string> = {};
       if (page * perPage < all.length) {
@@ -258,6 +267,10 @@ export const makeFakeGitHub = () => {
       };
       repositories.set(value.id, value);
       return value;
+    },
+    /** A Developer's change in GitHub: advances `updated_at` to second resolution, as GitHub does. */
+    edit: (issue: FakeIssue, change: Partial<Pick<FakeIssue, "state" | "title" | "body">>, at = Date.now()) => {
+      Object.assign(issue, change, { updated_at: iso(at) });
     },
     update: (id: number, change: Partial<FakeRepository>) => { Object.assign(repositories.get(id)!, change); },
     suspend: (installationId: number) => { installations.get(installationId)!.suspended = true; },

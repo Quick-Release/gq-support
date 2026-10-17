@@ -35,7 +35,7 @@ This covers the **plain-text MVP** only: Submitted text, Support status and Deli
 
 **Location.** D1 is created with `jurisdiction: "eu"` (ADR 0017). Workers execute wherever the request lands, and the GitHub repository is hosted by GitHub. Any data-location statement to a Client must name all three.
 
-**Logs.** A log line may contain the request `id`, the Slot, the intent `id`, an error class and an HTTP status. It must never contain Submitted text, the Reporter subject or its hash, the Submission ID, email, names, cookies, nonces, signatures or tokens.
+**Logs.** A log line may contain the request `id`, the Slot, the intent `id`, a numeric GitHub repository ID, an error class and an HTTP status. It must never contain Submitted text, the Reporter subject or its hash, the Submission ID, email, names, cookies, nonces, signatures or tokens.
 
 ## GitHub attribution
 

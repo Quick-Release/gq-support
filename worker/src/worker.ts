@@ -2,13 +2,17 @@ import * as Cloudflare from "alchemy/Cloudflare";
 import * as Effect from "effect/Effect";
 import * as Config from "effect/Config";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { handleRequest } from "./installation-api.ts";
 import { repositoryMappings } from "./repository-mappings.ts";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { SupportDB } from "./support-db.ts";
 import { sweepDelivery } from "./delivery.ts";
-import { GitHubGateway } from "./github-gateway.ts";
+import { GitHubGateway, GitHubReader } from "./github-gateway.ts";
+import { scheduledTick } from "./scheduled.ts";
+import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 
@@ -25,6 +29,15 @@ export default Cloudflare.Worker(
     const database = yield* Cloudflare.D1.QueryDatabase(yield* SupportDB);
     const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
     const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
+    // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
+    const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
+      Config.map(Option.filter((value) => value >= minimum)));
+    const sweep = Object.fromEntries(Object.entries(yield* Config.all({
+      intervalMs: setting("STATUS_SWEEP_INTERVAL_MS", 60_000),
+      skewMs: setting("STATUS_SWEEP_SKEW_MS", 0),
+      pagesPerTick: setting("STATUS_SWEEP_PAGES_PER_TICK", 1),
+      pagesPerRepository: setting("STATUS_SWEEP_PAGES_PER_REPOSITORY", 1),
+    })).flatMap(([key, value]) => Option.isSome(value) ? [[key, value.value]] : [])) as Partial<SweepConfig>;
     const deliver = Effect.gen(function* () {
       const env = yield* WorkerEnvironment;
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
@@ -33,7 +46,17 @@ export default Cloudflare.Worker(
         Effect.provide(GitHubGateway.live({ clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY })),
       );
     }).pipe(Effect.timeoutOption(25_000), Effect.catchCause(() => Effect.logError("Support delivery sweep failed")));
-    yield* Cloudflare.Workers.cron("* * * * *", () => deliver.pipe(Effect.asVoid));
+    // Delivery and reconciliation first, then the status sweep (src/scheduled.ts).
+    const tick = Effect.gen(function* () {
+      const env = yield* WorkerEnvironment;
+      if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
+      const db = yield* database.raw;
+      const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
+      yield* scheduledTick({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep }).pipe(
+        Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
+      );
+    }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));
+    yield* Cloudflare.Workers.cron("* * * * *", () => tick.pipe(Effect.asVoid));
 
     return {
       checkGitHubAppKey: Effect.fn(function* (clientId: string, slug: string) {
