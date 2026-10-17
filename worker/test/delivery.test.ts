@@ -340,3 +340,27 @@ it("audited read-only Operator recovery can resolve a late positive after 24 hou
   expect(github.issues).toHaveLength(1);
   expect((await db.prepare("SELECT action FROM delivery_audit").first<{ action: string }>())!.action).toBe('reconcile');
 });
+
+it("honours installation-wide rate cooldown across two read-only reconcilers", async () => {
+  github.onCreate(() => new Response(null, { status: 502 }));
+  await accept();
+  await sweep();
+  github.issues.length = 0; // remote visibility remains ambiguous
+  advance(60_000);
+  const other = { ...mapping, slot: 'other/production', project: 'other' };
+  installation = await harness(stage.databases.shared, [mapping, other]).enroll(other.slot, 'installation-b');
+  await accept();
+  await sweep([mapping, other]);
+  github.issues.length = 0;
+  advance(300_000);
+  const before = github.requests.length;
+  github.next(() => Response.json({ message: 'rate limit' }, { status: 429, headers: { 'retry-after': '120' } }));
+  await sweep([mapping, other]);
+  expect(github.requests.length - before).toBe(1);
+  advance(119_000);
+  await sweep([mapping, other]);
+  expect(github.requests.length - before).toBe(1);
+  advance(1000);
+  await sweep([mapping, other]);
+  expect(github.requests.length - before).toBeGreaterThan(1);
+});

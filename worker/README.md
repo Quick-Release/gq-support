@@ -224,7 +224,10 @@ All creates and additive metadata repairs share a 10-second installation budget
 and a conservative fleet-wide 10-second admission budget (at most 360
 mutations/hour across this stage). Failed claims may consume admission without
 creating an issue; they can never enlarge the budget. Provider cooldown is
-persisted independently of each request deadline. Expired unsent work fails
+persisted independently of each request deadline, applies to read-only
+reconciliation too, and is checked again when claiming a previously selected
+candidate. Read-only work bypasses the execution-drain lock, not provider
+throttling. Expired unsent work fails
 without waiting for an installation permit. Rejections honour provider delays and use bounded
 backoff with jitter otherwise, up to 24 hours from acceptance. Unknown creates
 never automatically POST again. Reconciliation checkpoints and candidate identities

@@ -61,10 +61,11 @@ export const deliveryStore = (db: QueryDatabase) => {
         LEFT JOIN delivery_permit p ON p.installation_id = i.github_installation_id
         WHERE i.next_attempt_at <= ? AND (i.owner IS NULL OR i.lease_expires_at <= ?)
           AND (i.state IN ('pending', 'outcome_unknown') OR (i.state = 'delivered' AND i.repair_pending = 1))
+          AND (p.installation_id IS NULL OR p.provider_cooldown_until <= ?)
           AND (i.state = 'outcome_unknown' OR ((p.installation_id IS NULL OR (p.drain_until <= ? AND p.next_mutation_at <= ?))
             AND EXISTS (SELECT 1 FROM delivery_fleet_budget WHERE id = 1 AND next_mutation_at <= ?)))
           AND ${ordered} AND ${unsuppressed}
-      ) SELECT * FROM ranked WHERE rank = 1 ORDER BY served, next_attempt_at, id LIMIT 16`, now, now, now, now, now).all<DeliveryRow>();
+      ) SELECT * FROM ranked WHERE rank = 1 ORDER BY served, next_attempt_at, id LIMIT 16`, now, now, now, now, now, now).all<DeliveryRow>();
       return result.results;
     },
     async claim(row: DeliveryRow, owner: string, now: number, drain: number): Promise<DeliveryRow | null> {
@@ -75,8 +76,8 @@ export const deliveryStore = (db: QueryDatabase) => {
           WHERE id = 1 AND next_mutation_at <= ?
           AND EXISTS (SELECT 1 FROM delivery_intent i WHERE i.id = ? AND i.slot = ? AND i.generation = ?
             AND i.state = ? AND (i.owner IS NULL OR i.lease_expires_at <= ?) AND ${unsuppressed})
-          AND NOT EXISTS (SELECT 1 FROM delivery_permit WHERE installation_id = ? AND (drain_until > ? OR next_mutation_at > ?))`,
-          owner, now + MUTATION_INTERVAL_MS, now, row.id, row.slot, row.generation, row.state, now, row.github_installation_id ?? 0, now, now),
+          AND NOT EXISTS (SELECT 1 FROM delivery_permit WHERE installation_id = ? AND (drain_until > ? OR next_mutation_at > ? OR provider_cooldown_until > ?))`,
+          owner, now + MUTATION_INTERVAL_MS, now, row.id, row.slot, row.generation, row.state, now, row.github_installation_id ?? 0, now, now, now),
           statement(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at)
           SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM delivery_fleet_budget WHERE id = 1 AND owner = ?)
           ON CONFLICT (installation_id) DO UPDATE SET owner = excluded.owner,
@@ -91,8 +92,9 @@ export const deliveryStore = (db: QueryDatabase) => {
           drain_until = CASE WHEN state = 'pending' THEN ? ELSE drain_until END
           WHERE i.id = ? AND i.slot = ? AND i.generation = ? AND i.state = ? AND i.next_attempt_at <= ?
             AND (i.owner IS NULL OR i.lease_expires_at <= ?) AND ${ordered} AND ${unsuppressed}
+            AND NOT EXISTS (SELECT 1 FROM delivery_permit p WHERE p.installation_id = i.github_installation_id AND p.provider_cooldown_until > ?)
             AND (? = 0 OR EXISTS (SELECT 1 FROM delivery_permit p WHERE p.installation_id = ? AND p.owner = ?))`,
-          owner, drain, now, now, drain, row.id, row.slot, row.generation, row.state, now, now,
+          owner, drain, now, now, drain, row.id, row.slot, row.generation, row.state, now, now, now,
           mutation ? 1 : 0, row.github_installation_id ?? 0, owner),
         statement(`INSERT INTO delivery_attempt (intent_id, generation, owner, operation, started_at, drain_until)
           SELECT id, generation, owner, ?, ?, ? FROM delivery_intent WHERE id = ? AND slot = ? AND owner = ?`,
@@ -107,9 +109,9 @@ export const deliveryStore = (db: QueryDatabase) => {
     async authorized(row: DeliveryRow, now: number): Promise<boolean> {
       const found = await statement(`SELECT i.id FROM delivery_intent i JOIN delivery_permit p ON p.installation_id = i.github_installation_id
         WHERE i.id = ? AND i.slot = ? AND i.owner = ? AND i.generation = ? AND i.lease_expires_at > ?
-          AND p.owner = ? AND p.drain_until > ? AND ${unsuppressed} AND ${ordered}
+          AND p.owner = ? AND p.drain_until > ? AND p.provider_cooldown_until <= ? AND ${unsuppressed} AND ${ordered}
           AND (i.state = 'delivered' OR (i.state = 'in_flight' AND i.retry_deadline > ?))`,
-        row.id, row.slot, row.owner, row.generation, now, row.owner, now, now).first();
+        row.id, row.slot, row.owner, row.generation, now, row.owner, now, now, now).first();
       return found !== null;
     },
     async finish(row: DeliveryRow, now: number, outcome: {
@@ -134,10 +136,11 @@ export const deliveryStore = (db: QueryDatabase) => {
           outcome.state === 'outcome_unknown' ? row.drain_until ?? now : now,
           outcome.providerUntil ?? now + MUTATION_INTERVAL_MS,
           row.github_installation_id, row.owner, row.id, row.owner, row.generation, now),
-        ...(outcome.providerUntil !== undefined ? [statement(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at)
-          SELECT github_installation_id, '', 0, ? FROM delivery_intent WHERE id = ? AND owner = ? AND generation = ? AND lease_expires_at > ?
-          ON CONFLICT (installation_id) DO UPDATE SET next_mutation_at = MAX(next_mutation_at, excluded.next_mutation_at)`,
-          outcome.providerUntil!, row.id, row.owner, row.generation, now)] : []),
+        ...(outcome.providerUntil !== undefined ? [statement(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at, provider_cooldown_until)
+          SELECT github_installation_id, '', 0, ?, ? FROM delivery_intent WHERE id = ? AND owner = ? AND generation = ? AND lease_expires_at > ?
+          ON CONFLICT (installation_id) DO UPDATE SET next_mutation_at = MAX(next_mutation_at, excluded.next_mutation_at),
+            provider_cooldown_until = MAX(provider_cooldown_until, excluded.provider_cooldown_until)`,
+          outcome.providerUntil!, outcome.providerUntil!, row.id, row.owner, row.generation, now)] : []),
         statement(`UPDATE delivery_intent SET state = ?, next_attempt_at = ?, last_error_class = ?, owner = NULL,
           lease_expires_at = NULL, unknown_since = COALESCE(unknown_since, ?), reconciliation_json = ?,
           review_json = ?, reconciliation_count = reconciliation_count + CASE WHEN state = 'outcome_unknown' AND ? IS NULL THEN 1 ELSE 0 END,
