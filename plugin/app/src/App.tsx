@@ -95,7 +95,7 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
           {error && <p className="gq-support-error" role="alert">{error}</p>}
           {session.paused && <p className="gq-support-error" role="alert">{session.message}</p>}
           {session.paused && hasDraft && <button type="button" onClick={() => { void navigator.clipboard.writeText([summary, description].filter(Boolean).join("\n\n")); }}>{__("Copy draft", textDomain)}</button>}
-          <button type="submit" disabled={session.paused || submission.locked || submission.waiting} className="gq-support-submit">{__("Send report", textDomain)}</button>
+          <button type="submit" disabled={session.paused || submission.locked || submission.waiting} className="gq-support-submit">{submission.retry ? __("Try again", textDomain) : __("Send report", textDomain)}</button>
         </form>
       </div>
       <div id="gq-support-requests" role="tabpanel" aria-labelledby="gq-support-requests-tab" hidden={tab !== "requests"}>

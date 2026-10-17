@@ -51,15 +51,16 @@ for (const outcome of ['conflict', 'failed', 'not accepted']) {
   test(`retry after ${outcome} uses the correct Submission ID`, async ({ page }) => {
     const submissions = await intercept(page, (attempt, payload) => attempt === 1
       ? outcome === 'failed'
-        ? { status: 202, body: { submission_id: payload.submission_id, delivery: 'failed', status: null } }
+        ? { status: 202, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'failed', status: null } }
         : { status: outcome === 'conflict' ? 409 : 503, body: { code: outcome === 'conflict' ? 'gq_support_idempotency_conflict' : 'gq_support_not_accepted' } }
-      : { status: 202, body: { submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } });
+      : { status: 202, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } });
     await open(page);
     await page.getByRole('button', { name: 'Send report' }).click();
     await expect(page.getByRole('dialog').getByRole('status')).toContainText('Not sent');
-    await page.getByRole('button', { name: 'Send report' }).click();
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect(page.getByRole('dialog').getByRole('status')).toContainText('Received');
     expect(submissions).toHaveLength(2);
+    expect(submissions[1].supersedes_id).toBe(outcome === 'failed' ? 'req_01J8Z6Q4M1ZC7X000000000000' : undefined);
     expect(submissions[0].submission_id === submissions[1].submission_id).toBe(outcome === 'not accepted');
     await expect(page.getByRole('textbox', { name: 'Description' })).toHaveValue('');
   });
@@ -89,7 +90,7 @@ test('closing the panel stops reconciliation and preserves its draft', async ({ 
 });
 
 test('a delivered report clears the draft, and a new draft gets a new key', async ({ page }) => {
-  const submissions = await intercept(page, (_attempt, payload) => ({ status: 201, body: { submission_id: payload.submission_id, delivery: 'delivered', status: 'open' } }));
+  const submissions = await intercept(page, (_attempt, payload) => ({ status: 201, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'delivered', status: 'open' } }));
   await open(page);
   await page.getByRole('button', { name: 'Send report' }).click();
   await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Open');
@@ -147,7 +148,7 @@ test('a failed session check preserves an unresolved intent until explicit recon
   let currentSession = true;
   const submissions = await intercept(page, (attempt, payload) => {
     if (attempt === 1) { currentSession = false; return unknown; }
-    return { status: 202, body: { submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } };
+    return { status: 202, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } };
   });
   await open(page);
   await page.clock.install();
@@ -172,7 +173,7 @@ test('a failed session check preserves an unresolved intent until explicit recon
 });
 
 test('reconciling an already closed request shows its current support status', async ({ page }) => {
-  await intercept(page, (_attempt, payload) => ({ status: 201, body: { submission_id: payload.submission_id, delivery: 'delivered', status: 'closed' } }));
+  await intercept(page, (_attempt, payload) => ({ status: 201, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'delivered', status: 'closed' } }));
   await open(page);
   await page.getByRole('button', { name: 'Send report' }).click();
   await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Closed');
@@ -182,7 +183,7 @@ for (const rejection of [429, 403]) {
   test(`HTTP ${rejection} during reconciliation preserves the original unresolved intent`, async ({ page }) => {
     const submissions = await intercept(page, (attempt, payload) => attempt === 1 ? unknown : attempt === 2
       ? { status: rejection, body: { code: rejection === 429 ? 'gq_support_rate_limited' : 'rest_cookie_invalid_nonce' } }
-      : { status: 202, body: { submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } });
+      : { status: 202, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } });
     await open(page);
     await page.clock.install();
     await page.getByRole('button', { name: 'Send report' }).click();
@@ -198,3 +199,61 @@ for (const rejection of [429, 403]) {
     expect(submissions[2]).toEqual(submissions[0]);
   });
 }
+
+test('sending preserves the draft until a durable receipt arrives', async ({ page }) => {
+  let release: () => void = () => {};
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route(/(?:rest_route=.*gq-support|wp-json\/gq-support)/, async route => {
+    const { submission_id } = route.request().postDataJSON();
+    await pending;
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({
+      id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id, delivery: 'accepted-pending', status: null,
+    }) });
+  });
+  await open(page);
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Sending…');
+  await expect(page.getByRole('textbox', { name: 'Description' })).toHaveValue('A private report');
+  await expect(page.getByRole('button', { name: 'Send report' })).toBeDisabled();
+  release();
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Received');
+  await expect(page.getByRole('textbox', { name: 'Description' })).toHaveValue('');
+});
+
+test('an uncertain replacement keeps its predecessor and frozen draft on reconciliation', async ({ page }) => {
+  const submissions = await intercept(page, (attempt, payload) => attempt === 1
+    ? { status: 202, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'failed', status: null } }
+    : attempt === 2 ? unknown
+      : { status: 202, body: { id: 'req_01J8Z6Q4M1ZC7X000000000001', submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } });
+  await open(page);
+  await page.clock.install();
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Not sent');
+  await page.getByRole('textbox', { name: 'Description' }).fill('A corrected report <plain text>');
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Checking…');
+  await expect(page.getByRole('textbox', { name: 'Description' })).toBeDisabled();
+  await expect(page.getByRole('textbox', { name: 'Description' })).toHaveValue('A corrected report <plain text>');
+  await page.clock.runFor(1100);
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Received');
+  expect(submissions[1].supersedes_id).toBe('req_01J8Z6Q4M1ZC7X000000000000');
+  expect(submissions[1].submission_id).not.toBe(submissions[0].submission_id);
+  expect(submissions[2]).toEqual(submissions[1]);
+});
+
+test('a failed reconciliation does not turn an unknown original send into Not sent', async ({ page }) => {
+  const submissions = await intercept(page, (attempt, payload) => attempt === 1 ? unknown : attempt === 2
+    ? { status: 503, body: { code: 'gq_support_not_accepted' } }
+    : { status: 202, body: { id: 'req_01J8Z6Q4M1ZC7X000000000000', submission_id: payload.submission_id, delivery: 'accepted-pending', status: null } });
+  await open(page);
+  await page.clock.install();
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Checking…');
+  await page.clock.runFor(1100);
+  await expect(page.getByRole('button', { name: 'Check again' })).toBeEnabled();
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Checking…');
+  await expect(page.getByRole('textbox', { name: 'Description' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Check again' }).click();
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Received');
+  expect(submissions[2]).toEqual(submissions[0]);
+});

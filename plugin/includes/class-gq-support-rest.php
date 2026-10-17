@@ -30,6 +30,10 @@ final class GQ_Support_REST {
 							'required' => true,
 							'format'   => 'uuid',
 						),
+						'supersedes_id' => array(
+							'type'    => 'string',
+							'pattern' => '^req_[0-9A-HJKMNP-TV-Z]{26}$',
+						),
 						'summary'       => array(
 							'type'              => 'string',
 							'maxLength'         => GQ_Support_Limits::SUMMARY_CHARACTERS,
@@ -269,9 +273,10 @@ final class GQ_Support_REST {
 			return self::error( 'gq_support_payload_too_large', 413 );
 		}
 		$body = json_decode( (string) $request->get_body(), true );
-		if ( ! is_array( $body ) || array_diff( array_keys( $body ), array( 'submission_id', 'summary', 'description' ) )
+		if ( ! is_array( $body ) || array_diff( array_keys( $body ), array( 'submission_id', 'summary', 'description', 'supersedes_id' ) )
 			|| ! isset( $body['submission_id'], $body['description'] ) || ! is_string( $body['submission_id'] )
 			|| ! preg_match( '/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i', $body['submission_id'] )
+			|| ( array_key_exists( 'supersedes_id', $body ) && ( ! is_string( $body['supersedes_id'] ) || ! preg_match( '/^req_[0-9A-HJKMNP-TV-Z]{26}$/', $body['supersedes_id'] ) ) )
 			|| ! is_string( $body['description'] ) || '' === trim( $body['description'] ) || mb_strlen( trim( $body['description'] ) ) > GQ_Support_Limits::DESCRIPTION_CHARACTERS
 			|| ( array_key_exists( 'summary', $body ) && ( ! is_string( $body['summary'] ) || '' === trim( $body['summary'] ) || mb_strlen( trim( $body['summary'] ) ) > GQ_Support_Limits::SUMMARY_CHARACTERS || preg_match( '/[\r\n]/', trim( $body['summary'] ) ) ) ) ) {
 			return self::error( 'gq_support_invalid_request', 400 );

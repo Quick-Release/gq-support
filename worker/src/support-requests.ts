@@ -76,6 +76,8 @@ interface Row {
   reporter_subject: string;
   submission_id: string;
   body_digest: string;
+  supersedes_id: string | null;
+  superseded_at: number | null;
   summary: string;
   description: string;
   title: string;
@@ -85,7 +87,7 @@ interface Row {
 }
 
 const COLUMNS = `SELECT r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
-  r.created_at, r.status, i.state FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
+  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
   WHERE r.slot = ?1 AND i.slot = ?1`;
 
 const resource = (row: Row, caller: Caller) => ({
@@ -113,6 +115,7 @@ interface CreateInput {
   reporter_subject: string;
   summary: string | null;
   description: string;
+  supersedes_id: string | null;
 }
 
 const parseCreate = (body: string): CreateInput | null => {
@@ -121,17 +124,19 @@ const parseCreate = (body: string): CreateInput | null => {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const fields = data as Record<string, unknown>;
   // Scope comes from the key: a named Slot, Client, repository or installation is rejected.
-  if (Object.keys(fields).some((field) => !["submission_id", "summary", "description", "reporter_subject", "scope"].includes(field))) return null;
+  if (Object.keys(fields).some((field) => !["submission_id", "summary", "description", "reporter_subject", "scope", "supersedes_id"].includes(field))) return null;
   const { submission_id: submissionId, reporter_subject: subject, scope, description, summary } = fields;
   if (typeof submissionId !== "string" || !UUID4.test(submissionId) || typeof subject !== "string" || !UUID4.test(subject) ||
     scope !== "mine" || typeof description !== "string") return null;
+  const supersedes = fields.supersedes_id;
+  if (supersedes !== undefined && (typeof supersedes !== "string" || !new RegExp(`^${SUPPORT_REQUEST_ID}$`).test(supersedes))) return null;
   const text = trim(description);
   if (text === "" || characters(text) > DESCRIPTION_CHARACTERS) return null;
-  if (summary === undefined) return { submission_id: submissionId, reporter_subject: subject, summary: null, description: text };
+  if (summary === undefined) return { submission_id: submissionId, reporter_subject: subject, summary: null, description: text, supersedes_id: supersedes ?? null };
   if (typeof summary !== "string") return null;
   const line = trim(summary);
   if (line === "" || characters(line) > SUMMARY_CHARACTERS || /[\r\n]/.test(line)) return null;
-  return { submission_id: submissionId, reporter_subject: subject, summary: line, description: text };
+  return { submission_id: submissionId, reporter_subject: subject, summary: line, description: text, supersedes_id: supersedes ?? null };
 };
 
 const findBySubmission = (storage: SlotStorage, input: CreateInput) =>
@@ -162,23 +167,32 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
   const limited = await throttle(storage, input.reporter_subject, now);
   if (limited) return limited;
   const digest = await sha256(JSON.stringify([input.summary, input.description]));
-  const replay = (row: Row) => row.body_digest === digest ? known(row, caller) : error("gq_support_idempotency_conflict", 409);
+  const replay = (row: Row) => row.body_digest === digest && row.supersedes_id === input.supersedes_id ? known(row, caller) : error("gq_support_idempotency_conflict", 409);
   const id = `req_${ulid(now)}`;
   const accepted: Row = {
     id, reporter_subject: input.reporter_subject, submission_id: input.submission_id, body_digest: digest,
     summary: input.summary ?? "", description: input.description, title: titleFor(input.summary, input.description),
-    created_at: now, status: null, state: "pending",
+    created_at: now, status: null, state: "pending", supersedes_id: input.supersedes_id, superseded_at: null,
+  };
+  const canSupersede = async () => {
+    const predecessor = await storage.first<Row>(`${COLUMNS} AND r.id = ?2 AND r.reporter_subject = ?3`, input.supersedes_id, input.reporter_subject);
+    return predecessor?.state === "failed" && predecessor.superseded_at === null;
   };
   try {
     const existing = await findBySubmission(storage, input);
     if (existing) return replay(existing);
+    if (input.supersedes_id !== null && !await canSupersede()) return notFound();
     await storage.batch([
       storage.debitIntake(input.reporter_subject, now, REPORTER_QUOTAS),
       storage.debitIntake(SLOT_BUDGET, now, SLOT_QUOTAS),
+      ...(input.supersedes_id === null ? [] : [storage.supersedeFailedRequest(input.supersedes_id, input.reporter_subject, now)]),
+      // Keep this INSERT immediately after supersession: changes() fences a
+      // zero-row update by failing reporter_subject's NOT NULL constraint.
       storage.statement(`INSERT INTO support_request (slot, id, reporter_subject, submission_id, body_digest, summary,
-        description, title, created_at, installation_id, repository_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+        description, title, created_at, installation_id, repository_id, supersedes_id)
+        VALUES (?1, ?2, CASE WHEN ?12 IS NULL OR changes() = 1 THEN ?3 END, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
       id, accepted.reporter_subject, accepted.submission_id, digest, accepted.summary, accepted.description, accepted.title,
-      now, caller.installationId, caller.repositoryId),
+      now, caller.installationId, caller.repositoryId, input.supersedes_id),
       storage.statement(`INSERT INTO delivery_intent (slot, id, request_id, kind, seq, state, next_attempt_at)
         VALUES (?1, ?2, ?3, 'create', 0, 'pending', ?4)`, `int_${ulid(now)}`, id, now),
       storage.statement("DELETE FROM intake_debit WHERE slot = ?1 AND debited_at <= ?2", now - DAY),
@@ -188,6 +202,9 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
     let row: Row | null;
     try { row = await findBySubmission(storage, input); } catch { return error("gq_support_outcome_unknown", 504); }
     if (row) return replay(row);
+    if (input.supersedes_id !== null) {
+      try { if (!await canSupersede()) return notFound(); } catch { return error("gq_support_outcome_unknown", 504); }
+    }
     // A full quota fails the debit's NOT NULL constraint; recount rather than parse the error.
     let wait = 0;
     try { wait = await quotaWait(storage, input.reporter_subject, now); } catch { /* not accepted either way */ }

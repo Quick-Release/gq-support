@@ -86,6 +86,18 @@ export class SlotStorage {
     return new ScopedStatement(this, this.db.prepare(sql).bind(this.slot, subject, now, ...params));
   }
 
+  /**
+   * Mark only an own, failed, unreplaced request. The next acceptance INSERT
+   * must assert changes() = 1, so a losing update rolls back its quota debits.
+   * This fixed query scopes both tables explicitly, including its subquery.
+   */
+  supersedeFailedRequest(id: string, subject: string, now: number): ScopedStatement {
+    return new ScopedStatement(this, this.db.prepare(`UPDATE support_request SET superseded_at = ?4
+      WHERE slot = ?1 AND id = ?2 AND reporter_subject = ?3 AND superseded_at IS NULL
+      AND EXISTS (SELECT 1 FROM delivery_intent WHERE slot = ?1 AND request_id = ?2 AND seq = 0 AND state = 'failed')`)
+      .bind(this.slot, id, subject, now));
+  }
+
   /** D1's only transaction: all statements commit, or none do. */
   batch(statements: readonly ScopedStatement[]): Promise<D1Result[]> {
     for (const statement of statements) {

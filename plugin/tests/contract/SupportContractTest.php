@@ -186,6 +186,17 @@ final class GQ_Support_Contract_Test extends TestCase {
 		self::assertCount( 201 === $fixture['status'] ? 1 : 0, $this->calls );
 	}
 
+	/** A retry carries only the public predecessor reference and attested identity. */
+	public function test_failed_request_replacement_is_forwarded(): void {
+		$payload                  = self::fixtures( 'create' )[0]['payload'];
+		$payload['supersedes_id'] = 'req_01J8Z6Q4M1ZC7X000000000000';
+		self::assertSame( 201, $this->request( 'POST', '/requests', $payload )->get_status() );
+		$forwarded = json_decode( $this->calls[0][1]['body'], true );
+		self::assertSame( $payload['supersedes_id'], $forwarded['supersedes_id'] );
+		self::assertSame( GQ_Support_Access::subject(), $forwarded['reporter_subject'] );
+		self::assertSame( 'mine', $forwarded['scope'] );
+	}
+
 	/**
 	 * Delivery and status combinations.
 	 *

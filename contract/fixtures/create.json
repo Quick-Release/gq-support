@@ -304,5 +304,47 @@
     "codes": [
       "gq_support_payload_too_large"
     ]
+  },
+  {
+    "name": "malformed predecessor",
+    "payload": {
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "description": "Report",
+      "supersedes_id": "req_bad"
+    },
+    "padding": 0,
+    "status": 400,
+    "codes": [
+      "rest_invalid_param",
+      "gq_support_invalid_request"
+    ]
+  },
+  {
+    "name": "null predecessor",
+    "payload": {
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "description": "Report",
+      "supersedes_id": null
+    },
+    "padding": 0,
+    "status": 400,
+    "codes": [
+      "rest_invalid_param",
+      "gq_support_invalid_request"
+    ]
+  },
+  {
+    "name": "non-string predecessor",
+    "payload": {
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "description": "Report",
+      "supersedes_id": 42
+    },
+    "padding": 0,
+    "status": 400,
+    "codes": [
+      "rest_invalid_param",
+      "gq_support_invalid_request"
+    ]
   }
 ]

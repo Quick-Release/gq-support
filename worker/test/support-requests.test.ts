@@ -86,6 +86,114 @@ describe("accepting a Support request", () => {
     expect(stored).toEqual({ slot: "acme-shop/production", repository_id: 42, installation_id: "installation-a" });
   });
 
+  it("replaces a failed own request only when its replacement is accepted", async () => {
+    const { id } = await (await submit(production)).json() as { id: string };
+    await db.prepare("UPDATE delivery_intent SET state = 'failed'").run();
+    const replacement = { submission_id: submissionId(2), supersedes_id: id };
+    const response = await submit(production, replacement);
+    expect(response.status).toBe(202);
+    const accepted = await response.json() as { id: string };
+    expect(accepted.id).not.toBe(id);
+    expect(await ids(await list(production))).toEqual([accepted.id]);
+    expect((await read(production, id)).status).toBe(200);
+    expect(await (await submit(production, replacement)).json()).toMatchObject({ id: accepted.id });
+    expect((await submit(production, { ...replacement, supersedes_id: undefined })).status).toBe(409);
+  });
+
+  it("hides missing, out-of-scope and non-failed replacement targets equally", async () => {
+    const { id } = await (await submit(production)).json() as { id: string };
+    const replacement = { submission_id: submissionId(2), supersedes_id: id };
+    for (const state of ["pending", "in_flight", "outcome_unknown", "delivered"]) {
+      await db.prepare("UPDATE delivery_intent SET state = ?").bind(state).run();
+      const response = await submit(production, replacement);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ code: "gq_support_not_found" });
+    }
+    await db.prepare("UPDATE delivery_intent SET state = 'failed'").run();
+    for (const response of [
+      await submit(production, replacement, REPORTER_2),
+      await submit(staging, replacement),
+      await submit(globex, replacement),
+      await submit(production, { ...replacement, supersedes_id: "req_00000000000000000000000000" }),
+    ]) {
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ code: "gq_support_not_found" });
+    }
+    expect(await ids(await list(production))).toEqual([id]);
+  });
+
+  it("accepts only one concurrent replacement and rolls back the loser's quota", async () => {
+    const { id } = await (await submit(production)).json() as { id: string };
+    await db.prepare("UPDATE delivery_intent SET state = 'failed'").run();
+    const results = await Promise.all([2, 3].map(n => submit(production, { submission_id: submissionId(n), supersedes_id: id })));
+    expect(results.map(r => r.status).sort()).toEqual([202, 404]);
+    const winner = await results.find(r => r.status === 202)!.json() as { id: string };
+    expect(await ids(await list(production))).toEqual([winner.id]);
+    // Original + replacement leave room for exactly three more in this window.
+    for (const n of [4, 5, 6]) expect((await submit(production, { submission_id: submissionId(n) })).status).toBe(202);
+    expect((await submit(production, { submission_id: submissionId(7) })).status).toBe(429);
+  });
+
+  it("rejects a conditional-update loser without recording a replacement or spending quota", async () => {
+    const { id } = await (await submit(production)).json() as { id: string };
+    await db.prepare("UPDATE delivery_intent SET state = 'failed'").run();
+    const changedBeforeCommit = {
+      prepare: db.prepare.bind(db),
+      batch: async <T>(statements: Parameters<typeof db.batch>[0]) => {
+        if (statements.length > 3) await db.prepare("UPDATE delivery_intent SET state = 'outcome_unknown'").run();
+        return db.batch<T>(statements);
+      },
+    };
+    const body = JSON.stringify({ submission_id: submissionId(2), description: "Replacement", reporter_subject: REPORTER_1, scope: "mine", supersedes_id: id });
+    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body, production.keyId, production.installationId), changedBeforeCommit, mappings);
+    expect(response.status).toBe(404);
+    expect(await ids(await list(production))).toEqual([id]);
+    for (const n of [3, 4, 5, 6]) expect((await submit(production, { submission_id: submissionId(n) })).status).toBe(202);
+    expect((await submit(production, { submission_id: submissionId(7) })).status).toBe(429);
+  });
+
+  it("keeps the failed predecessor listed when replacement acceptance rolls back", async () => {
+    const { id } = await (await submit(production)).json() as { id: string };
+    await db.prepare("UPDATE delivery_intent SET state = 'failed'").run();
+    const failedCommit = {
+      prepare: db.prepare.bind(db),
+      batch: async <T>(statements: Parameters<typeof db.batch>[0]) => {
+        if (statements.length > 3) return db.batch<T>([...statements, db.prepare("INSERT INTO support_request (id) VALUES ('force-rollback')")]);
+        return db.batch<T>(statements);
+      },
+    };
+    const replacement = { submission_id: submissionId(2), description: "Replacement", reporter_subject: REPORTER_1, scope: "mine", supersedes_id: id };
+    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", JSON.stringify(replacement), production.keyId, production.installationId), failedCommit, mappings);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ code: "gq_support_not_accepted" });
+    expect(await ids(await list(production))).toEqual([id]);
+    expect((await submit(production, replacement)).status).toBe(202);
+    expect(await ids(await list(production))).not.toContain(id);
+  });
+
+  it("reconciles concurrent same-key replacement retries after a lost commit response", async () => {
+    const { id } = await (await submit(production)).json() as { id: string };
+    await db.prepare("UPDATE delivery_intent SET state = 'failed'").run();
+    const replacement = { submission_id: submissionId(2), description: "Replacement", reporter_subject: REPORTER_1, scope: "mine", supersedes_id: id };
+    const lostResponse = {
+      prepare: db.prepare.bind(db),
+      batch: async <T>(statements: Parameters<typeof db.batch>[0]) => {
+        const result = await db.batch<T>(statements);
+        if (statements.length > 3) throw new Error("lost acceptance response");
+        return result;
+      },
+    };
+    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", JSON.stringify(replacement), production.keyId, production.installationId), lostResponse, mappings);
+    expect(response.status).toBe(202);
+    const accepted = await response.json() as { id: string };
+    const retries = await Promise.all([submit(production, replacement), submit(production, replacement)]);
+    for (const retry of retries) {
+      expect(retry.status).toBe(202);
+      expect(await retry.json()).toMatchObject({ id: accepted.id, delivery: "accepted-pending" });
+    }
+    expect(await ids(await list(production))).toEqual([accepted.id]);
+  });
+
   it("derives the title from the first description line at a word boundary", async () => {
     const description = `${"word ".repeat(30).trim()}\nsecond line`;
     const resource = await (await submit(production, { description })).json() as { title: string; summary: unknown };
