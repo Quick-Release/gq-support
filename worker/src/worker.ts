@@ -12,6 +12,7 @@ import { SupportDB } from "./support-db.ts";
 import { sweepDelivery } from "./delivery.ts";
 import { GitHubGateway, GitHubReader } from "./github-gateway.ts";
 import { scheduledTick } from "./scheduled.ts";
+import type { RefreshConfig } from "./status-refresh.ts";
 import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
@@ -38,6 +39,11 @@ export default Cloudflare.Worker(
       pagesPerTick: setting("STATUS_SWEEP_PAGES_PER_TICK", 1),
       pagesPerRepository: setting("STATUS_SWEEP_PAGES_PER_REPOSITORY", 1),
     })).flatMap(([key, value]) => Option.isSome(value) ? [[key, value.value]] : [])) as Partial<SweepConfig>;
+    const refresh = Object.fromEntries(Object.entries(yield* Config.all({
+      dailyIntervalMs: setting("STATUS_REFRESH_DAILY_INTERVAL_MS", 60_000),
+      dailyBatchSize: setting("STATUS_REFRESH_DAILY_BATCH_SIZE", 1),
+      readsPerTick: setting("STATUS_REFRESH_READS_PER_TICK", 1),
+    })).flatMap(([key, value]) => Option.isSome(value) ? [[key, value.value]] : [])) as Partial<RefreshConfig>;
     const deliver = Effect.gen(function* () {
       const env = yield* WorkerEnvironment;
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
@@ -52,7 +58,7 @@ export default Cloudflare.Worker(
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
-      yield* scheduledTick({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep }).pipe(
+      yield* scheduledTick({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
       );
     }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));

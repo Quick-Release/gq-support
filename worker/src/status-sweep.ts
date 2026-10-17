@@ -119,10 +119,15 @@ const statusStore = (db: QueryDatabase) => {
     async apply(target: SweepTarget, issues: readonly GitHubIssue[], position: Position, next: Position | null, now: number) {
       const at = [target.repositoryId, position.startedAt, position.cursor, position.page] as const;
       await db.batch([
-        // A listing has no per-issue ETag: drop the stored one so a later
-        // conditional read cannot 304 against an older observation.
+        // A changed listing invalidates the old ETag and requests an individual
+        // refresh. An unchanged listing preserves its conditional-read cache.
+        // Incrementing the generation fences a fetch already in progress.
         ...issues.map((issue) => statement(`UPDATE support_request SET status = ?1, status_source_updated_at = ?2, status_observed_at = ?3,
-            status_etag = NULL
+            status_etag = CASE WHEN status_source_updated_at IS NOT ?2 OR status IS NOT ?1 THEN NULL ELSE status_etag END,
+            status_refresh_due_at = CASE WHEN status_source_updated_at IS NOT ?2 OR status IS NOT ?1
+              THEN COALESCE(status_refresh_due_at, ?3) ELSE status_refresh_due_at END,
+            status_refresh_generation = status_refresh_generation + CASE
+              WHEN status_source_updated_at IS NOT ?2 OR status IS NOT ?1 THEN 1 ELSE 0 END
           WHERE repository_id = ?4 AND issue_id = ?5 AND tracking = 'active'
             AND (status_source_updated_at IS NULL OR status_source_updated_at <= ?2)
             AND NOT EXISTS (SELECT 1 FROM delivery_suppression s WHERE (s.scope = 'slot' AND s.reference = support_request.slot)

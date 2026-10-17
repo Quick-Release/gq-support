@@ -50,7 +50,7 @@ export interface Recorded {
 }
 
 /** Returning `undefined` hands the request to the fake; `"hang"` never answers. */
-export type Script = (request: Recorded) => Response | "hang" | "reset" | undefined;
+export type Script = (request: Recorded) => Response | "hang" | "reset" | undefined | Promise<Response>;
 
 export const CLIENT_ID = "Iv23.fake-client";
 export const SLUG = "getquick-support-staging";
@@ -238,7 +238,7 @@ export const makeFakeGitHub = () => {
         return yield* Effect.die(new Error(`Unexpected origin ${url.origin}`));
       }
       const script = scripts.shift();
-      const scripted = script?.(recorded);
+      const scripted = yield* Effect.promise(() => Promise.resolve(script?.(recorded)));
       if (scripted === "hang") return yield* Effect.never;
       if (scripted === "reset") {
         return yield* Effect.fail(new HttpClientError.HttpClientError({

@@ -42,7 +42,7 @@ All times are UTC epoch milliseconds. IDs are service-issued ULIDs with a type p
 | `repository_id` | Pinned at creation from the Slot's mapping. Never re-read from the current mapping |
 | `issue_id`, `issue_number` | Set once delivered |
 | `status`, `status_etag`, `status_observed_at` | **Projection.** `open`/`closed`, `NULL` until delivered |
-| `tracking` | `active` or `lost`. `lost` means the issue was deleted or transferred out of the Client's repositories |
+| `tracking` | `active` or `lost`. `lost` means the issue was deleted or transferred out of its Project repository |
 
 Constraints and indexes:
 
@@ -115,8 +115,8 @@ The query uses `list_mine` (an index search, not a scan), and rows read are abou
 
 **Webhook or sweep:** find the row by `(repository_id, issue_id)`, GET the issue with `If-None-Match`, and overwrite `status`, `status_etag` and `status_observed_at`. The sweep lists `creator=<app>[bot]&state=all&since=<last_swept_at − skew>` for each repository.
 
-- **301:** the row moves to the new repository and issue only if the new repository is mapped to the same Client.
-- **410, or a transfer elsewhere:** set `status = closed` and `tracking = lost`, and alert the operator.
+- **301:** set `status = closed` and `tracking = lost`, and alert the Operator. A Slot maps to exactly one repository (ADR 0014), so rows never move.
+- **410, or an issue 404 while its repository remains accessible:** set `status = closed` and `tracking = lost`, and alert the operator.
 
 ## Invariants for #11 and #12
 

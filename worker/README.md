@@ -258,3 +258,46 @@ Verification: `pnpm --filter gq-support-worker test`, `typecheck` and `load-test
 The delivery load test runs 24 Slots, including a busy Slot, across three provider
 installations against real local D1 with four competing sweeps and fake GitHub. It checks fairness beyond the frontier
 bound and shared pacing. Local results do not measure production provider latency.
+
+## Support status refresh
+
+The minute tick runs delivery/reconciliation first, then status refreshes, then
+repository sweeps. The phase timeouts total 57 seconds. Refreshes use the same
+repository-scoped, read-only gateway as the sweep. A changed sweep observation
+queues an individual refresh; unchanged listings preserve its ETag.
+
+Migration 0009 adds durable refresh generations, attempt ownership/backoff and
+a singleton daily-pass cursor. Every daily pass queues open, actively tracked
+requests in ID order at a fixed creation-time cut-off. Queue writes and cursor
+advancement are atomic, so a later minute resumes an interrupted pass. Closed,
+unbound, lost and suppressed requests are not fetched. Repository and App
+installation identities come from the pinned operational records.
+
+Defaults are 100 daily candidates and 10 issue reads per tick, a daily interval
+of 24 hours and a 10-second refresh dispatch window. Configure the first three
+with `STATUS_REFRESH_DAILY_BATCH_SIZE`, `STATUS_REFRESH_READS_PER_TICK` and
+`STATUS_REFRESH_DAILY_INTERVAL_MS`. A large backlog may need more than one tick;
+size these bounds for the stage's request volume and GitHub read budget.
+
+`requestStatusRefresh` is the trusted target-keyed wake-up for future webhook
+consumers. Its generation changes even for two notifications in the same
+millisecond. Successful reads clear only the generation/owner they started
+with. A 200 applies status under GitHub's `updated_at` guard; a 304 only advances
+observation time. A 301, 410, or an issue 404 with a still-accessible repository
+closes the request, marks tracking lost and logs an Operator alert. Requests
+never move to another repository. A repository-access failure remains due for
+Operator review rather than being mistaken for a missing issue.
+
+Errors retain the obligation, count attempts and back off exponentially from
+one minute to an hour, with up to one additional backoff interval of jitter.
+GitHub rate limits also persist the installation-wide cooldown shared with
+delivery. A cancelled read's durable claim is eligible after one minute.
+Structured `Support status refresh retry` events alert from attempt five;
+`support.status.refresh.oldest_due_age_ms` reports the oldest outstanding
+obligation and alerts after one hour, including obligations in backoff.
+Route these and `Support status tracking lost` events to Operator monitoring;
+these events do not send outbound notifications. No Reporter text, provider
+response bodies or tokens enter them.
+
+Verification: `pnpm exec vitest run test/status-refresh.test.ts` exercises the
+scheduled entry, local workerd D1, fake GitHub and the signed installation API.
