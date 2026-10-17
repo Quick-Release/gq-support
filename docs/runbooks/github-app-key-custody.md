@@ -287,9 +287,26 @@ Production's distinct key fingerprint is
 `vPYAL+0JV1iR7X+XuPT6EyV7hlQVLm9sYoLq5AZFQ1k=`; it also passed PKCS#8 import
 and live App authentication. No production key rotation or deployment was run.
 
-**Still pending:** merge the manual workflow into main, deploy staging through
-CI, inspect deployed bindings/bundles/state/logs, and repeat rotation with the
-deployed service-binding signing check. The earlier rehearsal proves GitHub key
-replacement and revocation, not Worker deployment. Repository installation and
+Staging deployment and custody verification passed in
+[CI run 39025087020](https://github.com/Quick-Release/gq-support/actions/runs/39025087020)
+at **2026-10-17 10:31:12 UTC**, from commit `e96ad95`:
+
+- Tipme account `8f38791a8c37b182239af2a385ab3c31`, Worker
+  `gqsupportworker-worker-staging-fzos3ewkrboeduj2`,
+  [deployed URL](https://gqsupportworker-worker-staging-fzos3ewkrboeduj2.tipme.workers.dev).
+- Worker-side fresh JWT authentication and fingerprint comparison passed for
+  `4GzKGdCua9winP33o6tC1KVBLi4DJqjScEhPy1OaSMU=`.
+- The audit confirmed `secret_text` custody and inspected five state entries,
+  421 checkout/log files, binding metadata and the deployed bundle without
+  finding key material outside the intended secret. No state/bundle artifacts
+  were uploaded.
+- Typechecking and all 165 tests passed. Native Workers-runtime regression
+  coverage verifies that redirect responses cannot forward the App JWT.
+
+**Still pending:** repeat replacement and old-key revocation with the deployed
+service-binding signing check before and after revocation. The earlier rehearsal
+proved GitHub key replacement and revocation before Worker deployment. The
+collaborative browser is currently signed out, so generating/revoking the next
+staging key remains blocked on operator sign-in. Repository installation and
 scoped-token behavior belong to #37; production rollout remains gated by #20.
 No live acceptance completion is claimed for #36 yet.

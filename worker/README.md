@@ -5,8 +5,9 @@ response are in the [key custody runbook](../docs/runbooks/github-app-key-custod
 Staging/prod Alchemy deployments now require that stage's App credentials and
 run a read-only registration preflight before declaring resources. Development
 stages do not receive an App key. Both Apps and encrypted CI sources are set up;
-staging App-key replacement/revocation passed live authentication checks. Stage
-deployment and the Worker-side rotation rehearsal remain pending; see the runbook.
+staging App-key replacement/revocation passed live authentication checks. Staging
+CI deployment, Worker authentication and the custody audit have passed. The
+Worker-side replacement/revocation rehearsal remains pending; see the runbook.
 
 `src/repository-mappings.ts` is the reviewed Repository mapping registry. It is
 intentionally empty until real Slots are approved. Each entry includes Slot,
