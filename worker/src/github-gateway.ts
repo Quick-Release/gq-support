@@ -60,7 +60,8 @@ export class RateLimited extends Data.TaggedError("RateLimited")<{
 }> {}
 /**
  * GitHub did not answer usefully, or rejected the installation token (401,
- * which drops it so the next call re-mints). Nothing was changed: retry later.
+ * which drops it so the next call re-mints). Reads and additive repairs may
+ * be repeated. Creates use this only before dispatch or after proven rejection.
  */
 export class ProviderUnavailable extends Data.TaggedError("ProviderUnavailable")<{
   readonly status: number | null;
@@ -104,6 +105,7 @@ export type CreateIssueError =
   | OutcomeUnknown;
 
 export type ReadIssueError = GatewayError | IssueMoved | IssueGone;
+export type RepairIssueError = ReadIssueError | ValidationRejected | RepositoryNotPrivate | RepositoryArchived;
 
 export interface NewIssue {
   readonly title: string;
@@ -215,6 +217,9 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
   /** One page of issues the App created, newest first, pull requests excluded. */
   readonly listAppIssues: (target: GitHubTarget, page: number) =>
     Effect.Effect<{ readonly issues: readonly GitHubIssue[]; readonly hasNextPage: boolean }, GatewayError>;
+  /** Additive, idempotent repairs. Caller owns pacing and retry scheduling. */
+  readonly addLabels: (target: GitHubTarget, number: number, labels: readonly string[]) => Effect.Effect<void, RepairIssueError>;
+  readonly addAssignees: (target: GitHubTarget, number: number, assignees: readonly string[]) => Effect.Effect<void, RepairIssueError>;
   /** One issue, conditionally on a stored ETag. Moves are reported, not followed. */
   readonly readIssue: (target: GitHubTarget, number: number, etag?: string) => Effect.Effect<IssueRead, ReadIssueError>;
 }>()("GitHubGateway") {
@@ -315,11 +320,11 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       if (status === 401) yield* Cache.invalidate(tokens, keyOf(target));
       return { status, headers: result.response.headers, body: result.body, now: yield* Clock.currentTimeMillis };
     });
-    /** A call that changes nothing on GitHub, so a missing response is just unavailability. */
-    const read = (target: GitHubTarget, build: (repository: string) => HttpClientRequest.HttpClientRequest) =>
+    /** Reads and additive repairs can be repeated safely after a missing response. */
+    const idempotentCall = (target: GitHubTarget, build: (repository: string) => HttpClientRequest.HttpClientRequest) =>
       call(target, build).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new ProviderUnavailable({ status: null }))));
 
-    const repository = (target: GitHubTarget) => read(target, HttpClientRequest.get).pipe(
+    const repository = (target: GitHubTarget) => idempotentCall(target, HttpClientRequest.get).pipe(
       Effect.tap(({ status }) =>
         // Renamed, transferred or gone since the mint: re-minting refreshes the name or reports the loss.
         status === 301 || status === 404 ? Cache.invalidate(tokens, keyOf(target)) : Effect.void),
@@ -343,7 +348,8 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       const { status, headers, body, now } = result;
       if (status === 201) {
         const created = issueFrom(body);
-        return created ? created : yield* Effect.fail(new OutcomeUnknown());
+        return created && created.creator === bot && created.title === issue.title && created.body === issue.body
+          ? created : yield* Effect.fail(new OutcomeUnknown());
       }
       const limited = rateLimit(status, headers, body, now);
       if (limited) return yield* Effect.fail(limited);
@@ -361,7 +367,7 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       return yield* Effect.fail(new OutcomeUnknown());
     });
 
-    const listAppIssues = (target: GitHubTarget, page: number) => read(target, (repository) =>
+    const listAppIssues = (target: GitHubTarget, page: number) => idempotentCall(target, (repository) =>
       HttpClientRequest.get(`${repository}/issues`).pipe(HttpClientRequest.setUrlParams({
         creator: bot, state: "all", sort: "created", direction: "desc",
         per_page: String(PER_PAGE), page: String(page),
@@ -378,7 +384,7 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       });
     }));
 
-    const readIssue = (target: GitHubTarget, number: number, etag?: string) => read(target, (repository) => {
+    const readIssue = (target: GitHubTarget, number: number, etag?: string) => idempotentCall(target, (repository) => {
       const request = HttpClientRequest.get(`${repository}/issues/${number}`);
       return etag === undefined ? request : request.pipe(HttpClientRequest.setHeader("If-None-Match", etag));
     }).pipe(Effect.flatMap(({ status, headers, body, now }): Effect.Effect<IssueRead, ReadIssueError> => {
@@ -398,6 +404,22 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
         ? Effect.succeed({ _tag: "Fresh", issue, etag: headers.etag ?? null })
         : Effect.fail(new ProviderUnavailable({ status }));
     }));
+
+    const repair = (target: GitHubTarget, number: number, field: "labels" | "assignees", values: readonly string[]) =>
+      Effect.gen(function* () {
+        const state = yield* repository(target);
+        if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
+        if (state.archived) return yield* Effect.fail(new RepositoryArchived());
+        const { status, headers, body, now } = yield* idempotentCall(target, (repository) =>
+          HttpClientRequest.post(`${repository}/issues/${number}/${field}`).pipe(
+            HttpClientRequest.bodyJsonUnsafe({ [field]: values }),
+          ));
+        if (status === 200 && (field === "labels" ? logins(body, "name") !== undefined : issueFrom(body) !== undefined)) return;
+        if (status === 400 || status === 422) return yield* Effect.fail(new ValidationRejected({ status, fields: [field] }));
+        if (status === 410) return yield* Effect.fail(new IssueGone());
+        // Do not follow mutation redirects, even within GitHub.
+        return yield* Effect.fail(failure(status, headers, body, now));
+      });
 
     /** Logs the failure's tag and safe fields only: no URL, header, body or credential. */
     const logged = <Args extends unknown[], A, E extends { readonly _tag: string }>(
@@ -420,6 +442,8 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       createIssue: logged("createIssue", createIssue),
       listAppIssues: logged("listAppIssues", listAppIssues),
       readIssue: logged("readIssue", readIssue),
+      addLabels: logged("addLabels", (target, number, labels) => repair(target, number, "labels", labels)),
+      addAssignees: logged("addAssignees", (target, number, assignees) => repair(target, number, "assignees", assignees)),
     };
   }));
 }
