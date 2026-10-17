@@ -127,10 +127,27 @@ properties are stage and the owning Worker's resolved script name. On apply it
 reads the CI environment in memory, verifies the registration again, and uses
 the [Worker secret API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/secrets/methods/update/)
 to upload `GITHUB_APP_PRIVATE_KEY` as `secret_text`. Only public metadata and
-the public fingerprint are returned to state. Raw provider/transport/crypto
+the public fingerprint, App ID and check timestamp are returned to state. Raw provider/transport/crypto
 errors are replaced without retaining their cause. No private key, JWT or
 Cloudflare token is in resource inputs, outputs, bundles, logs or artifacts.
 These deployment modules are outside the Worker runtime import graph.
+
+After upload, Alchemy calls `checkGitHubAppKey` over an authenticated Cloudflare
+remote service binding. The deployed Worker imports its own PKCS#8 secret as a
+non-extractable signing key, signs a fresh JWT and calls `GET /app`. It returns
+only public App identity and the bound key's SPKI fingerprint, or a generic
+failure. Alchemy compares this fingerprint with the intended CI key before
+recording success. The method has no HTTP route,
+never mints an installation token, never accesses D1 and does not cache an
+access token. The temporary remote-binding proxy holds a service reference,
+not the App key. This verifies the #36 custody boundary independently of the
+later #37 gateway and its repository-scoped token behavior.
+
+The final CI audit reads raw state records (including replaced resources),
+checks deployed binding metadata for `secret_text`, and scans the deployed
+bundle, checkout and local Alchemy/Wrangler logs for the current PEM/DER bytes.
+State and binding contents stay in memory; only counts and a public fingerprint
+are printed. No artifacts containing state, bundles or credentials are uploaded.
 
 The resource depends on the Worker and reconciles on **every** durable-stage
 deploy, even with unchanged code. Alchemy's script upload may remove an existing
@@ -153,21 +170,21 @@ is not provisioned by this key-only resource.
 GitHub supports overlapping keys; keys do not expire automatically.
 
 1. Record stage, App/client ID, old public fingerprint and change owner. Confirm
-   the old key still works through the deployed gateway once #37 is available.
-   Generate a second key in that same App, leaving the old key valid.
+   a successful CI deployment with the old key, including the deployed service
+   check and custody audit. Generate a second key in that same App, leaving the
+   old key valid.
 2. Compare the new fingerprint in GitHub, convert once into the same stage's
    encrypted environment secret, remove the download and run the deployment
    workflow. Save its URL and new public fingerprint, never a JWT or token.
-3. After apply, use a **fresh deployed Worker isolate** to authenticate and mint
-   a token restricted to the sandbox's mapped numeric repository ID. Verify an
-   allowed read with that token. Bypass any old in-memory token cache: a cached
-   installation token does not prove the new key works. Until #37 exposes this
-   gateway behavior, this live check and the rehearsal remain incomplete.
-4. Delete the old key in App settings → Credentials → Key pairs. Repeat the
-   fresh-isolate mint and sandbox read. Check Worker error rates and pending
-   deliveries without logging tokens or request bodies. Record the old-key
-   revocation time and the post-revocation success. Production rotation follows
-   only after this sequence has passed on staging.
+3. Confirm the deployment's service-binding check succeeds with the replacement
+   and the custody audit reports its expected public fingerprint. Each check
+   signs afresh inside the deployed Worker, so cached tokens cannot satisfy it.
+4. Delete the old key in App settings → Credentials → Key pairs. Run the same
+   workflow again without changing code. Confirm the deployed signing check and
+   custody audit still pass after old-key revocation. Check Worker error rates
+   and pending deliveries without logging request bodies or tokens. Record the
+   revocation timestamp and the post-revocation CI URL. Production rotation
+   follows only after this sequence has passed on staging.
 5. Before old-key deletion, rollback can restore the previous CI secret only
    from an approved encrypted recovery source; do not keep a local spare PEM.
    Otherwise generate another App key and roll forward. After deletion, roll
@@ -222,8 +239,9 @@ Append a dated non-secret record to this runbook or the issue with:
   Alchemy state showing no PEM/JWT/token copies outside encrypted CI source and
   the intended Worker secret. Do not dump bindings or state into issue comments.
 - The staging rotation's old/new fingerprints, deployment URLs, fresh-isolate
-  scoped mint/read successes before and after old-key deletion, and revocation
-  timestamp. Mark pending receiver/gateway prerequisites explicitly.
+  signing-check successes before and after old-key deletion, and revocation
+  timestamp. Receiver activation and #37's scoped-token tests remain separately
+  owned follow-ups; no repository installation is needed for this key-only check.
 
 Until that evidence exists, #36 remains open and its live acceptance is unmet.
 
@@ -268,8 +286,8 @@ Production's distinct key fingerprint is
 and live App authentication. No production key rotation or deployment was run.
 
 **Still pending:** merge the manual workflow into main, deploy staging through
-CI, inspect deployed bindings/bundles/state/logs, approve and install a sandbox
-repository mapping, and repeat rotation with fresh deployed-isolate scoped-token
-checks. The current rehearsal proves GitHub key replacement and revocation,
-not Worker deployment or token-cache behavior. Production rollout remains gated
-by #20. No live acceptance completion is claimed for #36.
+CI, inspect deployed bindings/bundles/state/logs, and repeat rotation with the
+deployed service-binding signing check. The earlier rehearsal proves GitHub key
+replacement and revocation, not Worker deployment. Repository installation and
+scoped-token behavior belong to #37; production rollout remains gated by #20.
+No live acceptance completion is claimed for #36 yet.

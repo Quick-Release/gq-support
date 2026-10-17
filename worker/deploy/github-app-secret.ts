@@ -2,11 +2,12 @@ import { Resource } from "alchemy/Resource";
 import * as Provider from "alchemy/Provider";
 import * as Effect from "effect/Effect";
 import { provisionAppKey } from "./github-app.ts";
+import { checkDeployedGitHubApp } from "./check-deployed-github-app.ts";
 
 type GitHubAppSecret = Resource<
   "GQSupport.GitHubAppSecret",
   { stage: string; workerName: string },
-  Awaited<ReturnType<typeof provisionAppKey>>
+  Awaited<ReturnType<typeof provisionAppKey>> & { appId: number; checkedAt: string }
 >;
 
 export const GitHubAppSecret = Resource<GitHubAppSecret>("GQSupport.GitHubAppSecret");
@@ -16,7 +17,11 @@ export const GitHubAppSecretProvider = () => Provider.succeed(GitHubAppSecret, {
   // every deploy, including no-op code deployments and rotations.
   diff: () => Effect.succeed({ action: "update" }),
   reconcile: ({ news }) => Effect.tryPromise({
-    try: () => provisionAppKey(news.stage, news.workerName),
+    try: async () => {
+      const metadata = await provisionAppKey(news.stage, news.workerName);
+      const evidence = await checkDeployedGitHubApp(metadata, news.workerName);
+      return { ...metadata, ...evidence };
+    },
     catch: () => new Error("GitHub App secret provisioning failed; see the key custody runbook"),
   }),
   // The owning Worker deletes its bindings when it is destroyed.

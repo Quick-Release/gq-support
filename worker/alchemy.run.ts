@@ -31,6 +31,7 @@ export default Alchemy.Stack(
 
     return {
       url: worker.url,
+      workerName: worker.workerName,
       // Recorded so a lost state store can adopt the database by name.
       databaseName: database.databaseName,
       databaseId: database.databaseId,
