@@ -271,3 +271,72 @@ it("refuses unknown and suppressed resume", async () => {
   await db.prepare("INSERT INTO delivery_suppression VALUES ('slot', ?, 'offboarding')").bind(mapping.slot).run();
   await expect(resume(request.id)).rejects.toThrow('cannot be resumed');
 });
+
+it("keeps the full installation cooldown when a request reaches its own deadline", async () => {
+  const request = await accept();
+  advance(86_340_000);
+  respondToPost(429, { 'retry-after': '7200' });
+  await sweep();
+  advance(60_000);
+  await sweep();
+  expect(await read(request.id)).toMatchObject({ delivery: 'failed' });
+  const other = await accept();
+  await sweep();
+  expect(await read(other.id)).toMatchObject({ delivery: 'accepted-pending' });
+  expect(github.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/issues'))).toHaveLength(1);
+  advance(7_140_000);
+  await sweep();
+  expect(await read(other.id)).toMatchObject({ delivery: 'delivered' });
+});
+
+it("expires confirmed unsent work while an unrelated attempt is still draining", async () => {
+  await accept();
+  advance(1);
+  const second = await accept();
+  advance(86_369_999);
+  github.onCreate(() => new Response(null, { status: 502 }));
+  await sweep();
+  advance(30_001);
+  await sweep();
+  expect(await read(second.id)).toMatchObject({ delivery: 'failed' });
+});
+
+it("preserves a multi-page reconciliation checkpoint through failed reads", async () => {
+  const request = await accept();
+  github.onCreate(() => new Response(null, { status: 502 }));
+  await sweep();
+  const original = github.issues[0]!;
+  for (let n = 1; n <= 100; n++) github.issues.push({ ...original, id: original.id + n, node_id: `noise_${n}`,
+    number: original.number + n, body: 'Unrelated App issue' });
+  advance(60_000);
+  await sweep(); // page one, with a durable continuation
+  advance(1000);
+  github.next(() => new Response(null, { status: 503 }));
+  await sweep(); // failed continuation leaves the checkpoint intact
+  const checkpoint = await stage.databases.shared.prepare('SELECT reconciliation_json FROM delivery_intent WHERE request_id = ?')
+    .bind(request.id).first<{ reconciliation_json: string }>();
+  expect(JSON.parse(checkpoint!.reconciliation_json)).toMatchObject({ page: 2 });
+  advance(1000);
+  await sweep();
+  expect(await read(request.id)).toMatchObject({ delivery: 'delivered' });
+  expect(github.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/issues'))).toHaveLength(1);
+});
+
+it("audited read-only Operator recovery can resolve a late positive after 24 hours", async () => {
+  const request = await accept();
+  github.onCreate(() => new Response(null, { status: 502 }));
+  await sweep();
+  advance(86_400_000);
+  await sweep();
+  expect(await read(request.id)).toMatchObject({ delivery: 'outcome-unknown' });
+  const db = stage.databases.shared;
+  const row = await db.prepare('SELECT id FROM delivery_intent WHERE request_id = ?').bind(request.id).first<{ id: string }>();
+  expect(await runOperator(['reconcile', mapping.slot, row!.id, 'operator-1', 'positive-evidence'], {
+    query: async (sql, parameters) => (await db.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
+    recordRevocation: async () => {}, mappings: [mapping], now,
+  })).toBe('Reconciliation scheduled');
+  await sweep();
+  expect(await read(request.id)).toMatchObject({ delivery: 'delivered' });
+  expect(github.issues).toHaveLength(1);
+  expect((await db.prepare("SELECT action FROM delivery_audit").first<{ action: string }>())!.action).toBe('reconcile');
+});

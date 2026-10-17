@@ -31,7 +31,7 @@ const approved = (row: DeliveryRow, mappings: readonly RepositoryMapping[]) => {
     mapping.environment === row.environment && mapping.clientOriginLabel === row.client_origin_label &&
     mapping.defaultDeveloper === row.default_developer;
 };
-const log = (row: DeliveryRow, outcome: string, alert = false) =>
+const log = (row: Pick<DeliveryRow, "id" | "generation">, outcome: string, alert = false) =>
   (alert ? Effect.logError("Support delivery requires review") : Effect.logInfo("Support delivery outcome")).pipe(
     Effect.annotateLogs({ intent: row.id, generation: row.generation, outcome, alert }),
   );
@@ -44,6 +44,8 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
   const deadline = started + EXECUTION_MS;
   const store = deliveryStore(options.db);
   yield* io(() => store.recover(now()));
+  const expired = yield* io(() => store.expire(now()));
+  for (const row of expired) yield* log(row, "DeliveryDeadline", true);
   const due = yield* io(() => store.due(now()));
   for (const candidate of due) {
     if (now() >= deadline) break;
@@ -77,7 +79,8 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         repair: !issue.labels.includes(intent.clientOriginLabel) || !issue.assignees.includes(intent.defaultDeveloper) });
       if (row.state === 'outcome_unknown') {
         const since = row.unknown_since ?? now();
-        if (now() >= since + DAY) {
+        const reconcileDeadline = Math.max(since + DAY, row.operator_reconcile_until ?? 0);
+        if (now() >= reconcileDeadline) {
           yield* finish({ state: 'outcome_unknown', next: null, error: 'ReviewRequired' });
           yield* log(row, 'ReviewRequired', true);
           return;
@@ -94,11 +97,12 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
           yield* log(row, 'Reconciled');
           return;
         }
-        const progress = Result.isSuccess(result) && result.success._tag === 'Continue' ? JSON.stringify(result.success.progress) : null;
+        const progress = Result.isFailure(result) ? row.reconciliation_json
+          : result.success._tag === 'Continue' ? JSON.stringify(result.success.progress) : null;
         const limited = Result.isFailure(result) && result.failure._tag === 'RateLimited' ? result.failure.until : 0;
         const next = Math.max(now() + 1000, limited, progress ? now() : reconcileAt(since, row.reconciliation_count + 1));
-        yield* finish({ state: 'outcome_unknown', next: Math.min(since + DAY, next), progress,
-          review: Result.isSuccess(result) && result.success._tag === 'Unknown' ? JSON.stringify({ reason: result.success.reason, candidates: result.success.candidates }) : null,
+        yield* finish({ state: 'outcome_unknown', next: Math.min(reconcileDeadline, next), progress, providerUntil: limited || undefined,
+          review: Result.isSuccess(result) && result.success._tag === 'Unknown' ? JSON.stringify({ reason: result.success.reason, candidates: result.success.candidates }) : row.review_json,
           error: Result.isFailure(result) ? result.failure._tag : result.success._tag === 'Unknown' ? result.success.reason : 'IncompleteScan' });
         yield* log(row, 'ReconciliationPending', now() - since >= 900_000 ||
           (Result.isSuccess(result) && result.success._tag === 'Unknown' && result.success.alert));
@@ -112,7 +116,7 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         const retryable = Result.isFailure(result) && ['RateLimited', 'ProviderUnavailable', 'OutcomeUnknown'].includes(result.failure._tag);
         yield* finish({ state: 'delivered', next: repaired || review || (!Result.isSuccess(result) && !retryable) || now() >= row.created_at + DAY
           ? null : Result.isFailure(result) && result.failure._tag === 'RateLimited' ? result.failure.until : now() + (Result.isSuccess(result) ? 10_000 : 60_000),
-          repair: !repaired, error: Result.isFailure(result) ? result.failure._tag : result.success._tag });
+          repair: !repaired, providerUntil: Result.isFailure(result) && result.failure._tag === 'RateLimited' ? result.failure.until : undefined, error: Result.isFailure(result) ? result.failure._tag : result.success._tag });
         yield* log(row, 'MetadataRepair', review || (Result.isFailure(result) && !retryable));
         return;
       }
@@ -128,7 +132,7 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
       } else if (error._tag === 'RateLimited' || error._tag === 'ProviderUnavailable') {
         const next = error._tag === 'RateLimited' ? Math.max(now() + 1000, error.until)
           : now() + Math.min(3_600_000, 30_000 * 2 ** Math.min(row.attempts - 1, 7)) * (1 + random() * 0.25);
-        yield* finish({ state: 'pending', next: Math.min(next, row.retry_deadline), error: error._tag });
+        yield* finish({ state: 'pending', next: Math.min(next, row.retry_deadline), providerUntil: error._tag === 'RateLimited' ? error.until : undefined, error: error._tag });
       } else {
         yield* finish({ state: 'failed', next: null, error: error._tag });
       }

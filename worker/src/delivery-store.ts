@@ -8,13 +8,14 @@ export const EXECUTION_MS = 20_000;
 export const DRAIN_MS = 60_000;
 // At most 360 mutations/hour per installation, including metadata repairs.
 export const MUTATION_INTERVAL_MS = 10_000;
+export type DeliveryState = "pending" | "in_flight" | "delivered" | "failed" | "outcome_unknown";
 export interface DeliveryRow {
-  id: string; slot: string; request_id: string; state: string; seq: number;
+  id: string; slot: string; request_id: string; state: DeliveryState; seq: number;
   attempts: number; generation: number; owner: string | null; lease_expires_at: number | null;
   github_installation_id: number | null; environment: string | null; client_origin_label: string | null;
   default_developer: string | null; attempt_started_at: number | null; drain_until: number | null;
   retry_deadline: number; unknown_since: number | null; reconciliation_count: number; reconciliation_json: string | null;
-  repair_pending: number; title: string; description: string; created_at: number; installation_id: string;
+  review_json: string | null; operator_reconcile_until: number | null; repair_pending: number; title: string; description: string; created_at: number; installation_id: string;
   repository_id: number; reporter_subject: string; issue_id: number | null; issue_number: number | null; issue_node_id: string | null;
 }
 const columns = `i.*, r.title, r.description, r.created_at, r.installation_id, r.repository_id, r.reporter_subject,
@@ -41,6 +42,14 @@ export const deliveryStore = (db: QueryDatabase) => {
         unknown_since = COALESCE(unknown_since, ?), next_attempt_at = ?, last_error_class = 'AbandonedAttempt'
         WHERE id IN (SELECT id FROM delivery_intent WHERE state = 'in_flight' AND lease_expires_at <= ? LIMIT 100)`, now, now, now).run();
     },
+    async expire(now: number) {
+      return (await statement(`UPDATE delivery_intent AS i SET state = 'failed', next_attempt_at = NULL,
+        owner = NULL, lease_expires_at = NULL, last_error_class = 'DeliveryDeadline'
+        WHERE i.id IN (SELECT i.id FROM delivery_intent i WHERE i.state = 'pending' AND i.retry_deadline <= ?
+          AND (i.owner IS NULL OR i.lease_expires_at <= ?) AND ${unsuppressed} LIMIT 100)
+        AND i.state = 'pending' AND i.retry_deadline <= ? RETURNING id, generation`, now, now, now)
+        .all<{ id: string; generation: number }>()).results;
+    },
     async due(now: number): Promise<DeliveryRow[]> {
       // One candidate per Slot before the global bound. Persisted least-recently
       // served order prevents a busy/poisoned Slot from occupying the frontier.
@@ -52,20 +61,28 @@ export const deliveryStore = (db: QueryDatabase) => {
         LEFT JOIN delivery_permit p ON p.installation_id = i.github_installation_id
         WHERE i.next_attempt_at <= ? AND (i.owner IS NULL OR i.lease_expires_at <= ?)
           AND (i.state IN ('pending', 'outcome_unknown') OR (i.state = 'delivered' AND i.repair_pending = 1))
-          AND (i.state = 'outcome_unknown' OR p.installation_id IS NULL OR (p.drain_until <= ? AND p.next_mutation_at <= ?))
+          AND (i.state = 'outcome_unknown' OR ((p.installation_id IS NULL OR (p.drain_until <= ? AND p.next_mutation_at <= ?))
+            AND EXISTS (SELECT 1 FROM delivery_fleet_budget WHERE id = 1 AND next_mutation_at <= ?)))
           AND ${ordered} AND ${unsuppressed}
-      ) SELECT * FROM ranked WHERE rank = 1 ORDER BY served, next_attempt_at, id LIMIT 16`, now, now, now, now).all<DeliveryRow>();
+      ) SELECT * FROM ranked WHERE rank = 1 ORDER BY served, next_attempt_at, id LIMIT 16`, now, now, now, now, now).all<DeliveryRow>();
       return result.results;
     },
     async claim(row: DeliveryRow, owner: string, now: number, drain: number): Promise<DeliveryRow | null> {
       const mutation = row.state !== 'outcome_unknown';
       const operation = row.state === 'pending' ? 'create' : row.state === 'delivered' ? 'repair' : 'reconcile';
       const batch = await db.batch([
-        ...(mutation ? [statement(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at)
-          VALUES (?, ?, ?, ?) ON CONFLICT (installation_id) DO UPDATE SET owner = excluded.owner,
+        ...(mutation ? [statement(`UPDATE delivery_fleet_budget SET owner = ?, next_mutation_at = ?
+          WHERE id = 1 AND next_mutation_at <= ?
+          AND EXISTS (SELECT 1 FROM delivery_intent i WHERE i.id = ? AND i.slot = ? AND i.generation = ?
+            AND i.state = ? AND (i.owner IS NULL OR i.lease_expires_at <= ?) AND ${unsuppressed})
+          AND NOT EXISTS (SELECT 1 FROM delivery_permit WHERE installation_id = ? AND (drain_until > ? OR next_mutation_at > ?))`,
+          owner, now + MUTATION_INTERVAL_MS, now, row.id, row.slot, row.generation, row.state, now, row.github_installation_id ?? 0, now, now),
+          statement(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at)
+          SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM delivery_fleet_budget WHERE id = 1 AND owner = ?)
+          ON CONFLICT (installation_id) DO UPDATE SET owner = excluded.owner,
             drain_until = excluded.drain_until, next_mutation_at = excluded.next_mutation_at
           WHERE delivery_permit.drain_until <= ? AND delivery_permit.next_mutation_at <= ?`,
-          row.github_installation_id ?? 0, owner, drain, now + MUTATION_INTERVAL_MS, now, now)] : []),
+          row.github_installation_id ?? 0, owner, drain, now + MUTATION_INTERVAL_MS, owner, now, now)] : []),
         statement(`UPDATE delivery_intent AS i SET owner = ?, generation = generation + 1, lease_expires_at = ?,
           state = CASE WHEN state = 'pending' THEN 'in_flight' ELSE state END,
           attempts = attempts + CASE WHEN state = 'pending' THEN 1 ELSE 0 END,
@@ -84,7 +101,7 @@ export const deliveryStore = (db: QueryDatabase) => {
           SELECT slot, ? FROM delivery_intent WHERE id = ? AND slot = ? AND owner = ?
           ON CONFLICT (slot) DO UPDATE SET last_served_at = excluded.last_served_at`, now, row.id, row.slot, owner),
       ]);
-      const won = batch[mutation ? 1 : 0]!.meta.changes === 1;
+      const won = batch[mutation ? 2 : 0]!.meta.changes === 1;
       return won ? owned({ ...row, owner, generation: row.generation + 1 }) : null;
     },
     async authorized(row: DeliveryRow, now: number): Promise<boolean> {
@@ -96,7 +113,7 @@ export const deliveryStore = (db: QueryDatabase) => {
       return found !== null;
     },
     async finish(row: DeliveryRow, now: number, outcome: {
-      state: string; next: number | null; error?: string; issue?: GitHubIssue;
+      state: DeliveryState; next: number | null; error?: string; providerUntil?: number; issue?: GitHubIssue;
       progress?: string | null; review?: string | null; repair?: boolean; unknownSince?: number;
     }) {
       const issue = outcome.issue;
@@ -115,12 +132,12 @@ export const deliveryStore = (db: QueryDatabase) => {
           WHERE installation_id = ? AND owner = ? AND EXISTS (SELECT 1 FROM delivery_intent
             WHERE id = ? AND owner = ? AND generation = ? AND lease_expires_at > ?)`,
           outcome.state === 'outcome_unknown' ? row.drain_until ?? now : now,
-          outcome.error === 'RateLimited' ? outcome.next ?? now : now + MUTATION_INTERVAL_MS,
+          outcome.providerUntil ?? now + MUTATION_INTERVAL_MS,
           row.github_installation_id, row.owner, row.id, row.owner, row.generation, now),
-        ...(outcome.error === 'RateLimited' ? [statement(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at)
+        ...(outcome.providerUntil !== undefined ? [statement(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at)
           SELECT github_installation_id, '', 0, ? FROM delivery_intent WHERE id = ? AND owner = ? AND generation = ? AND lease_expires_at > ?
           ON CONFLICT (installation_id) DO UPDATE SET next_mutation_at = MAX(next_mutation_at, excluded.next_mutation_at)`,
-          outcome.next ?? now, row.id, row.owner, row.generation, now)] : []),
+          outcome.providerUntil!, row.id, row.owner, row.generation, now)] : []),
         statement(`UPDATE delivery_intent SET state = ?, next_attempt_at = ?, last_error_class = ?, owner = NULL,
           lease_expires_at = NULL, unknown_since = COALESCE(unknown_since, ?), reconciliation_json = ?,
           review_json = ?, reconciliation_count = reconciliation_count + CASE WHEN state = 'outcome_unknown' AND ? IS NULL THEN 1 ELSE 0 END,

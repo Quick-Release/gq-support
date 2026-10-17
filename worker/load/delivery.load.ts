@@ -17,7 +17,7 @@ it("bounds fleet dispatch, shares installation pacing and gives every Slot a fai
     // More Slots than the scheduler's 16-candidate bound, with one busy Slot.
     const mappings: RepositoryMapping[] = Array.from({ length: 24 }, (_, index) => ({
       slot: `project-${index}/production`, client: `client-${index}`, project: `project-${index}`, environment: 'production',
-      repositoryId: 42, githubInstallationId: 7, clientOriginLabel: 'client-support', defaultDeveloper: 'developer',
+      repositoryId: 42 + index % 3, githubInstallationId: 7 + index % 3, clientOriginLabel: 'client-support', defaultDeveloper: 'developer',
     }));
     const clients = harness(db, mappings);
     for (const [index, mapping] of mappings.entries()) {
@@ -30,8 +30,10 @@ it("bounds fleet dispatch, shares installation pacing and gives every Slot a fai
     }
     await db.prepare('UPDATE delivery_control SET enabled = 1').run();
     const github = makeFakeGitHub();
-    github.installation(7);
-    github.repository({ id: 42, installationId: 7 });
+    for (let index = 0; index < 3; index++) {
+      github.installation(7 + index);
+      github.repository({ id: 42 + index, installationId: 7 + index });
+    }
     const posts: number[] = [];
     github.onCreate(() => { posts.push(now); return undefined; });
     for (let turn = 0; turn < 28; turn++) {
@@ -50,7 +52,7 @@ it("bounds fleet dispatch, shares installation pacing and gives every Slot a fai
     }
     expect(posts.every((time, index) => index === 0 || time - posts[index - 1]! >= 10_000)).toBe(true);
     expect(github.issues).toHaveLength(28);
-    console.log(JSON.stringify({ slots: 24, reports: 28, concurrentSweeps: 4, minimumMutationIntervalMs: 10_000,
+    console.log(JSON.stringify({ slots: 24, providerInstallations: 3, reports: 28, concurrentSweeps: 4, minimumMutationIntervalMs: 10_000,
       everySlotServedWithinTurns: 24, virtualElapsedMs: 280_000 }));
   } finally {
     vi.useRealTimers();

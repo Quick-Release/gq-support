@@ -1,6 +1,6 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
-import { resumeDelivery } from "./delivery-recovery.ts";
+import { recoverDelivery } from "./delivery-recovery.ts";
 import { sha256 } from "./signature.ts";
 
 export type CredentialDatabase = Pick<D1Database, "prepare" | "batch">;
@@ -29,7 +29,7 @@ const enrollmentCode = (): string => {
 
 /** The operator command boundary; Cloudflare authentication belongs to the CLI adapter. */
 export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
-  if (args[0] === "resume") return resumeDelivery(args, { query, recordRevocation, mappings, now });
+  if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
     throw new Error("Usage: operator <enroll|revoke|status> <slot>");

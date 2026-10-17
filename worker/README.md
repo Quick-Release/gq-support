@@ -221,7 +221,11 @@ service dispatch, not remote GitHub execution. Stale owners cannot persist resul
 read-only marker reconciliation handles positive late observations.
 
 All creates and additive metadata repairs share a 10-second installation budget
-(at most 360 mutations/hour). Rejections honour provider delays and use bounded
+and a conservative fleet-wide 10-second admission budget (at most 360
+mutations/hour across this stage). Failed claims may consume admission without
+creating an issue; they can never enlarge the budget. Provider cooldown is
+persisted independently of each request deadline. Expired unsent work fails
+without waiting for an installation permit. Rejections honour provider delays and use bounded
 backoff with jitter otherwise, up to 24 hours from acceptance. Unknown creates
 never automatically POST again. Reconciliation checkpoints and candidate identities
 are persisted, following the 1/5/15/60-minute, then hourly schedule through 24 hours.
@@ -239,9 +243,15 @@ Supply an opaque actor, an explicit deadline within the next 24 hours and one of
 writes an audit before its conditional mutation, rechecks mapping/suppression,
 and refuses unknown, superseded or unsafe requests. The audit records the
 attempted authorization even if the command loses eligibility before mutation.
-There is no WordPress or public HTTP recovery endpoint and no force-create action.
+For a positive observation discovered after the automatic reconciliation window,
+`pnpm operator reconcile <slot> <intent> <opaque-actor> positive-evidence` (with
+the same account/database flags) audits and schedules one additional bounded
+hour of read-only reconciliation. It verifies the pinned repository, App author,
+marker, attempt window and conflicts through the provider contract. A negative
+scan still cannot create an issue. There is no WordPress or public HTTP recovery
+endpoint and no force-create action.
 
 Verification: `pnpm --filter gq-support-worker test`, `typecheck` and `load-test`.
-The delivery load test runs 24 Slots, including a busy Slot, against real local D1
-with four competing sweeps and fake GitHub. It checks fairness beyond the frontier
+The delivery load test runs 24 Slots, including a busy Slot, across three provider
+installations against real local D1 with four competing sweeps and fake GitHub. It checks fairness beyond the frontier
 bound and shared pacing. Local results do not measure production provider latency.
