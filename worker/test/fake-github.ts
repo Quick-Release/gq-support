@@ -67,6 +67,7 @@ export const makeFakeGitHub = () => {
   const scripts: Script[] = [];
   const minted: string[] = [];
   let sequence = 0;
+  const omitted = new Set<string>();
   let afterCreate: ((issue: FakeIssue) => Response | undefined) | undefined;
 
   const iso = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -132,7 +133,8 @@ export const makeFakeGitHub = () => {
         expires_at: new Date(expiresAt).toISOString().replace(/\.\d{3}Z$/, "Z"),
         permissions,
         repository_selection: "selected",
-        repositories: scoped.map((repository) => repositoryJson(repository!)),
+        repositories: scoped.map((repository) => Object.fromEntries(Object.entries(repositoryJson(repository!))
+          .filter(([field]) => !omitted.has(field)))),
       }, 201);
     }
 
@@ -272,6 +274,8 @@ export const makeFakeGitHub = () => {
     edit: (issue: FakeIssue, change: Partial<Pick<FakeIssue, "state" | "title" | "body">>, at = Date.now()) => {
       Object.assign(issue, change, { updated_at: iso(at) });
     },
+    /** Leaves a field out of mint responses' repository objects, which GitHub does not document field by field. */
+    mintOmits: (field: string) => { omitted.add(field); },
     update: (id: number, change: Partial<FakeRepository>) => { Object.assign(repositories.get(id)!, change); },
     suspend: (installationId: number) => { installations.get(installationId)!.suspended = true; },
     revoke: (token: string) => { tokens.delete(token); },

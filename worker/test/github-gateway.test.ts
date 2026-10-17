@@ -215,11 +215,19 @@ describe("GitHubGateway", () => {
     ["a redirect", () => new Response(null, { status: 307, headers: { location: "https://api.github.com/repositories/42/issues" } })],
   ])("reports %s after the POST as an unknown outcome and never resends", async (_name, response) => {
     const github = setup();
-    github.next(() => undefined); // mint
-    github.next(() => undefined); // repository check
+    github.next(() => undefined); // mint, with the repository's safety facts
     github.next(response);
     expect(await run(github, failureOf(create))).toEqual({ _tag: "OutcomeUnknown" });
     expect(posts(github)).toHaveLength(1);
+  });
+
+  it("reports a repair 404 as a missing issue while the repository is reachable, so it cannot suspend the repository", async () => {
+    const github = setup();
+    expect(await run(github, failureOf(GitHubGateway.use((gateway) => gateway.addLabels(target, 5, ["client-support"])))))
+      .toEqual({ _tag: "IssueGone" });
+    github.update(42, { installationId: 9 });
+    expect(await run(github, failureOf(GitHubGateway.use((gateway) => gateway.addLabels(target, 5, ["client-support"])))))
+      .toEqual({ _tag: "RepositoryUnavailable", reason: "not-accessible" });
   });
 
   it("reports a POST that times out as an unknown outcome", async () => {
@@ -230,7 +238,8 @@ describe("GitHubGateway", () => {
       github.next(() => undefined);
       github.next(() => "hang");
       const fiber = yield* Effect.forkChild(failureOf(gateway.createIssue(target, newIssue)));
-      yield* Effect.yieldNow;
+      // The create's own mint signs a JWT first; start the clock once the POST is out.
+      while (posts(github).length === 0) yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1)));
       yield* TestClock.adjust("10 seconds");
       return yield* Fiber.join(fiber);
     }));
@@ -244,15 +253,15 @@ describe("GitHubGateway", () => {
     ["Issues disabled (410)", (github: FakeGitHub) => { github.update(42, { hasIssues: false }); },
       { _tag: "RepositoryUnavailable", reason: "issues-disabled" }],
     ["a repository archived after the check (403)", (github: FakeGitHub) => {
-      github.next(() => undefined); github.next(() => undefined);
+      github.next(() => undefined);
       github.next(() => Response.json({ message: "Repository was archived so is read-only." }, { status: 403 }));
     }, { _tag: "RepositoryArchived" }],
     ["a secondary rate limit", (github: FakeGitHub) => {
-      github.next(() => undefined); github.next(() => undefined);
+      github.next(() => undefined);
       github.next(() => Response.json({ message: "You have exceeded a secondary rate limit" }, { status: 403, headers: { "retry-after": "60" } }));
     }, { _tag: "RateLimited", kind: "secondary", until: START + 60_000 }],
     ["a rejected token (401)", (github: FakeGitHub) => {
-      github.next(() => undefined); github.next(() => undefined);
+      github.next(() => undefined);
       github.next(() => Response.json({ message: "Bad credentials" }, { status: 401 }));
     }, { _tag: "ProviderUnavailable", status: 401 }],
   ])("maps %s on create to a known non-creation", async (_name, arrange, expected) => {
@@ -332,10 +341,10 @@ describe("GitHubGateway", () => {
     const scenarios: [(() => void), Effect.Effect<unknown, unknown, GitHubGateway>][] = [
       [() => github.next(echo), GitHubGateway.use((gateway) => gateway.repository(target))],
       [() => { github.next(() => undefined); github.next(echo); }, GitHubGateway.use((gateway) => gateway.repository(target))],
-      [() => { github.next(() => undefined); github.next(() => undefined); github.next(echo); }, create],
-      [() => { github.next(() => undefined); github.next(() => undefined);
+      [() => { github.next(() => undefined); github.next(echo); }, create],
+      [() => { github.next(() => undefined);
         github.next((request) => Response.json({ message: "Validation Failed", errors: [{ field: request.headers.get("authorization") }] }, { status: 422 })); }, create],
-      [() => { github.next(() => undefined); github.next(() => undefined); github.next(() => "reset"); }, create],
+      [() => { github.next(() => undefined); github.next(() => "reset"); }, create],
       [() => { github.next(() => undefined); github.next(echo); }, GitHubGateway.use((gateway) => gateway.listAppIssues(target, 1))],
       [() => { github.next(() => undefined); github.next(echo); }, GitHubGateway.use((gateway) => gateway.readIssue(target, 1))],
       [() => { github.next(() => undefined);
@@ -446,6 +455,6 @@ describe("GitHubReader", () => {
 
   it("exposes no mutating method", () => {
     // Checked by the type checker: the sweep's view cannot create, label or assign.
-    expectTypeOf<keyof GitHubReader["Service"]>().toEqualTypeOf<"repository" | "listIssuesSince" | "readIssue">();
+    expectTypeOf<keyof GitHubReader["Service"]>().toEqualTypeOf<"repository" | "verifyRepository" | "listIssuesSince" | "readIssue">();
   });
 });

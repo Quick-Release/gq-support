@@ -6,6 +6,7 @@ import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256 } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { DAY, DRAIN_MS, EXECUTION_MS, deliveryStore, type DeliveryRow } from "./delivery-store.ts";
+import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
 
 export interface DeliveryOptions {
   readonly db: QueryDatabase;
@@ -30,6 +31,13 @@ const approved = (row: DeliveryRow, mappings: readonly RepositoryMapping[]) => {
     Number.isSafeInteger(row.github_installation_id) && row.github_installation_id! > 0 &&
     mapping.environment === row.environment && mapping.clientOriginLabel === row.client_origin_label &&
     mapping.defaultDeveloper === row.default_developer;
+};
+/** Before the attempt is recorded, so a storage failure cannot skip it. A failed write alerts; the next unsafe check retries it. */
+const suspendIfUnsafe = (options: DeliveryOptions, row: DeliveryRow, error: { readonly _tag: string; readonly reason?: string }, now: number) => {
+  const reason = unsafeReason(error);
+  return reason ? suspendRepository(options.db, row.repository_id, reason, now).pipe(Effect.asVoid,
+    Effect.catch(() => Effect.logError("Repository suspension not recorded").pipe(
+      Effect.annotateLogs({ repository: row.repository_id, reason, alert: true })))) : Effect.void;
 };
 const log = (row: Pick<DeliveryRow, "id" | "generation">, outcome: string, alert = false) =>
   (alert ? Effect.logError("Support delivery requires review") : Effect.logInfo("Support delivery outcome")).pipe(
@@ -113,6 +121,7 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         const result = yield* Effect.result(supportIssues.repair(intent, { id: row.issue_id, nodeId: row.issue_node_id, number: row.issue_number }, authorize));
         const repaired = Result.isSuccess(result) && result.success._tag === 'Repaired';
         const review = Result.isSuccess(result) && result.success._tag === 'NeedsReview';
+        if (Result.isFailure(result)) yield* suspendIfUnsafe(options, row, result.failure, now());
         const retryable = Result.isFailure(result) && ['RateLimited', 'ProviderUnavailable', 'OutcomeUnknown'].includes(result.failure._tag);
         yield* finish({ state: 'delivered', next: repaired || review || (!Result.isSuccess(result) && !retryable) || now() >= row.created_at + DAY
           ? null : Result.isFailure(result) && result.failure._tag === 'RateLimited' ? result.failure.until : now() + (Result.isSuccess(result) ? 10_000 : 60_000),
@@ -134,6 +143,7 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
           : now() + Math.min(3_600_000, 30_000 * 2 ** Math.min(row.attempts - 1, 7)) * (1 + random() * 0.25);
         yield* finish({ state: 'pending', next: Math.min(next, row.retry_deadline), providerUntil: error._tag === 'RateLimited' ? error.until : undefined, error: error._tag });
       } else {
+        yield* suspendIfUnsafe(options, row, error, now());
         yield* finish({ state: 'failed', next: null, error: error._tag });
       }
       yield* log(row, error._tag, !['OutcomeUnknown', 'RateLimited', 'ProviderUnavailable'].includes(error._tag));
