@@ -303,10 +303,25 @@ at **2026-10-17 10:31:12 UTC**, from commit `e96ad95`:
 - Typechecking and all 165 tests passed. Native Workers-runtime regression
   coverage verifies that redirect responses cannot forward the App JWT.
 
-**Still pending:** repeat replacement and old-key revocation with the deployed
-service-binding signing check before and after revocation. The earlier rehearsal
-proved GitHub key replacement and revocation before Worker deployment. The
-collaborative browser is currently signed out, so generating/revoking the next
-staging key remains blocked on operator sign-in. Repository installation and
-scoped-token behavior belong to #37; production rollout remains gated by #20.
-No live acceptance completion is claimed for #36 yet.
+Deployed staging rotation completed on **2026-10-17**:
+
+1. Generated replacement pair `4905670`, fingerprint
+   `2QVuwBptUqruWP2BGiHR/XpPwvpkOmR7lZKHodAH+8k=`. Converted PKCS#1 to
+   PKCS#8 in memory, verified import/live App authentication and the public
+   fingerprint, updated only the staging encrypted CI source, then removed the
+   downloaded PEM. No converted file was written.
+2. [Pre-revocation deployment 39031794586](https://github.com/Quick-Release/gq-support/actions/runs/39031794586)
+   passed Worker-side fresh signing, fingerprint comparison and custody audit
+   at **12:17:03 UTC** while old pair `4904209` remained valid.
+3. Deleted old pair `4904209`; at **12:17:53 UTC**, the settings page confirmed
+   only replacement pair `4905670` remained.
+4. [Post-revocation deployment 39031967179, attempt 2](https://github.com/Quick-Release/gq-support/actions/runs/39031967179/attempts/2)
+   passed fresh Worker signing, the same replacement fingerprint and custody
+   audit at **12:21:47 UTC**. Both successful rotation runs inspected five state
+   entries and 421 files and uploaded zero artifacts. All 165 tests and
+   typechecking passed. Attempt 1 stopped before deployment on a quota-test 503;
+   the unchanged retry passed the full suite.
+
+The registration, custody and staging rotation acceptance for #36 is complete.
+Repository installation and scoped-token behavior belong to #37; receiver
+activation belongs to #12; production rollout remains gated by #20.
