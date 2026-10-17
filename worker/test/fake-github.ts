@@ -138,6 +138,7 @@ export const makeFakeGitHub = () => {
     const match = path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
     const repository = match && repositoryAt(match[1]!, match[2]!);
     if (!match || !repository || !token.repositoryIds.includes(repository.id) ||
+        repository.installationId !== token.installationId ||
         installations.get(repository.installationId)?.suspended) return message(404, "Not Found");
     const rest = match[3] ?? "";
 

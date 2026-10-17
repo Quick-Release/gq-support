@@ -31,7 +31,8 @@ const observingFetch: typeof fetch = async (input, init) => {
   }
   if (method === "POST" && url.pathname.endsWith("/issues") && response.status !== 201) {
     const message = (await response.clone().json().catch(() => ({})) as { message?: unknown }).message;
-    observed.archivedCreate = { status: response.status, message: typeof message === "string" ? message.slice(0, 120) : null };
+    // A classification only: provider message text is never printed.
+    observed.archivedCreate = { status: response.status, mentionsArchived: typeof message === "string" && /archived/i.test(message) };
   }
   if (pretendUnarchived && method === "GET" && /^\/repos\/[^/]+\/[^/]+$/.test(url.pathname) && response.ok) {
     // Lets the POST reach GitHub so the real archived-repository error is observed.

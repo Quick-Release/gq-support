@@ -375,4 +375,30 @@ describe("GitHubGateway", () => {
     expect(error).toEqual({ _tag: "ProviderUnavailable", status: 307 });
     expect(redirects).toEqual(["manual"]);
   });
+
+  it("stops reading a response body larger than 8 MiB", async () => {
+    const github = setup();
+    github.next(() => undefined);
+    let pulled = 0;
+    github.next(() => new Response(new ReadableStream({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new Uint8Array(1024 * 1024).fill(32));
+        if (pulled > 20) controller.close();
+      },
+    }), { status: 200 }));
+    expect(await run(github, failureOf(GitHubGateway.use((gateway) => gateway.repository(target)))))
+      .toEqual({ _tag: "ProviderUnavailable", status: null });
+    expect(pulled).toBeLessThan(12);
+  });
+
+  it("reports a missing issue as gone only while its repository is still reachable", async () => {
+    const github = setup();
+    await run(github, Effect.gen(function* () {
+      const gateway = yield* GitHubGateway;
+      expect(yield* failureOf(gateway.readIssue(target, 404))).toEqual({ _tag: "IssueGone" });
+      github.update(42, { installationId: 8 });
+      expect(yield* failureOf(gateway.readIssue(target, 404))).toEqual({ _tag: "RepositoryUnavailable", reason: "not-accessible" });
+    }));
+  });
 });

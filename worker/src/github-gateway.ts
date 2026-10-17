@@ -7,6 +7,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -57,7 +58,10 @@ export class RateLimited extends Data.TaggedError("RateLimited")<{
   /** Epoch milliseconds before which the caller must not try again. */
   readonly until: number;
 }> {}
-/** GitHub did not answer usefully; nothing was changed, so a read may be retried. */
+/**
+ * GitHub did not answer usefully, or rejected the installation token (401,
+ * which drops it so the next call re-mints). Nothing was changed: retry later.
+ */
 export class ProviderUnavailable extends Data.TaggedError("ProviderUnavailable")<{
   readonly status: number | null;
 }> {}
@@ -78,6 +82,9 @@ export class OutcomeUnknown extends Data.TaggedError("OutcomeUnknown")<{}> {}
 export class IssueMoved extends Data.TaggedError("IssueMoved")<{ readonly location: string }> {}
 /** The issue was deleted. */
 export class IssueGone extends Data.TaggedError("IssueGone")<{}> {}
+
+/** Internal: no complete response (transport error, timeout or oversized body). */
+class NoResponse extends Data.TaggedError("NoResponse")<{}> {}
 
 export type GatewayError =
   | AppAuthenticationFailed
@@ -237,9 +244,9 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       )).pipe(
         Effect.flatMap((response) => readBody(response).pipe(Effect.map((body) => ({ response, body })))),
         Effect.timeoutOption(REQUEST_TIMEOUT_MS),
-        Effect.flatMap(Option.match({ onNone: () => Effect.fail(null), onSome: Effect.succeed })),
+        Effect.flatMap(Option.match({ onNone: () => Effect.fail(new NoResponse()), onSome: Effect.succeed })),
         // Transport errors carry the request, headers included: drop them.
-        Effect.mapError(() => null),
+        Effect.mapError(() => new NoResponse()),
       );
 
     const mint = (cacheKey: string) => Effect.gen(function* () {
@@ -304,18 +311,18 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       const token = yield* Cache.get(tokens, keyOf(target));
       const result = yield* send(build(`${API}/repos/${token.fullName}`), token.token);
       const status = result.response.status;
-      // A rejected token, or a repository renamed or gone since the mint:
-      // the next call re-mints, which also refreshes the cached name.
-      if (status === 401 || status === 404 || status === 301) yield* Cache.invalidate(tokens, keyOf(target));
+      // A rejected token is dropped so the next call re-mints.
+      if (status === 401) yield* Cache.invalidate(tokens, keyOf(target));
       return { status, headers: result.response.headers, body: result.body, now: yield* Clock.currentTimeMillis };
     });
+    /** A call that changes nothing on GitHub, so a missing response is just unavailability. */
     const read = (target: GitHubTarget, build: (repository: string) => HttpClientRequest.HttpClientRequest) =>
-      call(target, build).pipe(Effect.catchIf(
-        (error): error is null => error === null,
-        () => Effect.fail(new ProviderUnavailable({ status: null })),
-      ));
+      call(target, build).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new ProviderUnavailable({ status: null }))));
 
     const repository = (target: GitHubTarget) => read(target, HttpClientRequest.get).pipe(
+      Effect.tap(({ status }) =>
+        // Renamed, transferred or gone since the mint: re-minting refreshes the name or reports the loss.
+        status === 301 || status === 404 ? Cache.invalidate(tokens, keyOf(target)) : Effect.void),
       Effect.flatMap(({ status, headers, body, now }) => {
         if (status !== 200) return Effect.fail(failure(status, headers, body, now));
         const state = repositoryFrom(body);
@@ -331,11 +338,8 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       if (state.archived) return yield* Effect.fail(new RepositoryArchived());
       const result = yield* call(target, (repository) => HttpClientRequest.post(`${repository}/issues`).pipe(
         HttpClientRequest.bodyJsonUnsafe(issue),
-      )).pipe(Effect.catchIf(
-        (error): error is null => error === null,
-        // Sent, but no complete answer: GitHub may have created the issue.
-        () => Effect.fail(new OutcomeUnknown()),
-      ));
+      // Sent, but no complete answer: GitHub may have created the issue.
+      )).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new OutcomeUnknown())));
       const { status, headers, body, now } = result;
       if (status === 201) {
         const created = issueFrom(body);
@@ -386,6 +390,8 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
           : Effect.fail(new ProviderUnavailable({ status }));
       }
       if (status === 410) return Effect.fail(new IssueGone());
+      // 404 is a missing issue, or one moved out of reach, only if the repository is still reachable.
+      if (status === 404) return repository(target).pipe(Effect.andThen(Effect.fail(new IssueGone())));
       if (status !== 200) return Effect.fail(failure(status, headers, body, now));
       const issue = issueFrom(body);
       return issue && issue.number === number
@@ -418,19 +424,32 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
   }));
 }
 
+/** Reads at most MAX_RESPONSE_BYTES, stopping the stream once exceeded. */
 const readBody = (response: HttpClientResponse.HttpClientResponse) =>
-  Effect.gen(function* () {
-    const length = Number(response.headers["content-length"] ?? 0);
-    if (length > MAX_RESPONSE_BYTES) return yield* Effect.fail(null);
-    const text = yield* response.text;
-    if (text.length > MAX_RESPONSE_BYTES) return yield* Effect.fail(null);
-    if (text === "") return undefined;
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return undefined;
-    }
-  });
+  response.stream.pipe(
+    Stream.runFoldEffect(() => ({ chunks: [] as Uint8Array[], length: 0 }), (body, chunk) => {
+      body.length += chunk.length;
+      if (body.length > MAX_RESPONSE_BYTES) return Effect.fail(new NoResponse());
+      body.chunks.push(chunk);
+      return Effect.succeed(body);
+    }),
+    // A bodiless response (304, 3xx, some 5xx) has nothing to read.
+    Effect.catchIf(
+      (error) => error._tag === "HttpClientError" && error.reason._tag === "EmptyBodyError",
+      () => Effect.succeed({ chunks: [], length: 0 }),
+    ),
+    Effect.map(({ chunks, length }) => {
+      if (length === 0) return undefined;
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      try {
+        return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
 
 type Headers = Readonly<Record<string, string | undefined>>;
 

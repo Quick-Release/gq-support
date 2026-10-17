@@ -251,7 +251,7 @@ sandbox repository. It prints only these observations:
 - the created issue's creator login, and whether it equals `<slug>[bot]`;
 - whether the label and assignee were applied on create;
 - the creator-filtered list visibility delay;
-- the archived-repository create status and message, and the typed failure the gateway mapped it to.
+- the archived-repository create status, whether GitHub's message mentions archiving, and the typed failure the gateway mapped it to.
 
 The gateway reads privacy and archived state live before every create, so it
 does not depend on the mint-response answer. Record the results under the live
