@@ -229,6 +229,35 @@ mappings: an Operator verifies the new numeric installation/repository identity,
 permissions and private-only access first. Removing one installation does not
 require rotating an uncompromised App key or interrupting other installations.
 
+## Gateway tokens and the first spike (#37)
+
+`worker/src/github-gateway.ts` is the Worker's only GitHub client. It signs a
+fresh RS256 JWT (`iat` 60 s back, `exp` 9 minutes ahead) for each mint and mints
+installation tokens with exactly `repository_ids: [<mapped id>]` and
+`{issues: write, metadata: read}`. It fails closed when GitHub grants anything
+else. Tokens live only in isolate memory and are refreshed 5 minutes before
+`expires_at`. A 401, 404 or 301 drops the cached token. Restarting or
+redeploying the Worker clears every cached token. To cut off a leaked token
+early, revoke it with `DELETE /installation/token` or suspend the installation.
+Failures are logged as a tag plus status and rate-limit fields only.
+
+The research's first-spike checks run in the **GitHub App spike (staging)**
+workflow on main (`worker/scripts/github-spike.ts`). It creates real issues, so
+only point it at a staging-installed **private sandbox** repository with an
+existing label and an assignable collaborator. Optionally add an archived
+sandbox repository. It prints only these observations:
+
+- whether the scoped mint response includes `private` and `archived`;
+- the created issue's creator login, and whether it equals `<slug>[bot]`;
+- whether the label and assignee were applied on create;
+- the creator-filtered list visibility delay;
+- the archived-repository create status, whether GitHub's message mentions archiving, and the typed failure the gateway mapped it to.
+
+The gateway reads privacy and archived state live before every create, so it
+does not depend on the mint-response answer. Record the results under the live
+evidence below, and update `src/github-gateway.ts` if the creator format or the
+archived error differs from what it expects.
+
 ## Completion evidence for #36
 
 Append a dated non-secret record to this runbook or the issue with:
