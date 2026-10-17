@@ -131,6 +131,12 @@ Three layers keep noise out of the pass/fail signal.
 
 **Keeping provider latency out of the site gate.** CI points `GQ_SUPPORT_SERVICE_URL` at a local fake Worker with fixed latency, or stubs it with `pre_http_request`, so B13 measures only WordPress work. Worker acknowledgement, queue delay and GitHub delivery latency are production telemetry owned by #20. They never feed the site gate. A separate outage test sets the fake to hang or refuse and checks that B1–B6 are unchanged and that plugin routes return within the adapter timeout plus 1 s.
 
+**Implementation.** Layer 1 is `.github/workflows/performance.yml` (`size-gate.mjs`). Layer 2 is `plugin/tests/browser/performance.spec.ts`, which covers B1, B4, B8 and B10–B13; the fake Worker in `plugin/tests/performance/gq-probe.php` also simulates the outages (`down`, `hang`, and the negative control `stall`). Layer 3 is `.github/workflows/benchmark.yml`, which runs `plugin/tests/performance/timing-benchmark.mjs` on DDEV:
+- Every round runs each variant once, rotating the order: plugin off, base (on PRs) and head. Base is the PR's base tree, mounted as a second plugin directory and swapped in per request.
+- T1 and T2 use 50 rounds, read from the probe's `Server-Timing` header. T3 uses 20 rounds of a cold browser context.
+- The report also carries peak memory (M1, M2) for B2 and B6, the raw samples and the environment. It is uploaded as the `timing-<sha>` artifact and written to the job summary.
+- The rules live in `plugin/tests/performance/timing-stats.mjs`. Every metric has `promoted: false`, so no timing can fail the job. To promote T1 and T2, set `mainMad` from ten `main` artifacts. T3 is relative to the PR's base and needs no history. Then set `promoted: true` and record the thresholds here. T3's rule is the whole-CI rule: it fails only when the CI's lower bound exceeds 25% of the base median, which is stricter than "over 25% with a CI excluding 0". T4 (heap after 50 cycles) is not benchmarked yet.
+
 ## Alternatives considered
 
 - **Lighthouse or LHCI scores as the gate.** Rejected. A score blends everything on the page, and the plugin's share of a wp-admin page is a few kilobytes. Lighthouse's own guidance is that the median of 5 runs is only about twice as stable as one run, and it recommends dedicated hardware ([variability.md](https://github.com/GoogleChrome/lighthouse/blob/main/docs/variability.md)). Lighthouse 12 also removed `budgets.json`. LHCI `resource-summary` assertions would work, but they duplicate the byte check at a higher cost.

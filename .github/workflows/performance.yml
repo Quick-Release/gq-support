@@ -21,8 +21,9 @@ concurrency:
 jobs:
   size:
     # Budgets B5 and B7 in docs/research/idle-performance-budgets.md. The counter gate
-    # (B1, B4, B11, B12) is plugin/tests/browser/performance.spec.ts, which `pnpm test:browser`
-    # runs in php.yml's DDEV job on every WordPress and WooCommerce variant.
+    # (B1, B4, B8, B10–B13) is plugin/tests/browser/performance.spec.ts, which `pnpm test:browser`
+    # runs in php.yml's DDEV job on every WordPress and WooCommerce variant. Report-only
+    # timings (T1–T3) are benchmark.yml.
     name: Asset size gate
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:

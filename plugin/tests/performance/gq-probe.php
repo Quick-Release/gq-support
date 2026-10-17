@@ -7,7 +7,12 @@
  *   plugin request can leave the machine.
  * - `?gq_probe=1`: the response carries an `X-GQ-Probe` header with the plugin's SQL, HTTP and
  *   cron counts for that request. Plugin SQL is attributed by the `gq_support` name in the query.
+ *   It also carries a `Server-Timing` header with the request's PHP wall time and peak memory.
  * - `?gq_off=1`: the plugin is inactive for this request only, for on/off comparisons.
+ * - `?gq_variant=base`: load `plugins/gq-support-base/` (a PR's base tree) instead, for base/head comparisons.
+ * - A `gq_worker` cookie takes the fake Worker down for every request that carries it: `down` refuses
+ *   at once, `hang` times out after the caller's timeout, and `stall` (the outage negative control)
+ *   overruns that timeout by 2 s.
  * - `?gq_violate=<kind>`: inject one budget violation, as the probe's negative control.
  *
  * @package GQ_Support
@@ -36,6 +41,17 @@ add_filter(
 		if ( false !== $pre || ! $worker ) {
 			return $pre;
 		}
+		$outage = isset( $_COOKIE['gq_worker'] ) ? sanitize_key( wp_unslash( $_COOKIE['gq_worker'] ) ) : '';
+		if ( 'down' === $outage ) {
+			return new WP_Error( 'http_request_failed', 'cURL error 7: Connection refused' );
+		}
+		if ( 'hang' === $outage || 'stall' === $outage ) {
+			// Capped, so a missing or huge timeout still ends the request.
+			$timeout = min( (float) ( $args['timeout'] ?? 5 ), 15 );
+			$overrun = 'stall' === $outage ? 2 : 0;
+			usleep( (int) ( ( $timeout + $overrun ) * 1000000 ) );
+			return new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' );
+		}
 		return array(
 			'headers'  => array(),
 			'body'     => '{"code":"gq_support_fake_worker"}',
@@ -55,6 +71,10 @@ if ( isset( $_GET['gq_off'] ) ) {
 	$gq_support_without = static fn( $plugins ) => array_diff_key( (array) $plugins, array( 'gq-support/gq-support.php' => true ) );
 	add_filter( 'option_active_plugins', static fn( $plugins ) => array_values( array_diff( (array) $plugins, array( 'gq-support/gq-support.php' ) ) ) );
 	add_filter( 'site_option_active_sitewide_plugins', $gq_support_without );
+} elseif ( isset( $_GET['gq_variant'] ) && 'base' === $_GET['gq_variant'] ) {
+	$gq_support_rename = static fn( string $plugin ): string => 'gq-support/gq-support.php' === $plugin ? 'gq-support-base/gq-support.php' : $plugin;
+	add_filter( 'option_active_plugins', static fn( $plugins ) => array_map( $gq_support_rename, (array) $plugins ) );
+	add_filter( 'site_option_active_sitewide_plugins', static fn( $plugins ) => array_combine( array_map( $gq_support_rename, array_keys( (array) $plugins ) ), (array) $plugins ) );
 }
 
 $gq_support_violation = isset( $_GET['gq_violate'] ) ? sanitize_key( wp_unslash( $_GET['gq_violate'] ) ) : '';
@@ -93,6 +113,17 @@ switch ( $gq_support_violation ) {
 					wp_enqueue_style( 'gq-support-probe', $gq_support_plugin( 'assets/dist/index.css' ), array(), (string) time() );
 				}
 			},
+			20
+		);
+		break;
+	case 'rest':
+		// A REST call on every launcher click: the first open and each reopen.
+		add_action(
+			'admin_enqueue_scripts',
+			static fn() => wp_add_inline_script(
+				'gq-support-launcher',
+				sprintf( 'document.addEventListener("click", function (event) { if (event.target.closest(".gq-support-launcher")) fetch(%s); }, true);', wp_json_encode( rest_url( 'gq-support/v1/requests' ) ) )
+			),
 			20
 		);
 		break;
@@ -146,6 +177,8 @@ if ( isset( $_GET['gq_probe'] ) ) {
 				wp_clear_scheduled_hook( 'gq_support_probe' );
 			}
 			header( 'X-GQ-Probe: ' . wp_json_encode( $gq_support_probe ) );
+			// The same names as core's performance-test mu-plugin; memory is in bytes.
+			header( sprintf( 'Server-Timing: wp-total;dur=%.3F, wp-memory-usage;dur=%d', timer_float() * 1000, memory_get_peak_usage() ) );
 		},
 		0
 	);

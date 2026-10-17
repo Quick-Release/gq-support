@@ -20,3 +20,5 @@ package-dist/
 
 /worker/revocations.lock
 /worker/revocations.json.tmp
+.bench-base/
+benchmark-results/

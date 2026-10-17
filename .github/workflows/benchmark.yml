@@ -1,0 +1,76 @@
+name: Timing benchmark
+
+# Report-only timings (T1–T3 in docs/research/idle-performance-budgets.md). Every `main` run adds
+# to the variance history that promotes them to gates; PRs run only when labelled `perf`.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugin/**"
+      - ".ddev/**"
+      - ".github/workflows/benchmark.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  timing:
+    name: Interleaved timing benchmark (report-only)
+    # Adding any other label skips the job before it joins the concurrency group, so it cannot
+    # cancel a running benchmark.
+    if: >-
+      github.event_name == 'push' || (contains(github.event.pull_request.labels.*.name, 'perf')
+      && (github.event.action != 'labeled' || github.event.label.name == 'perf'))
+    concurrency:
+      group: benchmark-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ddev/github-action-setup-ddev@v1
+        with:
+          version: 1.25.4
+          autostart: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+      - name: Build the Reporter app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:app
+          pnpm exec playwright install --with-deps chromium
+      # The base tree is mounted as a second plugin, so base and head share one server and one job.
+      - name: Build the PR's base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          mkdir .bench-base
+          git archive "$BASE_SHA" | tar -x -C .bench-base
+          cd .bench-base
+          pnpm install --frozen-lockfile
+          pnpm build:app
+      - name: Disposable WordPress site
+        run: bash plugin/tests/integration/run.sh
+      - name: Interleaved benchmark
+        env:
+          GQ_BENCH_BASE: ${{ github.event_name == 'pull_request' && '.bench-base/plugin' || '' }}
+          GQ_BENCH_BASE_COMMIT: ${{ github.event.pull_request.base.sha }}
+        run: pnpm bench:timing
+      - name: Publish the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timing-${{ github.sha }}
+          path: benchmark-results/
+          if-no-files-found: ignore
+          retention-days: 90
