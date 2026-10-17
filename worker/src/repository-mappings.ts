@@ -5,6 +5,9 @@ export interface RepositoryMapping {
   readonly project: string;
   readonly environment: string;
   readonly repositoryId: number;
+  /** Required to deliver; omit only while a Slot is not approved for delivery. */
+  readonly githubInstallationId?: number;
+  readonly clientOriginLabel?: string;
   readonly defaultDeveloper: string;
 }
 

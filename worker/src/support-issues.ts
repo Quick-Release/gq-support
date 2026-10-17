@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import { GitHubGateway, ValidationRejected, type GitHubIssue, type GitHubTarget, type ReadIssueError } from "./github-gateway.ts";
+import { GitHubGateway, OutcomeUnknown, ValidationRejected, type GitHubIssue, type GitHubTarget, type ReadIssueError } from "./github-gateway.ts";
 
 /** Trusted, pinned delivery inputs. Never construct these from Reporter request fields. */
 export interface SupportIssueIntent {
@@ -89,22 +89,22 @@ export const supportIssues = {
   /** Deterministically reconstruct the expected template for reconciliation, without I/O. */
   prepare: prepareIssue,
   /** One authorized attempt. Caller owns durable authorization and fencing; no retry here. */
-  create: (intent: SupportIssueIntent) => Effect.gen(function* () {
+  create: (intent: SupportIssueIntent, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
     const issue = yield* prepareIssue(intent);
     const gateway = yield* GitHubGateway;
-    return yield* gateway.createIssue(intent.target, issue);
+    return yield* gateway.createIssue(intent.target, issue, authorize);
   }),
   /**
    * Read before/after one additive mutation at most. Schedule RepairPending
    * again under the installation's mutation budget; never replace metadata.
    */
-  repair: (intent: SupportIssueIntent, identity: IssueIdentity) => Effect.gen(function* () {
+  repair: (intent: SupportIssueIntent, identity: IssueIdentity, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
     const gateway = yield* GitHubGateway;
     yield* gateway.repository(intent.target);
     const read = yield* gateway.readIssue(intent.target, identity.number);
     if (read._tag !== "Fresh" || !sameIdentity(read.issue, identity)) return { _tag: "NeedsReview" } as const;
-    if (!read.issue.labels.includes(intent.clientOriginLabel)) yield* gateway.addLabels(intent.target, identity.number, [intent.clientOriginLabel]);
-    else if (!read.issue.assignees.includes(intent.defaultDeveloper)) yield* gateway.addAssignees(intent.target, identity.number, [intent.defaultDeveloper]);
+    if (!read.issue.labels.includes(intent.clientOriginLabel)) yield* gateway.addLabels(intent.target, identity.number, [intent.clientOriginLabel], authorize);
+    else if (!read.issue.assignees.includes(intent.defaultDeveloper)) yield* gateway.addAssignees(intent.target, identity.number, [intent.defaultDeveloper], authorize);
     const after = yield* gateway.readIssue(intent.target, identity.number);
     if (after._tag !== "Fresh" || !sameIdentity(after.issue, identity)) return { _tag: "NeedsReview" } as const;
     return { _tag: after.issue.labels.includes(intent.clientOriginLabel) && after.issue.assignees.includes(intent.defaultDeveloper)

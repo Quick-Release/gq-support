@@ -213,13 +213,13 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
    * private and not archived. Never retried here: an OutcomeUnknown must be
    * reconciled before any further attempt.
    */
-  readonly createIssue: (target: GitHubTarget, issue: NewIssue) => Effect.Effect<GitHubIssue, CreateIssueError>;
+  readonly createIssue: (target: GitHubTarget, issue: NewIssue, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<GitHubIssue, CreateIssueError>;
   /** One page of issues the App created, newest first, pull requests excluded. */
   readonly listAppIssues: (target: GitHubTarget, page: number) =>
     Effect.Effect<{ readonly issues: readonly GitHubIssue[]; readonly hasNextPage: boolean }, GatewayError>;
   /** Additive, idempotent repairs. Caller owns pacing and retry scheduling. */
-  readonly addLabels: (target: GitHubTarget, number: number, labels: readonly string[]) => Effect.Effect<void, RepairIssueError>;
-  readonly addAssignees: (target: GitHubTarget, number: number, assignees: readonly string[]) => Effect.Effect<void, RepairIssueError>;
+  readonly addLabels: (target: GitHubTarget, number: number, labels: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<void, RepairIssueError | OutcomeUnknown>;
+  readonly addAssignees: (target: GitHubTarget, number: number, assignees: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<void, RepairIssueError | OutcomeUnknown>;
   /** One issue, conditionally on a stored ETag. Moves are reported, not followed. */
   readonly readIssue: (target: GitHubTarget, number: number, etag?: string) => Effect.Effect<IssueRead, ReadIssueError>;
 }>()("GitHubGateway") {
@@ -312,8 +312,10 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
     const call = (
       target: GitHubTarget,
       build: (repository: string) => HttpClientRequest.HttpClientRequest,
+      authorize: Effect.Effect<void, OutcomeUnknown> = Effect.void,
     ) => Effect.gen(function* () {
       const token = yield* Cache.get(tokens, keyOf(target));
+      yield* authorize;
       const result = yield* send(build(`${API}/repos/${token.fullName}`), token.token);
       const status = result.response.status;
       // A rejected token is dropped so the next call re-mints.
@@ -322,7 +324,10 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
     });
     /** Reads and additive repairs can be repeated safely after a missing response. */
     const idempotentCall = (target: GitHubTarget, build: (repository: string) => HttpClientRequest.HttpClientRequest) =>
-      call(target, build).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new ProviderUnavailable({ status: null }))));
+      call(target, build).pipe(Effect.catchTags({
+        NoResponse: () => Effect.fail(new ProviderUnavailable({ status: null })),
+        OutcomeUnknown: () => Effect.fail(new ProviderUnavailable({ status: null })),
+      }));
 
     const repository = (target: GitHubTarget) => idempotentCall(target, HttpClientRequest.get).pipe(
       Effect.tap(({ status }) =>
@@ -337,14 +342,14 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       }),
     );
 
-    const createIssue = (target: GitHubTarget, issue: NewIssue) => Effect.gen(function* () {
+    const createIssue = (target: GitHubTarget, issue: NewIssue, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
       const state = yield* repository(target);
       if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
       if (state.archived) return yield* Effect.fail(new RepositoryArchived());
       const result = yield* call(target, (repository) => HttpClientRequest.post(`${repository}/issues`).pipe(
         HttpClientRequest.bodyJsonUnsafe(issue),
       // Sent, but no complete answer: GitHub may have created the issue.
-      )).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new OutcomeUnknown())));
+      ), authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new OutcomeUnknown())));
       const { status, headers, body, now } = result;
       if (status === 201) {
         const created = issueFrom(body);
@@ -405,15 +410,15 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
         : Effect.fail(new ProviderUnavailable({ status }));
     }));
 
-    const repair = (target: GitHubTarget, number: number, field: "labels" | "assignees", values: readonly string[]) =>
+    const repair = (target: GitHubTarget, number: number, field: "labels" | "assignees", values: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
       Effect.gen(function* () {
         const state = yield* repository(target);
         if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
         if (state.archived) return yield* Effect.fail(new RepositoryArchived());
-        const { status, headers, body, now } = yield* idempotentCall(target, (repository) =>
+        const { status, headers, body, now } = yield* call(target, (repository) =>
           HttpClientRequest.post(`${repository}/issues/${number}/${field}`).pipe(
             HttpClientRequest.bodyJsonUnsafe({ [field]: values }),
-          ));
+          ), authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new ProviderUnavailable({ status: null }))));
         if (status === 200 && (field === "labels" ? logins(body, "name") !== undefined : issueFrom(body) !== undefined)) return;
         if (status === 400 || status === 422) return yield* Effect.fail(new ValidationRejected({ status, fields: [field] }));
         if (status === 410) return yield* Effect.fail(new IssueGone());
@@ -442,8 +447,8 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
       createIssue: logged("createIssue", createIssue),
       listAppIssues: logged("listAppIssues", listAppIssues),
       readIssue: logged("readIssue", readIssue),
-      addLabels: logged("addLabels", (target, number, labels) => repair(target, number, "labels", labels)),
-      addAssignees: logged("addAssignees", (target, number, assignees) => repair(target, number, "assignees", assignees)),
+      addLabels: logged("addLabels", (target, number, labels, authorize) => repair(target, number, "labels", labels, authorize)),
+      addAssignees: logged("addAssignees", (target, number, assignees, authorize) => repair(target, number, "assignees", assignees, authorize)),
     };
   }));
 }

@@ -139,7 +139,10 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
       // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
       const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
       return await handleSupportRequests(request, url, body, storageFor(key.slot),
-        { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId }, now);
+        { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId,
+          ...(mapping.githubInstallationId && mapping.clientOriginLabel ? { delivery: { githubInstallationId: mapping.githubInstallationId,
+            environment: mapping.environment, clientOriginLabel: mapping.clientOriginLabel, defaultDeveloper: mapping.defaultDeveloper } } : {}),
+        }, now);
     }
     return json({ ...binding(key, mapping), mapping_state: results[1].results[0].suspended_reason ? "suspended" : "active" });
   } catch {

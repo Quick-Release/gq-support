@@ -188,3 +188,60 @@ These operations do not dispatch intake records or own installation permits.
   original text was purged, `reviewTitle` requires Operator title review. This
   signal alone does not claim erasure is complete. Multiple/suspicious erased
   discoveries still require review, with candidate identities for cleanup.
+
+## Durable GitHub delivery
+
+Issue #25 adds one D1 scheduler (`src/delivery.ts` and `src/delivery-store.ts`)
+using the existing GitHub gateway and Support issue operations. A committed
+acceptance wakes bounded `waitUntil` work; `* * * * *` recovers missed wake-ups.
+Public outcomes already project pending/in-flight, delivered, failed and unknown
+without exposing provider identities or errors. No GitHub key leaves the Worker.
+
+Delivery mappings additionally need `githubInstallationId` and
+`clientOriginLabel`. These and the environment/default Developer are pinned at
+acceptance. Changed or missing mappings fail closed rather than rerouting old
+reports. Migration 0005 marks pre-migration pending/in-flight work unknown and
+requires review because it has no pinned provider installation.
+
+The migration starts `delivery_control.enabled = 0`. After rollout/restore checks,
+an independently authenticated Operator can enable the intended database with
+`UPDATE delivery_control SET enabled = 1 WHERE id = 1`. Disable it before restore
+or incident recovery. This is a dispatch gate, not a complete restore procedure:
+#20 owns restore suppression replay, and #46 owns erasure/retention integration.
+Do not enable production report delivery until those gates are satisfied.
+`delivery_suppression` denies new creates/repairs by Slot or request; removing a
+WordPress key alone does not cancel accepted reports.
+
+Each invocation can authorize dispatch for 20 seconds from its start; the adapter
+interrupts background work at 25 seconds. Installation permits cannot recycle
+uncertain execution for 60 seconds from invocation start. The gateway's finite
+15-second requests and final deadline/ownership check after token minting prevent
+a delayed claim or lookup from starting a POST outside that window. This bounds
+service dispatch, not remote GitHub execution. Stale owners cannot persist results;
+read-only marker reconciliation handles positive late observations.
+
+All creates and additive metadata repairs share a 10-second installation budget
+(at most 360 mutations/hour). Rejections honour provider delays and use bounded
+backoff with jitter otherwise, up to 24 hours from acceptance. Unknown creates
+never automatically POST again. Reconciliation checkpoints and candidate identities
+are persisted, following the 1/5/15/60-minute, then hourly schedule through 24 hours.
+Structured Effect logs and spans contain intent/generation/outcome only. Alerts
+are log events for operations to route, not outbound notifications.
+
+An independent Operator may resume a **failed**, confirmed non-created request:
+
+```sh
+pnpm operator resume shop/production int_<id> 2026-10-18T12:00:00Z operator-7 permissions-restored --account-id <account-id> --database-id <database-id>
+```
+
+Supply an opaque actor, an explicit deadline within the next 24 hours and one of
+`configuration-fixed`, `permissions-restored`, `provider-recovered`. The command
+writes an audit before its conditional mutation, rechecks mapping/suppression,
+and refuses unknown, superseded or unsafe requests. The audit records the
+attempted authorization even if the command loses eligibility before mutation.
+There is no WordPress or public HTTP recovery endpoint and no force-create action.
+
+Verification: `pnpm --filter gq-support-worker test`, `typecheck` and `load-test`.
+The delivery load test runs 24 Slots, including a busy Slot, against real local D1
+with four competing sweeps and fake GitHub. It checks fairness beyond the frontier
+bound and shared pacing. Local results do not measure production provider latency.

@@ -9,6 +9,7 @@ export interface Caller {
   readonly slot: string;
   readonly installationId: string;
   readonly repositoryId: number;
+  readonly delivery?: { readonly githubInstallationId: number; readonly environment: string; readonly clientOriginLabel: string; readonly defaultDeveloper: string };
 }
 
 /**
@@ -193,8 +194,11 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
         VALUES (?1, ?2, CASE WHEN ?12 IS NULL OR changes() = 1 THEN ?3 END, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
       id, accepted.reporter_subject, accepted.submission_id, digest, accepted.summary, accepted.description, accepted.title,
       now, caller.installationId, caller.repositoryId, input.supersedes_id),
-      storage.statement(`INSERT INTO delivery_intent (slot, id, request_id, kind, seq, state, next_attempt_at)
-        VALUES (?1, ?2, ?3, 'create', 0, 'pending', ?4)`, `int_${ulid(now)}`, id, now),
+      storage.statement(`INSERT INTO delivery_intent (slot, id, request_id, kind, seq, state, next_attempt_at,
+        github_installation_id, environment, client_origin_label, default_developer, retry_deadline)
+        VALUES (?1, ?2, ?3, 'create', 0, 'pending', ?4, ?5, ?6, ?7, ?8, ?9)`, `int_${ulid(now)}`, id, now,
+        caller.delivery?.githubInstallationId ?? null, caller.delivery?.environment ?? null,
+        caller.delivery?.clientOriginLabel ?? null, caller.delivery?.defaultDeveloper ?? null, now + DAY),
       storage.statement("DELETE FROM intake_debit WHERE slot = ?1 AND debited_at <= ?2", now - DAY),
     ]);
   } catch {
