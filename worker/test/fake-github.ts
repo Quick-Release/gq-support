@@ -66,6 +66,7 @@ export const makeFakeGitHub = () => {
   const scripts: Script[] = [];
   const minted: string[] = [];
   let sequence = 0;
+  let afterCreate: ((issue: FakeIssue) => Response | undefined) | undefined;
 
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
     Response.json(body, { status, headers: { "x-github-request-id": "FAKE:REQUEST", ...headers } });
@@ -167,7 +168,7 @@ export const makeFakeGitHub = () => {
         repositoryId: repository.id,
       };
       issues.push(issue);
-      return json(issueJson(issue), 201);
+      return afterCreate?.(issue) ?? json(issueJson(issue), 201);
     }
     if (rest === "/issues" && request.method === "GET") {
       const creator = request.query.get("creator");
@@ -182,6 +183,20 @@ export const makeFakeGitHub = () => {
         headers.link = `<https://api.github.com/repositories/${repository.id}/issues?page=${page + 1}>; rel="next"`;
       }
       return json(slice.map(issueJson), 200, headers);
+    }
+    const metadata = rest.match(/^\/issues\/(\d+)\/(labels|assignees)$/);
+    if (metadata && request.method === "POST") {
+      if (repository.archived) return message(403, "Repository was archived so is read-only.");
+      const issue = issues.find((candidate) => candidate.repositoryId === repository.id && candidate.number === Number(metadata[1]));
+      if (!issue || issue.deleted) return message(404, "Not Found");
+      const body = request.body as { labels?: string[]; assignees?: string[] };
+      if (metadata[2] === "labels") {
+        for (const name of body.labels ?? []) if (!issue.labels.some((label) => label.name === name)) issue.labels.push({ name });
+        return json(issue.labels);
+      }
+      if ((body.assignees ?? []).some((login) => !repository.collaborators.includes(login))) return message(422, "Validation Failed");
+      for (const login of body.assignees ?? []) if (!issue.assignees.some((assignee) => assignee.login === login)) issue.assignees.push({ login });
+      return json(issueJson(issue));
     }
     const one = rest.match(/^\/issues\/(\d+)$/);
     if (one && request.method === "GET") {
@@ -227,6 +242,7 @@ export const makeFakeGitHub = () => {
   return {
     layer,
     privateKeyPem,
+    onCreate: (script: (issue: FakeIssue) => Response | undefined) => { afterCreate = script; },
     requests,
     minted,
     issues,

@@ -138,3 +138,53 @@ Platform behavior checked against the installed Wrangler and Cloudflare docs:
 [primary reads and Sessions](https://developers.cloudflare.com/d1/best-practices/read-replication/),
 [Ed25519](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/), and
 [Wrangler D1 queries](https://developers.cloudflare.com/d1/wrangler-commands/#execute).
+
+### Support issue provider operations
+
+`src/support-issues.ts` exposes `supportIssues.create`, `repair` and `reconcile`
+for the delivery scheduler described in `docs/support-delivery-design.md` (#38).
+These operations do not dispatch intake records or own installation permits.
+
+- Construct `SupportIssueIntent` from trusted, pinned operational records. The
+  title is intake's derived title; the label and default Developer are approved
+  mapping configuration. Attribution takes only an environment, opaque
+  installation reference and Reporter pseudonym (`rs_…`), never a raw subject,
+  username, email or Submission ID. The versioned template fences Reporter text
+  with a tilde run longer than any in that text; context fields remain omitted.
+- Persist authorization/attempt ownership **before** calling `create` once.
+  Persist the returned GitHub identity even when metadata is missing. An
+  `OutcomeUnknown` goes to reconciliation, never a generic mutation retry.
+  The scheduler must recheck execution deadlines and erasure/suppression before
+  dispatch; provider operations cannot provide durable authorization themselves.
+- Call `repair` with that trusted identity under the installation mutation budget.
+  It reads current metadata and sends at most one additive POST. `RepairPending`
+  needs a later paced repair; `Repaired` changes no delivery identity. A repair
+  failure leaves the successful delivery intact. Gateway errors retain rate
+  feedback. Silent provider drops are detected by the final read.
+- `reconcile` reads one creator-filtered, creation-descending page (100 issues)
+  per call, plus the preceding page on resumption to verify its boundary has
+  not shifted through insertion, deletion or transfer. Persist a `Continue.progress` checkpoint with the intent and pass it
+  to the next call. Checkpoints hold only scope, pagination and candidate
+  identities, never Reporter text. An error preserves the previous checkpoint;
+  retry that read under the provider budget. A shifted/inconclusive scan needs a
+  fresh scan at the next scheduled check. Never interpret either as absence.
+- Supply the recorded attempt's bounded dispatch window and configured App bot
+  login. Before erasure, supply the exact original template/title as
+  `expectedIssue` (reconstruct it with `supportIssues.prepare`); after purging text use `null` with `erasurePending`. A known
+  GitHub identity, if any, must also match. Repository identity is checked live.
+  A single candidate is re-read after completing the scan; changed content or
+  identity requires review. A collaborator can copy even the entire template:
+  this is correlation evidence, not authentication. Before committing a result,
+  the scheduler must conditionally verify request ownership and ensure the
+  returned identity is not already bound to another request.
+- `Unknown` always remains outcome-unknown, including complete empty scans.
+  `alert: true` signals suspicious or multiple matches for immediate Operator
+  review; it sends no notification. No operation selects a duplicate, closes,
+  deletes or recreates an issue. Scheduling (1/5/15/60 minutes, then hourly),
+  unresolved alerts after 15 minutes, the 24-hour review deadline and late
+  positive binding belong to the delivery scheduler, not this module.
+- An erased discovery returns `RedactionRequired` with an identity, never a
+  create or repair. Route it to the privacy redaction workflow (#46); when
+  original text was purged, `reviewTitle` requires Operator title review. This
+  signal alone does not claim erasure is complete. Multiple/suspicious erased
+  discoveries still require review, with candidate identities for cleanup.
