@@ -1,11 +1,25 @@
 # GitHub webhook synchronization of Support status
 
 - **Research target:** GitHub issue [#12](https://github.com/Quick-Release/gq-support/issues/12)
-- **Status:** Recommended design for the Worker's webhook receiver, status projection refresh, and missed-delivery recovery. Not implemented.
+- **Status:** Accepted 2026-10-17 (see Decisions) for status projection refresh, repository safety checks, and the webhook receiver. Not implemented.
 - **Access date:** 2026-10-17. Every GitHub and Cloudflare fact below was read on this date. Re-check before relying on them.
 - **Inputs:** [CONTEXT.md](../../CONTEXT.md), [ADR 0003](../adr/0003-durable-acceptance-separates-delivery-from-status.md), [ADR 0006](../adr/0006-ordered-reconciliation-of-support-mutations.md), [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md), [ADR 0010](../adr/0010-installation-scoped-attestation-not-cross-site-identity.md), [ADR 0013](../adr/0013-shared-cloudflare-resources-per-stage.md), [ADR 0015](../adr/0015-reporters-see-submitted-text-and-projected-status.md), [ADR 0016](../adr/0016-restores-never-rewind-revocations-or-deliveries.md), [ADR 0019](../adr/0019-uncertain-creates-require-review.md), [support storage design](../support-storage-design.md), [support delivery design](../support-delivery-design.md), [support security design](../support-security-design.md), [support privacy design](../support-privacy-design.md), [support domain design](../support-domain-design.md), [support API contract](../support-api-contract.md), [GitHub App research](github-app-issue-integration.md)
 
 GitHub facts are cited to docs.github.com, or to GitHub's published OpenAPI description where the docs page omits payload detail. Cloudflare facts are cited to developers.cloudflare.com, or to the `workerd` runtime source. Anything marked **verify in spike** is an inference that the first implementation slice must confirm against a real App and test repository.
+
+## Decisions (2026-10-17)
+
+Settled in a design review of this note. Where they differ from the sections below, these win; the sections have been edited to match.
+
+1. **Scope.** #12 covers status projection, routing and revocation events, and recovery. Reviewed replies are not designed here; reopening them needs a new ADR.
+2. **Ship the sweep first.** Slice 1 is the 15-minute sweep, the daily open-row pass and mapping safety checks, with no public route. The webhook receiver is slice 2 and only improves freshness.
+3. **Sweep checks repository safety.** Each sweep reads `private` and `archived` from the scoped token mint (or one `GET /repos/{o}/{r}` if the mint omits `archived`) and suspends the mapping on failure or lost access.
+4. **Only an Operator lifts a Suspended mapping,** for every cause, after a passing verification.
+5. **Transfers always end tracking.** A Slot maps to exactly one repository (ADR 0014), so a transferred or deleted issue becomes `closed`, `tracking = lost`, with an Operator alert. Rows never move.
+6. **Reporters see open or closed only.** No third state and no "last checked" time.
+7. **Signed safety events suspend at once** in the webhook request.
+8. **No delivery-log check.** The sweep repairs missed deliveries. Alert on webhook `401`/`5xx` counts and sweep lag instead. Redelivery stays a manual Operator action in GitHub's UI.
+9. **No `issues.opened` hint.** The receiver handles status and safety events only.
 
 ## Scope against accepted decisions
 
@@ -32,7 +46,7 @@ Map issue #1 already restates #12 as "secure status synchronization and recovery
 5. **Durability before ack.** For a matching `issues` event, one conditional D1 `UPDATE` marks that row's status as due for refresh, then the handler returns `202`. Fail-closed lifecycle events (publicized, deleted, removed, suspended, archived) write the suspension in the same request before returning `2xx`. If D1 fails, return `503`, so GitHub records a failed delivery and recovery can find it.
 6. **Processing.** A `waitUntil()` task re-fetches the issue with `If-None-Match` and overwrites the projection, guarded by GitHub's `updated_at` so an older fetch can never overwrite a newer one. The payload's own state is never written. If the task does not finish, the minute Cron picks up the due row.
 7. **No echo.** Webhook handlers never call a mutating GitHub endpoint. The App's own events (`opened`, `labeled`, `assigned`, redaction `edited`) therefore cannot loop.
-8. **Recovery.** Correctness comes from the periodic per-repository sweep ADR 0015 already requires. This note sets it at every 15 minutes, plus a bounded daily re-check of open rows to catch deletions and transfers. A scheduled delivery-log check (`GET /app/hook/deliveries`, JWT) detects missed deliveries in GitHub's 3-day window and turns them into targeted sweeps and mapping verifications. It does not redeliver them. Redelivery stays an audited Operator tool.
+8. **Recovery.** Correctness comes from the periodic per-repository sweep ADR 0015 already requires. This note sets it at every 15 minutes, plus a bounded daily re-check of open rows to catch deletions and transfers. Each sweep also checks repository safety. There is no delivery-log check. Redelivery stays a manual Operator action.
 9. **Freshness targets.** Normally within about two minutes of the GitHub change. Without a webhook, within one sweep interval (about 17 minutes). Deletions and transfers without a webhook, within 24 hours. These are measured service objectives, not promises, and the API contract does not change.
 
 ## Event and action matrix
@@ -46,8 +60,7 @@ GitHub subscriptions are per event, not per action. The `issues` event lists 20 
 | `issues` | `closed`, `reopened` | Mark row due; re-fetch; overwrite status | Issues: read |
 | `issues` | `transferred` | Mark row due; re-fetch follows the 301; see lifecycle table | Issues: read |
 | `issues` | `deleted` | Mark row due; re-fetch expects 410; `closed` + `tracking = lost` + alert | Issues: read |
-| `issues` | `opened` by the App bot | Optional hint: bring forward reconciliation of `outcome_unknown` intents in that repository. Never binds an identity from the payload | Issues: read |
-| `issues` | all others (`edited`, `labeled`, `assigned`, …) | `204`, no D1 access. The Reporter never sees edits (ADR 0015). Erasure checks for retitles with its own GET at erasure time ([privacy design](../support-privacy-design.md)) | — |
+| `issues` | all others (`opened`, `edited`, `labeled`, `assigned`, …) | `204`, no D1 access. The Reporter never sees edits (ADR 0015). Erasure checks for retitles with its own GET at erasure time ([privacy design](../support-privacy-design.md)) | — |
 | `repository` | `publicized`, `deleted`, `archived`, `transferred` | Fail closed now: write `repository_state.suspended_reason`, alert, schedule verification | Metadata: read ([source](https://docs.github.com/en/webhooks/webhook-events-and-payloads#repository)) |
 | `repository` | `privatized`, `unarchived` | Schedule verification only. Never resume from the payload | Metadata: read |
 | `repository` | `renamed`, `edited`, `created` | `204`. Names come from each token mint response, and mappings are code | Metadata: read |
@@ -111,13 +124,12 @@ Forward migration (never edit `0001`), additive only:
 - `support_request.status_refresh_attempts`: for bounded backoff and alerting.
 - `support_request.status_source_updated_at`: GitHub's `issue.updated_at` from the last applied fetch.
 - `repository_state.verify_due_at`, and `suspended_at` for alert age.
-- A single-row `webhook_delivery_check` with the delivery-log checkpoint (see Missed deliveries).
 
 These are rebuildable, target-keyed obligations, not stored deliveries. They hold no payload, no delivery ID, and no Reporter content.
 
 | Issue #12 state | Here | Transition |
 |---|---|---|
-| received | `status_refresh_due_at` set | Webhook, sweep, or delivery-log repair: `UPDATE … SET status_refresh_due_at = COALESCE(status_refresh_due_at, now)`. Repeats coalesce into one obligation that keeps the earliest due time |
+| received | `status_refresh_due_at` set | Webhook or sweep: `UPDATE … SET status_refresh_due_at = COALESCE(status_refresh_due_at, now)`. Repeats coalesce into one obligation that keeps the earliest due time |
 | processing | `waitUntil()` task or Cron claims the due row | No lease needed: the work is one idempotent conditional GET, and concurrent runs are harmless because the write is guarded (next section) |
 | completed | `status_refresh_due_at` cleared | Conditional on the due value read at claim time, so a newer webhook that arrived during the fetch is not lost |
 | failed | Still due, `status_refresh_attempts` + 1, next try with jittered backoff | Retryable: 5xx, timeout, 403/429 rate limit (honour `retry-after` / `x-ratelimit-reset`). Alert after repeated failures. Terminal: 404/410 → lifecycle table |
@@ -126,7 +138,7 @@ These are rebuildable, target-keyed obligations, not stored deliveries. They hol
 
 Fail-closed lifecycle events are applied in the request itself: one `UPSERT` into `repository_state` setting `suspended_reason` and `verify_due_at`, before the `2xx`. Suspension needs no fetch, and the delivery path re-checks repository safety before every POST anyway ([delivery design](../support-delivery-design.md#scheduling-ownership-and-fairness)). If the write fails, return `503`.
 
-The Cron already runs every minute for delivery. The same handler drains due refreshes and verifications with a per-invocation bound and fair ordering across repositories. It also runs the sweeps and the delivery-log check on their own cadence. No extra Cron Trigger or Queue is needed. Revisit Queues if measured webhook volume, due-row age or Cron duration requires it, the same trigger the delivery design uses.
+The Cron already runs every minute for delivery. The same handler drains due refreshes and verifications with a per-invocation bound and fair ordering across repositories. It also runs the sweeps on their own cadence. No extra Cron Trigger or Queue is needed. Revisit Queues if measured webhook volume, due-row age or Cron duration requires it, the same trigger the delivery design uses.
 
 ## Ordering, staleness and when to refetch
 
@@ -141,8 +153,8 @@ The Cron already runs every minute for delivery. The same handler drains due ref
 ## The App's own events and echo avoidance
 
 - The App's own writes produce events: create (`opened`), label and assignee repair (`labeled`, `assigned`), and ADR 0018 redaction (`edited`). The `sender` "may be the `ghost` placeholder" and "Don't assume `sender` always identifies the person who caused an event" ([sender property](https://docs.github.com/en/webhooks/webhook-events-and-payloads)). So echo handling must not depend on `sender`.
-- **Invariant:** the webhook and sweep code paths never call a mutating GitHub endpoint. Enforce it structurally: the gateway methods they receive are read-only (`readIssue`, `listIssuesSince`, `verifyMapping`, `listDeliveries`). A test asserts that no `POST`, `PATCH`, `PUT` or `DELETE` happens while processing any fixture. With no writes there is no loop, whatever the event.
-- `issues.opened` from the bot may expedite read-only reconciliation of `outcome_unknown` intents in that repository. It is a scheduling hint only. Binding an identity still goes through the marker, creator and time-window checks in the [delivery design](../support-delivery-design.md#unknown-outcomes-and-reconciliation). A forged or copied marker in a payload gains nothing.
+- **Invariant:** the webhook and sweep code paths never call a mutating GitHub endpoint. Enforce it structurally: the gateway methods they receive are read-only (`readIssue`, `listIssuesSince`, `verifyMapping`). A test asserts that no `POST`, `PATCH`, `PUT` or `DELETE` happens while processing any fixture. With no writes there is no loop, whatever the event.
+- `issues.opened` from the bot is ignored. Reconciliation of `outcome_unknown` intents keeps its own schedule ([delivery design](../support-delivery-design.md#unknown-outcomes-and-reconciliation)).
 
 ## Issue and repository lifecycle
 
@@ -151,7 +163,7 @@ This extends the [#8 lifecycle table](github-app-issue-integration.md#lifecycle-
 | Case | Webhook signal | Confirmation | Result |
 |---|---|---|---|
 | Issue closed / reopened | `issues.closed` / `reopened` | Conditional GET | Status overwritten under the guard |
-| Issue transferred | `issues.transferred`. The schema has required `changes.new_issue` and `changes.new_repository` ([OpenAPI](https://github.com/github/rest-api-description/blob/0fa95c50cd6fc3d5f736a54f49d9195b4cb139bb/descriptions/api.github.com/api.github.com.json), `webhook-issues-transferred`) | GET old issue: "301 Moved Permanently … if the issue was transferred" ([get an issue](https://docs.github.com/en/rest/issues/issues#get-an-issue)) | If the new `repository_id` is mapped to the **same Client**, mint a token for it and move the row's `(repository_id, issue_id, issue_number)` conditionally. Otherwise `closed`, `tracking = lost`, alert. The payload's `new_repository` is a hint, never authority. **Verify in spike** what a token scoped to the old repository gets from the 301, and whether the issue `id` changes on transfer. |
+| Issue transferred | `issues.transferred`. The schema has required `changes.new_issue` and `changes.new_repository` ([OpenAPI](https://github.com/github/rest-api-description/blob/0fa95c50cd6fc3d5f736a54f49d9195b4cb139bb/descriptions/api.github.com/api.github.com.json), `webhook-issues-transferred`) | GET old issue: "301 Moved Permanently … if the issue was transferred" ([get an issue](https://docs.github.com/en/rest/issues/issues#get-an-issue)) | A Slot maps to exactly one repository (ADR 0014), so a transfer always leaves it: `closed`, `tracking = lost`, alert. Rows never move (decided 2026-10-17). The 301 is only confirmation |
 | Issue deleted | `issues.deleted` | GET → 410 "if the issue was deleted" ([same](https://docs.github.com/en/rest/issues/issues#get-an-issue)) | `closed`, `tracking = lost`, alert. Never recreated |
 | Repository renamed / owner renamed | `repository.renamed`, `installation_target.renamed` | Next mint returns the current `full_name` | No D1 write. Identity is unchanged |
 | Repository publicized / `public` | Both | Not needed to suspend | `suspended_reason = public`, alert, pending creates stay unsent. Only an Operator resumes, after a Client decision (#8) |
@@ -165,7 +177,7 @@ This extends the [#8 lifecycle table](github-app-issue-integration.md#lifecycle-
 
 - `installation.deleted` / `suspend` and `installation_repositories.removed` set `no_access` on every affected mapped repository, in the request. Known-unsent accepted intents follow the #8 and delivery rules: `failed` with an alert. Uncertain creates stay `outcome-unknown`, and delivered requests keep their last projection.
 - Either the App owner (or app managers) or the installing account owner can suspend an installation, and "A GitHub App must be unsuspended in the same way it was suspended" ([suspending an installation](https://docs.github.com/en/apps/maintaining-github-apps/suspending-a-github-app-installation)). A suspended installation cannot mint tokens. Whether a suspended installation still receives webhooks is not documented: **verify in spike**. The design does not depend on it.
-- `unsuspend`, `added` and `new_permissions_accepted` only schedule verification: a scoped mint, the repository `private` and `archived` checks, and `GET /repos/{o}/{r}/installation` matching the pinned installation (#8). A passing verification is reported to the Operator, who resumes with one audited CLI action (#41). This mirrors the operator-only resume for `public` and keeps one rule for every suspension. Whether `archived` and `no_access` may later clear automatically after verification is a choice for #39/#40.
+- `unsuspend`, `added` and `new_permissions_accepted` only schedule verification: a scoped mint, the repository `private` and `archived` checks, and `GET /repos/{o}/{r}/installation` matching the pinned installation (#8). A passing verification is reported to the Operator, who resumes with one audited CLI action (#41). This mirrors the operator-only resume for `public` and keeps one rule for every suspension. Decided: no suspension clears automatically, whatever its cause.
 - Out-of-order lifecycle events (for example `unsuspend` before `suspend`) at worst leave a mapping suspended with a verification showing it healthy. That is the safe direction, and it is visible to the Operator.
 
 ## Missed deliveries, redelivery and reconciliation
@@ -182,32 +194,23 @@ Design:
 
 1. **The sweep is the correctness backstop** (ADR 0015). Every 15 minutes, for each mapped repository with delivered rows, list `creator=<app>[bot]&state=all&since=<last_swept_at − 5 min>` ([list repository issues](https://docs.github.com/en/rest/issues/issues#list-repository-issues): `since` is "last updated"). Mark changed rows due, or apply the listed state under the same `updated_at` guard. A moving `since` changes the ETag, so these calls are never free `304`s. Budget them as full requests.
 2. **Daily re-check of open rows.** A deleted or transferred issue drops out of the list, so the `since` sweep cannot see it. Once a day, run a bounded, resumable pass of conditional GETs over `open` + `active` rows. Unchanged issues return `304` with no primary-quota cost.
-3. **Delivery-log check, detection only.** Every 15 minutes (on the same Cron), list App deliveries back to the stored checkpoint, capped at 3 days and a fixed page budget. Group by `guid`. A GUID with no `OK` attempt is missed. Do **not** use `status=failure`: it covers 400–599 only, and a timeout or connection failure may carry another code. **Verify in spike** what `status` and `status_code` a timeout records. For each missed GUID, use the metadata, not the payload:
-   - `issues` with a mapped `repository_id`: sweep that repository now.
-   - `repository`, `public`, `installation_repositories`: verify those repositories now.
-   - `installation` (no `repository_id`): verify every mapping pinned to that `installation_id`.
-
-   Count misses, alert above a threshold, and export `throttled_at` counts.
-4. **Redelivery is an Operator tool.** The UI (App owner or managers) or the operator CLI can redeliver within 3 days, through the gateway with the App JWT. Redelivery is safe because every handler is idempotent. It is not automatic: the metadata repair already covers it without re-sending payloads to the Worker.
-5. **Older than 3 days, or a long outage:** run a full reconciliation. Sweep every mapped repository with `since = outage start − skew`, verify every mapping, then resume normal cadence. After a D1 restore, ADR 0016's ordering applies first. Projections are rebuildable by this sweep.
-
-Permissions and blast radius: the deliveries endpoints are app-level (JWT), not installation-scoped, and can read delivery request and response bodies (`GET /app/hook/deliveries/{id}` returns `request.payload`). Only the `GitHubGateway` holds the key. Its `listDeliveries` method returns metadata fields only, and never the per-delivery payload. Operator actions use Operator credentials, never a WordPress capability or installation key, and are audited ([delivery design](../support-delivery-design.md#operator-recovery-and-alerts)).
+3. **Repository safety on every sweep** (decision 3). The sweep's scoped mint reports `private` (and `archived`, **verify in spike**; otherwise one `GET /repos/{o}/{r}`). A public, archived or inaccessible repository, or a failed mint, suspends the mapping and alerts. This also catches missed `repository`, `public` and `installation` events within one interval.
+4. **No delivery-log check** (decision 8). The sweep already repairs every missed `issues` event, and item 3 repairs missed lifecycle events, so scanning `GET /app/hook/deliveries` would add an app-level JWT surface, a checkpoint row and payload-capable endpoints for no extra correctness. Webhook health is watched through the Worker's own `401`/`5xx` counts and sweep lag. Redelivery stays a manual Operator action in GitHub's UI; it is safe because every handler is idempotent.
+5. **After a long outage:** run a full reconciliation. Sweep every mapped repository with `since = outage start − skew`, verify every mapping, then resume normal cadence. After a D1 restore, ADR 0016's ordering applies first. Projections are rebuildable by this sweep.
 
 Rate considerations:
 
 - Installation tokens get 5,000 requests per hour per installation. GETQUICK's organization is one installation, so this budget is shared fleet-wide ([rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)).
 - Sweep cost per hour is about `R × 4` lists plus about `R` token mints. Each mint is scoped to one repository (#8 criterion 2). For 100 repositories that is about 500 requests per hour, 10% of the base limit, leaving room for delivery and reconciliation. Use a read-only permission set (`issues: read, metadata: read`) for sweep mints. That narrows #8's set. A multi-repository read-only token would cut mints, but needs an explicit amendment to #8 criterion 2; it is not proposed here.
-- JWT-authenticated App endpoint limits are not stated on the rate-limit page. **Verify in spike**, and treat `422` "spammed" as back-off.
 - Pace sweeps serially per installation, as GitHub advises ([REST best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)), and give delivery and reconciliation priority over sweeps.
 
 ### Runbook: missed webhooks
 
-1. **Detect:** alert on misses from the delivery-log check, on Worker `5xx` or `401` spikes on the webhook route, on due-row age, or on a sweep failing for a repository for more than an hour.
+1. **Detect:** alert on Worker `5xx` or `401` spikes on the webhook route, on due-row age, or on a sweep failing for a repository for more than an hour.
 2. **Check config:** `GET /app/hook/config` (JWT) shows the configured `url`, `content_type` and `insecure_ssl` ([REST: App webhooks](https://docs.github.com/en/rest/apps/webhooks#get-a-webhook-configuration-for-an-app)). Never log its `secret`. A burst of `401` after a rotation means the secret pair is wrong.
-3. **Repair within 3 days:** let the delivery-log check run, or trigger it from the operator CLI. Optionally redeliver specific GUIDs for debugging.
-4. **Repair beyond 3 days:** run the full reconciliation sweep with the outage start time.
-5. **Confirm:** due-row backlog drained, every repository's `last_swept_at` within one interval, no unacknowledged suspensions.
-6. **Record:** an audit entry with actor, time, window and counts. No payloads or content.
+3. **Repair:** fix the configuration. The next sweeps repair status and safety without any redelivery. For an outage longer than one sweep interval, trigger a full reconciliation sweep with the outage start time from the operator CLI. Redelivering specific GUIDs in GitHub's UI is optional, for debugging.
+4. **Confirm:** due-row backlog drained, every repository's `last_swept_at` within one interval, no unacknowledged suspensions.
+5. **Record:** an audit entry with actor, time, window and counts. No payloads or content.
 
 ## Freshness expectations
 
@@ -215,15 +218,15 @@ Targets, to be measured in the spike and staging, under normal GitHub and Cloudf
 
 | Path | Target | Bound comes from |
 |---|---|---|
-| Webhook delivered | p95 ≤ 2 min from GitHub `updated_at` to `status_observed_at` | GitHub delivery delay ("a few minutes" possible) plus `waitUntil()` or the next minute Cron |
-| Webhook missed or event before identity bound | ≤ 17 min | 15-min sweep plus 1-min Cron plus fetch |
+| Webhook delivered (slice 2) | p95 ≤ 2 min from GitHub `updated_at` to `status_observed_at` | GitHub delivery delay ("a few minutes" possible) plus `waitUntil()` or the next minute Cron |
+| Slice 1 (sweep only), webhook missed, or event before identity bound | ≤ 17 min | 15-min sweep plus 1-min Cron plus fetch |
 | Issue deleted or transferred, webhook missed | ≤ 24 h | Daily open-row re-check |
-| Repository made public, webhook missed | Creates blocked at the next dispatch; mapping suspended at the next sweep or verification | Write-time guard (#8) |
+| Repository made public, webhook missed | Creates blocked at the next dispatch; mapping suspended at the next sweep | Write-time guard (#8) and the sweep's safety check |
 | Reporter sees a change | On the next first-show or manual refresh after the projection updates | Domain design: no polling |
 
-Metrics: projection lag (`status_observed_at − status_source_updated_at`), oldest due-refresh age, per-repository sweep age, missed GUIDs per check, `throttled_at` count, `401` count, and suspended mappings by reason and age. Alert routing belongs to #20.
+Metrics: projection lag (`status_observed_at − status_source_updated_at`), oldest due-refresh age, per-repository sweep age, webhook `401` and `5xx` counts, and suspended mappings by reason and age. Alert routing belongs to #20.
 
-The API contract does not expose `status_observed_at`, and this note does not add it. A "last checked" hint for Reporters would be a separate contract change.
+The API contract does not expose `status_observed_at`, and it will not (decision 6). Staleness is an Operator concern, covered by the alerts above.
 
 ## Caches and widget behaviour
 
@@ -280,7 +283,7 @@ Deterministic Worker tests with a fake GitHub Layer, a controlled clock and inje
 
 12. Same delivery twice, redelivery with the same GUID after a failed first attempt, and after a successful one: the obligation is set each time, and the result is one correct status.
 13. `closed` then `reopened` delivered in reverse; two concurrent fetches completing in reverse order: the final state matches GitHub, with the `updated_at` guard proving no regression.
-14. D1 write fails during the request: `503`, nothing applied. Recovered by the delivery-log check.
+14. D1 write fails during the request: `503`, nothing applied. GitHub records a failed delivery; the next sweep repairs it.
 15. The `waitUntil()` task is cancelled mid-fetch: the row stays due, and the next Cron completes it.
 16. A webhook arrives during a fetch: the due marker survives the completion write.
 17. GitHub 5xx, timeout, 403/429 with `retry-after`: backoff honoured, attempts counted, alert at the threshold, no tight loop.
@@ -288,17 +291,17 @@ Deterministic Worker tests with a fake GitHub Layer, a controlled clock and inje
 
 **Lifecycle**
 
-19. Every row of the lifecycle table, including issue transfer inside the same Client, transfer to another Client, delete (410), repository publicized, privatized (no resume), archived/unarchived, transferred, deleted, installation deleted/suspended/unsuspended, repositories removed/added.
+19. Every row of the lifecycle table, including issue transfer (always lost, row never moves), delete (410), repository publicized, privatized (no resume), archived/unarchived, transferred, deleted, installation deleted/suspended/unsuspended, repositories removed/added.
 20. Out-of-order `suspend`/`unsuspend`: ends suspended, with verification showing healthy.
 
 **Echo**
 
 21. Process every fixture, including the App's own `opened`, `labeled`, `assigned` and `edited`: zero mutating GitHub calls.
-22. `opened` by the bot with a forged or copied marker: no identity bound without full reconciliation.
+22. `opened` by the bot, including one with a forged or copied marker: `204`, no D1 access, no identity bound.
 
 **Recovery**
 
-23. Delivery-log check: GUID with failed then OK attempts (skip), only failed attempts (repair), timeout-coded attempts, pagination across the checkpoint, 3-day cap, `422` back-off.
+23. Sweep safety check: mint shows public, archived, or fails with lost access; each suspends the mapping and alerts. A later healthy check never resumes it.
 24. Sweep: `since` window with skew, pagination, PR items skipped, a missing repository (404) leading to verification and no row changes.
 25. Daily open-row pass: `304`s, a 410, a 301; resumable after a mid-run cutoff.
 26. Full reconciliation after a simulated 4-day outage restores every projection.
@@ -315,17 +318,16 @@ Deterministic Worker tests with a fake GitHub Layer, a controlled clock and inje
 3. Routing uses only `repository.id` and `installation.id` against reviewed mappings, plus the `(repository_id, issue_id)` index. No webhook creates a row.
 4. A `2xx` is returned only after the refresh obligation or suspension is committed. D1 failure returns `503`.
 5. Projection writes come only from GitHub reads, guarded by `updated_at`. Payload state is never written.
-6. The webhook, sweep and delivery-log paths have no mutating gateway methods, enforced by types and test 21.
-7. The 15-minute sweep, daily open-row pass and delivery-log check run from the existing minute Cron, with bounded work per invocation, fairness across repositories, and priority for delivery.
+6. The webhook and sweep paths have no mutating gateway methods, enforced by types and test 21.
+7. The 15-minute sweep (with its safety check) and the daily open-row pass run from the existing minute Cron, with bounded work per invocation, fairness across repositories, and priority for delivery.
 8. Metrics and alerts from the freshness section exist. Targets are measured in staging before production.
 9. The missed-webhook runbook is executable through the operator CLI, is audited, and logs no payloads.
 
 ## Implementation slices
 
-1. **Webhook receiver core:** route, size and content checks, signature verification, routing, allowlist, and the forward migration. Builds on #37 (gateway) and #36 (App registration, secret).
-2. **Status refresh:** due marker, `waitUntil()` fetch, Cron drain, guarded write, 15-minute sweep, daily pass.
-3. **Lifecycle handlers:** the existing ticket #40, using slice 1. #39 owns verification and resume.
-4. **Delivery-log check and runbook:** gateway `listDeliveries` (metadata only), checkpoint, repair mapping, operator CLI commands (#41), alerts (#20).
+1. **Sweep and status refresh (ships first, no public route):** forward migration, due marker, Cron drain, guarded write, 15-minute sweep with repository safety check, daily open-row pass, full-reconciliation CLI command (#41), alerts (#20). Builds on #37 (gateway).
+2. **Webhook receiver (freshness):** route, size and content checks, signature verification, routing, allowlist, immediate suspension on signed safety events, `waitUntil()` fetch. Builds on #36 (App registration, secret).
+3. **Lifecycle handlers:** the existing ticket #40. #39 owns verification and the Operator resume.
 
 ## Verify in spike
 
@@ -335,13 +337,12 @@ Deterministic Worker tests with a fake GitHub Layer, a controlled clock and inje
 - Whether `installation_target` must be selected at registration (the docs do not say it is delivered by default).
 - The App bot's `login` and `id` on `issue.user` (shared with #8's `creator` check).
 - That close and reopen always advance `issue.updated_at`.
-- For a transferred issue: what a token scoped to the old repository gets from the 301, and whether the issue `id` changes.
+- For a transferred issue: what a token scoped to the old repository gets (301 or 404), so either is treated as confirmation.
 - Whether a suspended installation still receives webhooks, and which event, if any, fires when a repository becomes `internal`.
-- The `status` and `status_code` a timed-out delivery records in `GET /app/hook/deliveries`.
-- Rate limits for JWT-authenticated App endpoints and for token mints.
+- Whether the scoped token mint response includes `archived` (decision 3).
+- Rate limits for token mints.
 - The largest real payloads for the subscribed events, to set the body cap.
 - Measured delivery latency and projection lag, to confirm the freshness targets.
-- The 3-day versus 7-day delivery retention discrepancy in GitHub's docs.
 
 ## Sources
 

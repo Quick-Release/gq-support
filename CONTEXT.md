@@ -59,7 +59,7 @@ The Summary and Description exactly as the Reporter sent them. It is what the Re
 _Avoid_: Issue body, when the GitHub-side text is not meant
 
 **Support status**:
-Whether a Support request's GitHub issue is open or closed. GitHub is authoritative for this status; what the Reporter sees is the service's last observation of it. Delivery outcome is separate.
+Whether a Support request's GitHub issue is open or closed. GitHub is authoritative for this status; what the Reporter sees is the service's last observation of it. An issue deleted or transferred out of the Project repository shows as closed, and an Operator is alerted. Delivery outcome is separate.
 
 **Engineering issue**:
 An issue used for internal project work in the same Project repository. It is never included in a Reporter's issue list merely because it shares a label or repository.
@@ -68,6 +68,10 @@ An issue used for internal project work in the same Project repository. It is ne
 
 **Repository mapping**:
 The approved association between a WordPress project/installation and its existing Project repository. Reporters cannot choose or change the mapping through the support experience.
+
+**Suspended mapping**:
+A Repository mapping the service has stopped sending new Support requests to, because the Project repository became public, was archived, or the GitHub App lost access. Reporters keep seeing existing requests' last-known status. Only an Operator lifts a suspension, even when the cause appears resolved.
+_Avoid_: Disabled, disconnected
 
 **Installation credential**:
 A revocable identity for one approved WordPress installation and environment when contacting the support service; it does not authorize another installation or an operator. The installation holds it; the service knows only how to verify it.
