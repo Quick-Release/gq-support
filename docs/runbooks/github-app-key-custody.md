@@ -143,8 +143,10 @@ access token. The temporary remote-binding proxy holds a service reference,
 not the App key. This verifies the #36 custody boundary independently of the
 later #37 gateway and its repository-scoped token behavior.
 
-The final CI audit reads raw state records (including replaced resources),
-checks deployed binding metadata for `secret_text`, and scans the deployed
+The final CI audit reads state records (including replaced resources) through
+Alchemy's authenticated state service. It re-encodes any redacted wrappers to
+inspect their actual contents in memory, rather than their display placeholders.
+It checks deployed binding metadata for `secret_text`, and scans the deployed
 bundle, checkout and local Alchemy/Wrangler logs for the current PEM/DER bytes.
 State and binding contents stay in memory; only counts and a public fingerprint
 are printed. No artifacts containing state, bundles or credentials are uploaded.

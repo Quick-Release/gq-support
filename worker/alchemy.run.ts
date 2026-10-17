@@ -2,6 +2,7 @@ import * as Alchemy from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Output from "alchemy/Output";
 import { GitHubAppSecret, GitHubAppSecretProvider } from "./deploy/github-app-secret.ts";
 import { appConfig, verifyApp } from "./deploy/github-app.ts";
 import { SupportDB } from "./src/support-db.ts";
@@ -26,7 +27,13 @@ export default Alchemy.Stack(
     const database = yield* SupportDB;
     const worker = yield* Worker;
     if (stack.stage === "staging" || stack.stage === "prod") {
-      yield* GitHubAppSecret("GitHubAppSecret", { stage: stack.stage, workerName: worker.workerName });
+      // workerName is a stable attribute, which Alchemy can resolve before a
+      // script update finishes. Resolve the whole Worker first to retain the
+      // apply dependency, then project only its public name into secret props.
+      yield* GitHubAppSecret("GitHubAppSecret", {
+        stage: stack.stage,
+        workerName: Output.map(Output.of(worker), (attributes) => attributes.workerName),
+      });
     }
 
     return {
