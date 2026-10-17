@@ -1,5 +1,13 @@
 # Support Worker enrollment
 
+GitHub App registration, stage secrets, CI deployment, key rotation and incident
+response are in the [key custody runbook](../docs/runbooks/github-app-key-custody.md).
+Staging/prod Alchemy deployments now require that stage's App credentials and
+run a read-only registration preflight before declaring resources. Development
+stages do not receive an App key. Both Apps and encrypted CI sources are set up;
+staging App-key replacement/revocation passed live authentication checks. Stage
+deployment and the Worker-side rotation rehearsal remain pending; see the runbook.
+
 `src/repository-mappings.ts` is the reviewed Repository mapping registry. It is
 intentionally empty until real Slots are approved. Each entry includes Slot,
 Client, WordPress project, authoritative environment, numeric GitHub repository

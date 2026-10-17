@@ -6,16 +6,26 @@ import { handleRequest } from "./installation-api.ts";
 import { repositoryMappings } from "./repository-mappings.ts";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { SupportDB } from "./support-db.ts";
+import { WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
+import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 
 export default Cloudflare.Worker(
   "Worker",
-  { main: import.meta.url },
+  {
+    main: import.meta.url,
+    compatibility: { date: "2026-10-17" },
+    observability: { enabled: true, traces: { enabled: true } },
+  },
   Effect.gen(function* () {
     // Binds SupportDB. Routes reach Slot-owned records only through
     // createStorageFor (src/storage.ts), with the binding's `raw` database as `shared`.
     const database = yield* Cloudflare.D1.QueryDatabase(yield* SupportDB);
 
     return {
+      checkGitHubAppKey: Effect.fn(function* (clientId: string, slug: string) {
+        const env = yield* WorkerEnvironment;
+        return yield* Effect.promise(() => checkBoundGitHubAppKey(env.GITHUB_APP_PRIVATE_KEY, { clientId, slug }));
+      }),
       fetch: Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const web = HttpServerRequest.toWebResult(request);
