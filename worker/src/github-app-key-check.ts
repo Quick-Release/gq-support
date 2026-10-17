@@ -1,3 +1,5 @@
+import { createPublicKey } from "node:crypto";
+
 /** Read-only custody check. Called through a service binding, never HTTP. */
 export async function checkBoundGitHubAppKey(
   pem: unknown,
@@ -27,7 +29,9 @@ export async function checkBoundGitHubAppKey(
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "getquick-support-key-custody-check",
       },
-      redirect: "error",
+      // Workers fetch rejects `error`; manual plus the status check below
+      // denies redirects without forwarding the App JWT to another origin.
+      redirect: "manual",
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok || !response.body) throw new Error();
@@ -61,4 +65,3 @@ export async function checkBoundGitHubAppKey(
     return { ok: false as const };
   }
 }
-import { createPublicKey } from "node:crypto";
