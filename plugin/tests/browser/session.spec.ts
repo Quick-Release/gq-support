@@ -55,6 +55,8 @@ test('REST requires cookie plus nonce and sends private no-store errors', async 
   const session = await refreshed.json();
   expect(session.state).toBe('current');
   expect(session.nonce).toBeTruthy();
+  // No Support manager scope without an explicit view-site grant.
+  expect(session.site).toBe(false);
   const endpoint = `${site}/?rest_route=/gq-support/v1/requests`;
   for (const headers of [{}, { 'X-WP-Nonce': 'expired' }]) {
     const response = await page.request.get(endpoint, { headers });

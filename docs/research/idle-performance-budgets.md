@@ -88,7 +88,7 @@ The two queries on every site-admin screen come from `GQ_Support_Lifecycle::ensu
 | B7 | First open: plugin-owned code | App JS ≤ 10 KB gz; app CSS ≤ 4 KB gz; plugin asset requests ≤ 2; no second copy of a core script (React, element, i18n, api-fetch) | 1,326 B / 703 B / 2 / none | Hard |
 | B8 | First open: data | At most 1 REST list call, and only when My requests is shown (`per_page` ≤ 20 by default, ≤ 50 maximum per the [contract](../support-api-contract.md)); New report makes 0 calls | 0 (no routes yet) | Hard once #34 lands |
 | B9 | First open: main thread | 0 long tasks (> 50 ms, [W3C Long Tasks](https://w3c.github.io/longtasks/)) attributable to the open, on the CI desktop profile | 0 | Hard |
-| B10 | Reopen after mount | 0 asset requests; 0 REST unless the Reporter presses refresh or switches to My requests | 0 | Hard |
+| B10 | Reopen after mount | 0 asset requests; 0 REST unless the Reporter presses refresh, even when My requests is shown again (Q2) | 0 | Hard |
 | B11 | Closed, before and after use | 0 plugin-owned requests in a 60 s idle window after `focus`, `online` and `visibilitychange` events; no plugin interval timers; no WP-Cron events | 0 | Hard |
 | B12 | Options | 0 autoloaded bytes owned by the plugin (every `gq_support_*` option has `autoload` `off`/`no`), unless an allowlisted record ≤ 1 KB is chosen under Q1 | 0 | Hard |
 | B13 | Submit, list or read (after #34) | WordPress route time is reported separately from the Worker round-trip. Adapter timeouts are 8 s for create and 5 s for read, per the contract. An unavailable provider never affects non-plugin requests (B1–B6 still hold with the Worker down) | n/a | Hard for isolation; timings are report-only |
@@ -169,7 +169,7 @@ Three layers keep noise out of the pass/fail signal.
 ## Open questions for the map
 
 - **Q1 (for #3 and #7).** Should the four small `gq_support_*` records be consolidated into one state record? The choice is between non-autoloaded (1 admin query) and autoloaded with a size cap under 1 KB (0 queries everywhere, but bytes on public requests). The measurements show the current layout costs 2 queries on every site-admin screen and 4 on eligible ones.
-- **Q2 (for #13).** When the panel reopens on My requests, does it refetch automatically or show the last list until refresh is pressed? The domain design says the list "loads when My requests is shown", which is ambiguous for reopen. B10 assumes no automatic refetch on reopen.
+- **Q2 (for #13).** When the panel reopens on My requests, does it refetch automatically or show the last list until refresh is pressed? The domain design says the list "loads when My requests is shown", which is ambiguous for reopen. B10 assumes no automatic refetch on reopen. **Resolved by #26:** the list loads once per page session, the first time My requests is shown; reopening or switching back to My requests shows the last list until refresh is pressed, and an accepted report joins it from its receipt.
 - **Q3 (for #19).** Should the counter benchmark run in the existing DDEV job or in a Playground job? Playground is faster to boot and gives exact counters, but it is not a production-like database or PHP runtime.
 - **Q4.** The T4 heap growth of about 0.6 MB over 50 cycles should be re-measured on the real app once #34 and #13 add state, to confirm there is no retained-tree leak.
 

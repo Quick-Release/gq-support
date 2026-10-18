@@ -158,32 +158,38 @@ async function openCosts(page: Page, violation?: string) {
   await expect(launcher).toBeVisible();
   await page.waitForLoadState('networkidle');
   const costs = { open: { rest: 0, files: 0 }, requests: { rest: 0, files: 0 }, reopen: { rest: 0, files: 0 } };
+  const lists: URL[] = [];
   let phase: keyof typeof costs | null = null;
   page.on('request', (request) => {
     if (!phase) return;
-    if (REST.test(request.url())) costs[phase].rest++;
-    else if (PLUGIN_FILE.test(request.url())) costs[phase].files++;
+    if (REST.test(request.url())) {
+      costs[phase].rest++;
+      if (request.method() === 'GET') lists.push(new URL(request.url()));
+    } else if (PLUGIN_FILE.test(request.url())) costs[phase].files++;
   });
   // Requests start on the click itself; give late ones a moment to appear.
   const settle = async () => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(500); };
+  const myRequests = page.getByRole('tab', { name: 'My requests' });
   phase = 'open';
   await launcher.click();
   await expect(dialog).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Description' })).toBeFocused();
   await settle();
   phase = 'requests';
-  await page.getByRole('tab', { name: 'My requests' }).click();
+  await myRequests.click();
   await settle();
   phase = null;
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await settle();
+  // Reopen lands on New report; showing My requests again reuses the first load.
   phase = 'reopen';
   await launcher.click();
   await expect(dialog).toBeVisible();
+  await myRequests.click();
   await settle();
   phase = null;
-  return costs;
+  return { ...costs, perPage: lists.map((url) => Number(url.searchParams.get('per_page') ?? 20)) };
 }
 
 /** Adapter timeouts in docs/support-api-contract.md. */
@@ -262,10 +268,18 @@ for (const woo of wooInstalled ? [false, true] : [false]) {
       // B7: at most the app's two files. B8: New report makes no REST call.
       expect(costs.open.rest).toBe(0);
       expect(costs.open.files).toBeLessThanOrEqual(2);
-      // B8: at most one list call when My requests is shown.
-      expect(costs.requests.rest).toBeLessThanOrEqual(1);
-      // B10: nothing is fetched again without an explicit refresh.
+      // B8: exactly one list call when My requests is shown, at the default page size or less.
+      expect(costs.requests.rest).toBe(1);
+      expect(costs.perPage).toHaveLength(1);
+      expect(costs.perPage[0]).toBeLessThanOrEqual(20);
+      // B10: nothing is fetched again without an explicit refresh, even when My requests is shown again.
       expect(costs.reopen).toEqual({ rest: 0, files: 0 });
+    });
+
+    test('B8: negative control, two list calls when My requests is shown', async ({ page }) => {
+      await logIn(page);
+      const costs = await openCosts(page, 'list');
+      expect(costs.requests.rest, 'negative control: a second list call').toBeGreaterThan(1);
     });
 
     test('B8 and B10: negative control, a REST call on every open', async ({ page }) => {

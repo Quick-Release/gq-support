@@ -127,6 +127,17 @@ switch ( $gq_support_violation ) {
 			20
 		);
 		break;
+	case 'list':
+		// A second list call whenever My requests is shown.
+		add_action(
+			'admin_enqueue_scripts',
+			static fn() => wp_add_inline_script(
+				'gq-support-launcher',
+				sprintf( 'document.addEventListener("click", function (event) { if (event.target.closest("#gq-support-requests-tab")) fetch(%s); }, true);', wp_json_encode( add_query_arg( 'scope', 'mine', rest_url( 'gq-support/v1/requests' ) ) ) )
+			),
+			20
+		);
+		break;
 	case 'timer':
 		add_action( 'admin_enqueue_scripts', static fn() => wp_add_inline_script( 'gq-support-launcher', 'setInterval(function () {}, 30000);' ), 20 );
 		break;

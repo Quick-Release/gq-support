@@ -5,6 +5,8 @@ import { __ } from "@wordpress/i18n";
 import { limits } from "./limits";
 import { useSubmission } from "./useSubmission";
 import { useSession } from "./useSession";
+import { useRequests } from "./useRequests";
+import { Requests } from "./Requests";
 import { speak } from "@wordpress/a11y";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 
@@ -26,7 +28,11 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   const [description, setDescription] = useState("");
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
-  const submission = useSubmission(visible, session, () => { setDescription(""); setSummary(""); });
+  const requests = useRequests(session);
+  const submission = useSubmission(visible, session, (resource, supersedes) => {
+    setDescription(""); setSummary("");
+    requests.add(resource, supersedes);
+  });
   const field = useRef<HTMLTextAreaElement>(null);
   const panel = useRef<HTMLElement>(null);
   const hasDraft = Boolean(description.trim() || summary.trim());
@@ -35,6 +41,8 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     if (session.changed) { setDescription(""); setSummary(""); setError(""); }
   }, [session.changed]);
   useEffect(() => onVisibilityChange(visible, hasDraft), [hasDraft]);
+  // The list loads the first time My requests is shown; reopening reuses it.
+  useEffect(() => { if (visible && tab === "requests" && !session.changed) requests.show(); }, [visible, tab, requests.phase, session.changed]);
   const open = () => { setTab("new"); setVisible(true); };
   const close = () => setVisible(false);
   useEffect(() => registerToggle(visible ? close : open));
@@ -99,8 +107,7 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
         </form>
       </div>
       <div id="gq-support-requests" role="tabpanel" aria-labelledby="gq-support-requests-tab" hidden={tab !== "requests"}>
-        <p>{__("Requests are not available yet.", textDomain)}</p>
-        <button type="button" className="gq-support-link" onClick={() => setTab("new")}>{__("New report", textDomain)}</button>
+        <Requests requests={requests} site={session.site} disabled={session.changed} onNewReport={() => setTab("new")} />
       </div>
     </section>
   );

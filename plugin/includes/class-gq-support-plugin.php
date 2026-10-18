@@ -76,10 +76,12 @@ final class GQ_Support_Plugin {
 		if ( ! GQ_Support_Access::can( 'gq_support_submit_requests' ) ) {
 			wp_send_json( array( 'state' => 'forbidden' ) );
 		}
+		// Re-evaluated on every check, so a revoked Support manager grant drops the installation scope.
 		wp_send_json(
 			array(
 				'state' => 'current',
 				'nonce' => wp_create_nonce( 'wp_rest' ),
+				'site'  => GQ_Support_Access::can( 'gq_support_view_site_requests' ),
 			)
 		);
 	}
@@ -140,10 +142,11 @@ final class GQ_Support_Plugin {
 		wp_enqueue_style( 'gq-support-launcher', GQ_SUPPORT_PLUGIN_URL . 'assets/launcher.css', array(), GQ_SUPPORT_VERSION );
 		wp_enqueue_script( 'gq-support-launcher', GQ_SUPPORT_PLUGIN_URL . 'assets/launcher.js', array(), GQ_SUPPORT_VERSION, true );
 		$bootstrap = array(
-			'session' => GQ_Support_Access::session(),
-			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-			'loading' => __( 'Loading support…', 'gq-support' ),
-			'error'   => __( 'Support could not load. Press to retry.', 'gq-support' ),
+			'session'  => GQ_Support_Access::session(),
+			'ajaxUrl'  => admin_url( 'admin-ajax.php' ),
+			'timezone' => wp_timezone_string(),
+			'loading'  => __( 'Loading support…', 'gq-support' ),
+			'error'    => __( 'Support could not load. Press to retry.', 'gq-support' ),
 		);
 		wp_add_inline_script( 'gq-support-launcher', 'window.gqSupportLauncher=' . wp_json_encode( $bootstrap ) . ';', 'before' );
 	}

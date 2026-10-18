@@ -6,9 +6,11 @@ type Draft = { summary?: string; description: string };
 type Phase = 'draft' | 'sending' | 'checking' | 'received' | 'delivered' | 'failed' | 'unsent' | 'error';
 type Session = { paused: boolean; changed: boolean; check: () => Promise<boolean> };
 type Resource = { id: string; submission_id: string; delivery: string; status: string | null };
+/** Receives the accepted receipt, and the failed request it replaces, if any. */
+type Accepted = (resource: Resource, supersedes?: string) => void;
 
 /** One in-memory creation intent. Reconciliation always reuses its frozen body. */
-export function useSubmission(visible: boolean, session: Session, accepted: () => void) {
+export function useSubmission(visible: boolean, session: Session, accepted: Accepted) {
   const [phase, setPhase] = useState<Phase>('draft');
   const [message, setMessage] = useState('');
   const [attempts, setAttempts] = useState(0);
@@ -79,7 +81,7 @@ export function useSubmission(visible: boolean, session: Session, accepted: () =
           setMessage(resource.delivery === 'delivered'
             ? resource.status === 'closed' ? __('Closed', 'gq-support') : __('Open', 'gq-support')
             : __('Received', 'gq-support'));
-          accepted();
+          accepted(resource, payload.supersedes_id);
         }
       } catch (error) {
         if (current !== generation.current) return;
