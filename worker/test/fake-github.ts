@@ -68,7 +68,7 @@ export const makeFakeGitHub = () => {
   const minted: string[] = [];
   let sequence = 0;
   const omitted = new Set<string>();
-  let afterCreate: ((issue: FakeIssue) => Response | undefined) | undefined;
+  let afterCreate: ((issue: FakeIssue) => Response | undefined | Promise<Response | undefined>) | undefined;
 
   const iso = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, "Z");
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -108,7 +108,7 @@ export const makeFakeGitHub = () => {
   const repositoryAt = (owner: string, name: string) =>
     [...repositories.values()].find((repository) => repository.owner === owner && repository.name === name);
 
-  const handle = (request: Recorded, now: number): Response => {
+  const handle = (request: Recorded, now: number): Response | Promise<Response> => {
     const path = request.path;
     const mint = path.match(/^\/app\/installations\/(\d+)\/access_tokens$/);
     if (mint && request.method === "POST") {
@@ -175,7 +175,7 @@ export const makeFakeGitHub = () => {
         repositoryId: repository.id,
       };
       issues.push(issue);
-      return afterCreate?.(issue) ?? json(issueJson(issue), 201);
+      return Promise.resolve(afterCreate?.(issue)).then((response) => response ?? json(issueJson(issue), 201));
     }
     if (rest === "/issues" && request.method === "GET") {
       const creator = request.query.get("creator");
@@ -247,13 +247,14 @@ export const makeFakeGitHub = () => {
           reason: new HttpClientError.TransportError({ request, description: "connection reset" }),
         }));
       }
-      return HttpClientResponse.fromWeb(request, scripted ?? handle(recorded, now));
+      const response = yield* Effect.promise(() => Promise.resolve(scripted ?? handle(recorded, now)));
+      return HttpClientResponse.fromWeb(request, response);
     })));
 
   return {
     layer,
     privateKeyPem,
-    onCreate: (script: (issue: FakeIssue) => Response | undefined) => { afterCreate = script; },
+    onCreate: (script: (issue: FakeIssue) => Response | undefined | Promise<Response | undefined>) => { afterCreate = script; },
     requests,
     minted,
     issues,

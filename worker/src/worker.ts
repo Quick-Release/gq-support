@@ -1,3 +1,4 @@
+import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Effect from "effect/Effect";
 import * as Config from "effect/Config";
@@ -12,7 +13,7 @@ import { SupportDB } from "./support-db.ts";
 import { sweepDelivery } from "./delivery.ts";
 import { GitHubGateway, GitHubReader } from "./github-gateway.ts";
 import { scheduledTick } from "./scheduled.ts";
-import type { RefreshConfig } from "./status-refresh.ts";
+import { refreshStatus, type RefreshConfig } from "./status-refresh.ts";
 import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
@@ -82,8 +83,19 @@ export default Cloudflare.Worker(
           secret: typeof env.GITHUB_WEBHOOK_SECRET === "string" ? env.GITHUB_WEBHOOK_SECRET : undefined,
           previousSecret: typeof env.GITHUB_WEBHOOK_PREVIOUS_SECRET === "string" ? env.GITHUB_WEBHOOK_PREVIOUS_SECRET : undefined,
         });
+        const services = yield* Effect.context<RuntimeContext>();
         const response = yield* handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
-          (task) => context.raw.waitUntil(task));
+          (task) => context.raw.waitUntil(task), {
+            mappings: repositoryMappings, botLogin: `${slug}[bot]`,
+            database: () => Effect.runPromiseWith(services)(database.raw),
+            refresh: (db) => Effect.runPromise(Effect.gen(function* () {
+              if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
+              yield* refreshStatus({ db, config: refresh }).pipe(Effect.provide(GitHubReader.live({
+                clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY,
+              })));
+            }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
+              Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
+          });
         if (request.method === "POST" && new URL(request.url, "https://support.invalid").pathname === "/v1/requests" && response.status === 202) {
           yield* context.waitUntil(deliver);
         }
