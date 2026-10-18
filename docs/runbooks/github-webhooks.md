@@ -11,9 +11,22 @@ verifies HMAC-SHA256 using `crypto.subtle.verify`, then parses UTF-8 JSON and
 checks the hook target type (`integration`) and this stage's numeric App ID.
 The App ID is distinct from the App's client ID and its installation ID.
 
-The event/action allowlist is empty: all verified, correctly targeted JSON
-deliveries return an empty `204`. There is no handler, gateway call, payload
-storage or D1 access. Invalid deliveries return an empty `401`, increment the
+Verified `issues` actions `closed`, `reopened`, `transferred` and `deleted`
+are refresh hints. Only issues authored by this stage's App bot are eligible.
+The numeric repository ID must be mapped and all mappings for that repository
+must pin the delivery's numeric installation ID. Other events/actions, foreign
+creators and unmatched pins return `204` without resolving D1.
+
+An eligible delivery updates only the refresh due marker/generation for an
+existing active request matched by repository ID and issue ID. No match returns
+`204`; a D1 failure returns `503`; a match returns `202` after the marker is
+durable and starts a bounded read-only refresh with `waitUntil()`. The minute
+Cron retries outstanding work. Duplicate and reversed deliveries are safe:
+only fresh GitHub reads determine status, never the payload's state or text.
+No webhook creates Support requests or mutates GitHub. Transfers/deletions close
+the original request through the refresher's lost-tracking path.
+
+Invalid deliveries return an empty `401`, increment the
 Effect `github_webhook_rejections_total` counter, and log only a fixed message
 and a reason class (`configuration`, `content_type`, `headers`, `body_size`,
 `body_read`, `signature`, `json`, `target`). No payload, signature, delivery ID,

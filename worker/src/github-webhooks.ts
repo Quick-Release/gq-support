@@ -1,6 +1,10 @@
 import * as Effect from "effect/Effect";
 import * as Metric from "effect/Metric";
 
+import type { RepositoryMapping } from "./repository-mappings.ts";
+import type { QueryDatabase } from "./storage.ts";
+import { requestStatusRefresh } from "./status-refresh.ts";
+
 export const GITHUB_WEBHOOK_PATH = "/v1/github/webhooks";
 // Provisional until staging payload measurements are recorded in #55.
 export const GITHUB_WEBHOOK_BODY_BYTES = 1024 * 1024;
@@ -12,6 +16,14 @@ interface WebhookConfig {
   readonly previousSecret?: string;
   readonly diagnostics?: boolean;
 }
+
+export interface StatusWebhookConfig {
+  readonly mappings: readonly RepositoryMapping[];
+  readonly botLogin: string;
+  readonly database: () => Promise<QueryDatabase>;
+  /** The adapter provides only GitHubReader, never the mutation gateway. */
+  readonly refresh: (db: QueryDatabase) => Promise<void>;
+}
 type Rejection = "configuration" | "content_type" | "headers" | "body_size" | "body_read" |
   "signature" | "target" | "json";
 
@@ -22,7 +34,7 @@ export const createGitHubWebhookReceiver = ({ appId, secret, previousSecret, dia
     crypto.subtle.importKey("raw", new TextEncoder().encode(value), { name: "HMAC", hash: "SHA-256" }, false, ["verify"])));
 
   const verify = async (request: Request, waitUntil: (task: Promise<void>) => void):
-    Promise<Rejection | { bytes: number; key: "current" | "previous" }> => {
+    Promise<Rejection | { bytes: number; key: "current" | "previous"; payload: unknown }> => {
     if (!secret || !/^[1-9][0-9]*$/.test(appId)) return "configuration";
     if (request.headers.get("content-type")?.split(";")[0]!.trim().toLowerCase() !== "application/json") return "content_type";
     const signature = request.headers.get("x-hub-signature-256") ?? "";
@@ -60,23 +72,48 @@ export const createGitHubWebhookReceiver = ({ appId, secret, previousSecret, dia
       }
     } catch { return "configuration"; }
     if (!valid) return "signature";
-    try { JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)); }
+    let payload: unknown;
+    try { payload = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)); }
     catch { return "json"; }
     if (request.headers.get("x-github-hook-installation-target-type") !== "integration" ||
         request.headers.get("x-github-hook-installation-target-id") !== appId) return "target";
-    // The event/action allowlist is intentionally empty in #55. No handler,
-    // gateway or D1 capability is reachable from this receiver.
-    return { bytes: size, key: matchedKey };
+    return { bytes: size, key: matchedKey, payload };
   };
 
-  return (request: Request, waitUntil: (task: Promise<void>) => void) => Effect.gen(function* () {
+  return (request: Request, waitUntil: (task: Promise<void>) => void, status?: StatusWebhookConfig) => Effect.gen(function* () {
     const result = yield* Effect.promise(() => verify(request, waitUntil));
     if (typeof result === "string") {
       yield* Metric.update(webhookRejections, 1);
       yield* Effect.logWarning("GitHub webhook rejected").pipe(Effect.annotateLogs({ reason: result }));
       return new Response(null, { status: 401 });
     }
-    return new Response(null, { status: 204, headers: diagnostics ? {
+    let responseStatus = 204;
+    const record = (value: unknown): Record<string, unknown> =>
+      typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+    const payload = record(result.payload);
+    const issue = record(payload.issue);
+    const repositoryId = record(payload.repository).id;
+    const installationId = record(payload.installation).id;
+    const issueId = issue.id;
+    const positiveId = (id: unknown): id is number => typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+    if (status && request.headers.get("x-github-event") === "issues" &&
+        typeof payload.action === "string" && ["closed", "reopened", "transferred", "deleted"].includes(payload.action) &&
+        record(issue.user).login === status.botLogin && record(issue.user).type === "Bot" &&
+        positiveId(repositoryId) && positiveId(installationId) && positiveId(issueId)) {
+      const mapped = status.mappings.filter((mapping) => mapping.repositoryId === repositoryId);
+      // Conflicting pins fail closed, as they do for the repository sweep.
+      if (mapped.length > 0 && mapped.every((mapping) => mapping.githubInstallationId === installationId)) {
+        const accepted = yield* Effect.tryPromise({ try: async () => {
+          const db = await status.database();
+          const marked = await requestStatusRefresh(db, repositoryId, issueId, Date.now());
+          if (marked.meta.changes === 0) return false;
+          waitUntil(Promise.resolve().then(() => status.refresh(db)).catch(() => {}));
+          return true;
+        }, catch: () => "storage" as const }).pipe(Effect.catch(() => Effect.succeed("storage" as const)));
+        responseStatus = accepted === "storage" ? 503 : accepted ? 202 : 204;
+      }
+    }
+    return new Response(null, { status: responseStatus, headers: diagnostics ? {
       "X-GQ-Webhook-Bytes": String(result.bytes), "X-GQ-Webhook-Key": result.key,
     } : undefined });
   });

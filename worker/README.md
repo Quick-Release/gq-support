@@ -329,8 +329,11 @@ with `STATUS_REFRESH_DAILY_BATCH_SIZE`, `STATUS_REFRESH_READS_PER_TICK` and
 `STATUS_REFRESH_DAILY_INTERVAL_MS`. A large backlog may need more than one tick;
 size these bounds for the stage's request volume and GitHub read budget.
 
-`requestStatusRefresh` is the trusted target-keyed wake-up for future webhook
-consumers. Its generation changes even for two notifications in the same
+`requestStatusRefresh` is the trusted target-keyed wake-up for verified issue
+webhooks and sweep observations. A matching webhook durably queues the request
+and starts a bounded read-only refresh with `waitUntil()`; the minute tick
+recovers unfinished work. See the [webhook runbook](../docs/runbooks/github-webhooks.md)
+for event and identity filters. Its generation changes even for two notifications in the same
 millisecond. Successful reads clear only the generation/owner they started
 with. A 200 applies status under GitHub's `updated_at` guard; a 304 only advances
 observation time. A 301, 410, or an issue 404 with a still-accessible repository
