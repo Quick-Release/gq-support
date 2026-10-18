@@ -348,9 +348,10 @@ Deterministic Worker tests with a fake GitHub Layer, a controlled clock and inje
 
 ## Staging verification (#57)
 
-Status on 2026-10-18: the procedure and tooling are ready, but **nothing has
-been measured on staging yet**. The results table below stays empty until a
-live run, and #57's measurement criteria stay open. The Operator steps are in
+Status on 2026-10-18: steps 1–3 ran on staging (Worker `0cfff3a`, after #79
+and #80), and their results are below. Step 4, the suspension, has **not run
+yet**: it changes the sandbox repository's visibility, and the session that ran
+the other steps could not change that repository. The Operator steps are in
 the [missed-webhook runbook](../runbooks/missed-webhooks.md).
 
 Prerequisites:
@@ -405,23 +406,33 @@ Procedure (from `worker/`, Operator credentials for staging):
    `GitHub webhook rejected` with `reason: signature`. Then run `restore` and
    rehearse runbook steps 5–6 (`status-health`, `status-repair`).
 4. **Suspension:** make the sandbox public with
-   `gh repo edit Quick-Release/gq-support-sandbox --visibility public --accept-visibility-change-consequences`,
+   `gh api -X PATCH repos/Quick-Release/gq-support-sandbox -f visibility=public` (any gh version),
    and immediately start `watch-suspension --state <file> --timeout-minutes 20`.
    It passes when the mapping shows `suspended` within one sweep and
    `createRefused` is `true`: the probe's next submission gets
    `403 gq_support_not_configured`, which WordPress shows on the form. "At once with webhooks" needs
    #40's `public`/`repository` handlers; the current allowlist has only issue
-   actions. Make the sandbox private again. After a passing sweep, run
+   actions. Make the sandbox private again (`-f visibility=private`). After a passing sweep, run
    `unsuspend gq-support-sandbox/staging <actor> verified-private`.
 5. Record the results below, and revoke the probe Slot.
 
 | Scenario | Target | Measured |
 |---|---|---|
-| Webhooks working, p95 `updated_at` → Reporter observation | ≤ 2 min | not run |
-| Webhooks working, App writes after observation | 0 | not run |
-| Webhook broken, each close/reopen observed | ≤ 17 min | not run |
-| Webhook broken, `401` deliveries and rejection log | present (alerts need #20) | not run |
+| Webhooks working, p95 `updated_at` → Reporter observation | ≤ 2 min | **12.5 s** over 20 transitions (p50 11.9 s, max 12.6 s). Pass |
+| Webhooks working, App writes after observation | 0 | **0**. The App's only event on the issue is its creation-time label; it made no comments. Pass |
+| Webhook broken, each close/reopen observed | ≤ 17 min | **7 m 03 s, 53 s, 12 m 38 s**. The 53 s change came 9 s after a sweep had listed the previous one, so the individual refresh that listing queued picked it up. The other two waited for a sweep. Pass |
+| Webhook broken, `401` deliveries and rejection log | present (alerts need #20) | All 3 deliveries while broken got `401` in GitHub's delivery log (the 20 before got `202`). Worker logs show `GitHub webhook rejected`, `reason: signature`, for each. Pass. Alerts are #20's |
 | Sandbox public → `suspended`, create refused `not_configured` | ≤ one sweep | not run |
+
+Run notes (2026-10-18, 21:49–22:24 UTC). The probe ran on an NTP-synchronised
+machine, less than 1 ms from NTP time. All lags come from that run, for one
+sandbox issue. Runbook steps 5–6 were rehearsed after `restore`.
+`status-health` reported `healthy: true`, with no due refreshes and the
+sandbox swept 3 minutes earlier. `status-repair` then recorded one audit row
+holding only the actor, the window, counts and times. With gh 2.46 the
+probe's App-write check failed after recording every transition, because
+`--slurp` needs a newer gh. The App writes above were counted by hand with the
+same rule, and the probe now pages without `--slurp`.
 
 Remaining spike answers (from [Verify in spike](#verify-in-spike)):
 
@@ -431,15 +442,15 @@ Remaining spike answers (from [Verify in spike](#verify-in-spike)):
 | Hook target headers | `integration` and the numeric App ID `5355960` (#55) |
 | Redelivery of a pre-rotation delivery | Signed with the **current** secret, also after the previous key was retired (#55) |
 | `installation_target` delivered by default | Not observed |
-| App bot `login` | `getquick-support-staging[bot]` (#53). Its numeric `id` was not recorded |
-| Close and reopen advance `updated_at` | Pending: step 2 checks it |
+| App bot `login` | `getquick-support-staging[bot]` (#53), numeric `id` `343894256` (#57) |
+| Close and reopen advance `updated_at` | Yes: each of 24 transitions had a later `updated_at` than the one before (#57) |
 | Transferred issue read with the old repository's token | Not observed |
 | Suspended installation still receives webhooks | Not observed. #55 saw only the `installation` suspend/unsuspend events themselves |
 | Event for a repository made `internal` | Not observed |
 | Mint response includes `archived` | Yes, with `private` (#53) |
 | Token mint rate limits | Not observed |
 | Largest real payloads | 75,766 bytes (issues), 3,009 bytes (installation) (#55) |
-| Delivery latency and projection lag | Pending: steps 2 and 3 |
+| Delivery latency and projection lag | Webhook to Reporter observation about 12 s, including the probe's 10 s poll. Sweep-only up to 12 m 38 s (#57) |
 
 ## Sources
 
