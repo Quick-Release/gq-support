@@ -2,13 +2,6 @@ name: PHP
 
 on:
   pull_request:
-    paths:
-      - "plugin/**"
-      - "contract/**"
-      - ".ddev/**"
-      - ".github/workflows/php.yml"
-      - "package.json"
-      - "pnpm-lock.yaml"
   push:
     branches: [main]
     paths:
@@ -31,8 +24,34 @@ defaults:
     working-directory: plugin
 
 jobs:
+  # Every PR runs this workflow so `PHP result` can be a required check;
+  # the jobs below skip themselves when the PR touches none of these paths.
+  changes:
+    name: Detect PHP changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevant: ${{ github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true' }}
+    steps:
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - "plugin/**"
+              - "contract/**"
+              - ".ddev/**"
+              - ".github/workflows/php.yml"
+              - "package.json"
+              - "pnpm-lock.yaml"
+
   lint:
     name: PHPCS + PHPStan
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +79,8 @@ jobs:
 
   lifecycle-integration:
     name: WordPress lifecycle and browser acceptance (DDEV)
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -119,3 +140,17 @@ jobs:
           ddev wp --path=.test-site plugin check gq-support \
             --exclude-directories=tests,app,vendor \
             --exclude-files=composer.json,composer.lock,phpstan.neon.dist,.phpcs.xml.dist
+
+  # The one required check: passes when every job passed or was skipped as irrelevant.
+  result:
+    name: PHP result
+    if: always()
+    defaults:
+      run:
+        working-directory: .
+    needs: [changes, lint, lifecycle-integration]
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$FAILED" = false
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
