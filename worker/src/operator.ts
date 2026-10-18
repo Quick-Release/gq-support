@@ -1,6 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { recoverDelivery } from "./delivery-recovery.ts";
+import { runCleanupOperator } from "./cleanup-operator.ts";
 import { unsuspendRepository } from "./repository-suspension.ts";
 import { sha256 } from "./signature.ts";
 
@@ -32,9 +33,12 @@ const enrollmentCode = (): string => {
 export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now });
+  if (["erase", "erasure-status", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
+    return runCleanupOperator(args, { query, recordRevocation, mappings, now });
+  }
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile and unsuspend");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, cleanup-reconcile, cleanup-exception and offboard");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

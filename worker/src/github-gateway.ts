@@ -131,6 +131,14 @@ export interface GitHubIssue {
   readonly creator: string;
   readonly labels: readonly string[];
   readonly assignees: readonly string[];
+  /** Comment count, when GitHub reports one. */
+  readonly comments?: number;
+}
+
+/** A replacement title and body for an App-authored issue. */
+export interface IssueChange {
+  readonly title?: string;
+  readonly body: string;
 }
 
 export type IssueRead =
@@ -215,6 +223,7 @@ const issueFrom = (value: unknown): GitHubIssue | undefined => {
     id: value.id as number, nodeId: value.node_id, number: value.number as number, title: value.title,
     body: value.body as string | null, state: value.state, createdAt: value.created_at, updatedAt: value.updated_at,
     creator: value.user.login, labels, assignees,
+    ...(Number.isSafeInteger(value.comments) ? { comments: value.comments as number } : {}),
   };
 };
 
@@ -237,6 +246,11 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
   readonly addAssignees: (target: GitHubTarget, number: number, assignees: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<void, RepairIssueError | OutcomeUnknown>;
   /** One issue, conditionally on a stored ETag. Moves are reported, not followed. */
   readonly readIssue: (target: GitHubTarget, number: number, etag?: string) => Effect.Effect<IssueRead, ReadIssueError>;
+  /**
+   * Replaces an issue's body, and its title if given: erasure redaction. The
+   * same PATCH can be repeated, so a missing response is ProviderUnavailable.
+   */
+  readonly updateIssue: (target: GitHubTarget, number: number, change: IssueChange, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<GitHubIssue, RepairIssueError | OutcomeUnknown>;
 }>()("GitHubGateway") {
   /** The gateway over Workers fetch. Redirects are never followed. */
   static readonly live = (config: GitHubAppConfig) => GitHubGateway.layer(config).pipe(
@@ -490,6 +504,27 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       return yield* Effect.fail(failure(status, headers, body, now));
     });
 
+  const updateIssue = (target: GitHubTarget, number: number, change: IssueChange, authorize?: Effect.Effect<void, OutcomeUnknown>) =>
+    Effect.gen(function* () {
+      yield* verifyRepository(target);
+      const { status, headers, body, now } = yield* call(target, (repository) =>
+        HttpClientRequest.patch(`${repository}/issues/${number}`).pipe(HttpClientRequest.bodyJsonUnsafe(change)),
+        authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new ProviderUnavailable({ status: null }))));
+      if (status === 200) {
+        const updated = issueFrom(body);
+        return updated && updated.number === number && updated.body === change.body &&
+          (change.title === undefined || updated.title === change.title)
+          ? updated : yield* Effect.fail(new ProviderUnavailable({ status }));
+      }
+      if (status === 400 || status === 422) return yield* Effect.fail(new ValidationRejected({ status, fields: ["body"] }));
+      if (status === 410) return yield* Effect.fail(new IssueGone());
+      if (status === 404) return yield* repository(target).pipe(Effect.andThen(Effect.fail(new IssueGone())));
+      if (status === 403 && isRecord(body) && typeof body.message === "string" && /archived/i.test(body.message)) {
+        return yield* Effect.fail(new RepositoryArchived());
+      }
+      return yield* Effect.fail(failure(status, headers, body, now));
+    });
+
   /** Logs the failure's tag and safe fields only: no URL, header, body or credential. */
   const logged = <Args extends unknown[], A, E extends { readonly _tag: string }>(
     operation: string,
@@ -517,6 +552,7 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
     addAssignees: logged("addAssignees", (target: GitHubTarget, number: number, assignees: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
       repair(target, number, "assignees", assignees, authorize)),
     listIssuesSince: logged("listIssuesSince", listIssuesSince),
+    updateIssue: logged("updateIssue", updateIssue),
   };
 });
 

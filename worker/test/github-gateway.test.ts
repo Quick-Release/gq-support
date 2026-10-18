@@ -191,7 +191,7 @@ describe("GitHubGateway", () => {
     expect(issue).toEqual({
       id: expect.any(Number), nodeId: expect.any(String), number: 1, title: newIssue.title, body: newIssue.body,
       state: "open", createdAt: "2026-10-17T10:00:00Z", updatedAt: "2026-10-17T10:00:00Z", creator: "getquick-support-staging[bot]",
-      labels: ["client-support"], assignees: ["developer"],
+      labels: ["client-support"], assignees: ["developer"], comments: 0,
     });
     expect(posts(github)).toHaveLength(1);
     expect(posts(github)[0]!.path).toBe("/repos/Quick-Release/acme-shop/issues");

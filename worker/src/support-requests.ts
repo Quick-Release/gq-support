@@ -58,7 +58,7 @@ const trim = (text: string) => text.replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$
 const characters = (text: string) => [...text].length;
 
 /** A service-issued ULID: 48 bits of time, then 80 random bits. */
-const ulid = (now: number): string => {
+export const ulid = (now: number): string => {
   let time = "";
   for (let rest = now, i = 0; i < 10; i += 1, rest = Math.floor(rest / 32)) time = CROCKFORD[rest % 32] + time;
   return time + Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => CROCKFORD[byte % 32]).join("");
@@ -91,7 +91,7 @@ interface Row {
 
 const COLUMNS = `SELECT r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
   r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
-  WHERE r.slot = ?1 AND i.slot = ?1`;
+  WHERE r.slot = ?1 AND i.slot = ?1 AND r.erased_at IS NULL`;
 
 const resource = (row: Row, caller: Caller) => ({
   id: row.id,

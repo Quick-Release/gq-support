@@ -23,7 +23,8 @@ const columns = `i.*, r.title, r.description, r.created_at, r.installation_id, r
 const unsuppressed = `EXISTS (SELECT 1 FROM delivery_control WHERE id = 1 AND enabled = 1)
   AND NOT EXISTS (SELECT 1 FROM delivery_suppression s WHERE (s.scope = 'slot' AND s.reference = i.slot)
     OR (s.scope = 'request' AND s.reference = i.request_id))
-  AND EXISTS (SELECT 1 FROM support_request r WHERE r.id = i.request_id AND r.slot = i.slot AND r.superseded_at IS NULL)
+  AND EXISTS (SELECT 1 FROM support_request r WHERE r.id = i.request_id AND r.slot = i.slot AND r.superseded_at IS NULL
+    AND r.erased_at IS NULL)
   AND NOT EXISTS (SELECT 1 FROM repository_state rs JOIN support_request r ON r.repository_id = rs.repository_id
     WHERE r.id = i.request_id AND rs.suspended_reason IS NOT NULL)`;
 const ordered = `NOT EXISTS (SELECT 1 FROM delivery_intent earlier WHERE earlier.request_id = i.request_id

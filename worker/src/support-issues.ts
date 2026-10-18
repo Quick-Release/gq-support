@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import { GitHubGateway, OutcomeUnknown, ValidationRejected, type GitHubIssue, type GitHubTarget, type ReadIssueError } from "./github-gateway.ts";
+import { sha256 } from "./signature.ts";
 
 /** Trusted, pinned delivery inputs. Never construct these from Reporter request fields. */
 export interface SupportIssueIntent {
@@ -20,10 +21,11 @@ export interface SupportIssueIntent {
 }
 
 const marker = (intentId: string) => `<!-- gq-support:v1 intent=${intentId} -->`;
+const ATTRIBUTION = "**Support request** submitted via GETQUICK Support · ";
 const bodyFor = (intent: SupportIssueIntent) => {
   const fence = "~".repeat(Math.max(3, ...Array.from(intent.description.matchAll(/~+/g), (run) => run[0].length + 1)));
   const { environment, installationReference, reporterReference } = intent.attribution;
-  const attribution = `**Support request** submitted via GETQUICK Support · \`${environment}\` · ` +
+  const attribution = `${ATTRIBUTION}\`${environment}\` · ` +
     `installation \`${installationReference}\` · reporter \`${reporterReference}\` · ${new Date(intent.acceptedAt).toISOString()}`;
   return [marker(intent.intentId), attribution, "", "### Description", "", `${fence}text`, intent.description, fence].join("\n");
 };
@@ -80,6 +82,20 @@ const plausible = (query: ReconciliationQuery, issue: GitHubIssue) => {
     (query.expectedIssue ? issue.title === query.expectedIssue.title && issue.body === query.expectedIssue.body : query.erasurePending);
 };
 
+export const ERASED_TITLE = "Support request (erased)";
+const ERASED_TEXT = "Support request text erased at the Reporter's request.";
+/** Copies redaction cannot reach, reported for Operator review. */
+export type ResidualCopy = "comments" | "edit_history" | "retitled" | "title_review" | "transferred";
+export type RedactionResult =
+  | { readonly _tag: "Redacted"; readonly residual: readonly ResidualCopy[] }
+  | { readonly _tag: "Lost"; readonly residual: readonly ResidualCopy[] }
+  | { readonly _tag: "NeedsReview"; readonly reason: "identity" | "marker" };
+/**
+ * Keyed by the intent, so equal titles of different requests never compare
+ * equal. Kept only while automatic cleanup may still retitle the issue.
+ */
+export const titleDigest = (intentId: string, title: string) => sha256(JSON.stringify([intentId, title]));
+
 const prepareIssue = (intent: SupportIssueIntent) => Effect.gen(function* () {
   if (!validIntent(intent)) return yield* Effect.fail(new ValidationRejected({ status: 400, fields: ["intent"] }));
   return { title: intent.title, body: bodyFor(intent), labels: [intent.clientOriginLabel], assignees: [intent.defaultDeveloper] };
@@ -109,6 +125,37 @@ export const supportIssues = {
     if (after._tag !== "Fresh" || !sameIdentity(after.issue, identity)) return { _tag: "NeedsReview" } as const;
     return { _tag: after.issue.labels.includes(intent.clientOriginLabel) && after.issue.assignees.includes(intent.defaultDeveloper)
       ? "Repaired" : "RepairPending" } as const;
+  }),
+
+  /**
+   * Erasure redaction: keeps the marker and attribution, replaces the
+   * Reporter text, and replaces the title only while it provably is the one
+   * derived at acceptance. Comments are never edited. One PATCH at most.
+   */
+  redact: (target: GitHubTarget, intentId: string, identity: IssueIdentity, derivedTitleDigest: string | null,
+    authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
+    const gateway = yield* GitHubGateway;
+    const read = yield* gateway.readIssue(target, identity.number).pipe(Effect.catchTags({
+      IssueGone: () => Effect.succeed({ _tag: "Gone" } as const),
+      IssueMoved: () => Effect.succeed({ _tag: "Moved" } as const),
+    }));
+    if (read._tag === "Gone") return { _tag: "Lost", residual: [] } satisfies RedactionResult;
+    if (read._tag === "Moved") return { _tag: "Lost", residual: ["transferred"] } satisfies RedactionResult;
+    if (read._tag !== "Fresh" || !sameIdentity(read.issue, identity)) return { _tag: "NeedsReview", reason: "identity" } satisfies RedactionResult;
+    const [first, attribution] = read.issue.body?.split("\n", 2) ?? [];
+    if (first !== marker(intentId) || !attribution?.startsWith(ATTRIBUTION)) return { _tag: "NeedsReview", reason: "marker" } satisfies RedactionResult;
+    const body = [first, attribution, "", "### Description", "", ERASED_TEXT].join("\n");
+    const title = read.issue.title === ERASED_TITLE ? "erased"
+      : derivedTitleDigest === null ? "title_review"
+      : (yield* Effect.promise(() => titleDigest(intentId, read.issue.title))) === derivedTitleDigest ? "derived" : "retitled";
+    if (read.issue.body !== body || title === "derived") {
+      yield* gateway.updateIssue(target, identity.number, { body, ...(title === "derived" ? { title: ERASED_TITLE } : {}) }, authorize);
+    }
+    const residual: ResidualCopy[] = ["edit_history"];
+    if (title === "retitled" || title === "title_review") residual.push(title);
+    // An unreported count may hide quotations as well as a positive one.
+    if (read.issue.comments !== 0) residual.push("comments");
+    return { _tag: "Redacted", residual: residual.sort() } satisfies RedactionResult;
   }),
 
   /**

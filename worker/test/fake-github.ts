@@ -36,6 +36,7 @@ export interface FakeIssue {
   labels: { name: string }[];
   assignees: { login: string }[];
   repositoryId: number;
+  comments?: number;
   pull_request?: { url: string };
   deleted?: boolean;
   movedTo?: string;
@@ -50,7 +51,7 @@ export interface Recorded {
 }
 
 /** Returning `undefined` hands the request to the fake; `"hang"` never answers. */
-export type Script = (request: Recorded) => Response | "hang" | "reset" | undefined | Promise<Response>;
+export type Script = (request: Recorded) => Response | "hang" | "reset" | undefined | Promise<Response | undefined>;
 
 export const CLIENT_ID = "Iv23.fake-client";
 export const SLUG = "getquick-support-staging";
@@ -172,6 +173,7 @@ export const makeFakeGitHub = () => {
         user: { login: BOT, type: "Bot" },
         labels: (body.labels ?? []).map((name) => ({ name })),
         assignees: (body.assignees ?? []).map((login) => ({ login })),
+        comments: 0,
         repositoryId: repository.id,
       };
       issues.push(issue);
@@ -210,6 +212,18 @@ export const makeFakeGitHub = () => {
       return json(issueJson(issue));
     }
     const one = rest.match(/^\/issues\/(\d+)$/);
+    if (one && request.method === "PATCH") {
+      if (repository.archived) return message(403, "Repository was archived so is read-only.");
+      const issue = issues.find((candidate) => candidate.repositoryId === repository.id && candidate.number === Number(one[1]));
+      if (!issue) return message(404, "Not Found");
+      if (issue.movedTo) return new Response(null, { status: 301, headers: { location: issue.movedTo } });
+      if (issue.deleted) return message(410, "This issue was deleted");
+      const body = request.body as { title?: string; body?: string };
+      if (body.title === "") return json({ message: "Validation Failed", errors: [{ resource: "Issue", code: "missing_field", field: "title" }] }, 422);
+      Object.assign(issue, body.title === undefined ? {} : { title: body.title }, body.body === undefined ? {} : { body: body.body },
+        { updated_at: iso(now) });
+      return json(issueJson(issue));
+    }
     if (one && request.method === "GET") {
       const issue = issues.find((candidate) => candidate.repositoryId === repository.id && candidate.number === Number(one[1]));
       if (!issue) return message(404, "Not Found");
