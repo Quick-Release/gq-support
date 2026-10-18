@@ -268,8 +268,17 @@ Reporters then get `gq_support_not_configured` on submit, `GET /v1/installation`
 reports `mapping_state: "suspended"`, existing requests keep their last-known
 status, and accepted unsent work is held, not sent.
 
-No check ever lifts a suspension. After verifying the cause is resolved, an
-Operator runs:
+The scheduled repository sweep checks every approved mapping, even without
+Support requests or webhooks, and keeps checking suspended repositories. Each
+due sweep uses a fresh read-only repository-scoped mint. If the mint omits
+`private` or `archived`, verification makes exactly one repository read.
+Transient provider failures and rate limits retry without proving lost access.
+
+No check ever lifts a suspension. A healthy sweep records `verified_safe_at`
+and logs `Suspended repository verified safe; Operator lift required` with
+`alert: true`. Suspended repositories keep their requests' last-known status,
+including during individual refreshes. After a passing sweep later than the
+suspension, an Operator runs:
 
 ```sh
 pnpm operator unsuspend shop/production operator-7 verified-private --account-id <account-id> --database-id <database-id>
@@ -277,9 +286,18 @@ pnpm operator unsuspend shop/production operator-7 verified-private --account-id
 
 The evidence must match the recorded cause: `verified-private` (public),
 `verified-unarchived` (archived) or `access-restored` (lost access). `status`
-shows the current suspension. The command writes a `repository_audit` row before
-its conditional update. The next create checks the repository again, so an
-unsafe repository suspends again at once.
+shows the current suspension and its `verified_safe_at`. The command requires
+`verified_safe_at > suspended_at` both before writing the `repository_audit`
+row and in its conditional update. A renewed unsafe observation clears passing
+evidence; a check begun before that observation cannot restore it. Migration
+0011 adds this verification bookkeeping. The next create checks the repository
+again, so an unsafe repository suspends again at once.
+
+The fake GitHub tests cover both mint shapes: present `archived` needs no extra
+repository read, omitted `archived` needs one per verification. Actual staging
+mint shape is still unmeasured: the staging spike has no recorded run. Its
+`mintIncludesArchived` and `createRepositoryReads` outputs are the live evidence
+when it is run; tests do not claim to establish GitHub's live response shape.
 
 Verification: `pnpm --filter gq-support-worker test`, `typecheck` and `load-test`.
 The delivery load test runs 24 Slots, including a busy Slot, across three provider

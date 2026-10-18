@@ -4,6 +4,9 @@ import * as Logger from "effect/Logger";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { GitHubGateway, GitHubReader } from "../src/github-gateway.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
+import { runOperator } from "../src/operator.ts";
+import { suspendRepository } from "../src/repository-suspension.ts";
+import { requestStatusRefresh } from "../src/status-refresh.ts";
 import { scheduledTick } from "../src/scheduled.ts";
 import type { SweepConfig } from "../src/status-sweep.ts";
 import { harness, type Installation } from "./installation-client.ts";
@@ -330,4 +333,134 @@ it("reports per-repository sweep lag and alerts after an hour without a complete
   }
   expect(lag().at(-1)!.annotations).toMatchObject({ repository: 42, lag_ms: 5 * SWEEP, alert: true });
   expect(logs.join("\n")).not.toMatch(/Private report text|ghs_|Bearer/);
+});
+
+
+it("suspends a public mapped repository without any Support request or webhook", async () => {
+  const staging = { ...production, slot: "shop/staging", environment: "staging" };
+  mappings = [production, staging];
+  const installations = [await enroll(production), await enroll(staging, "installation-b")];
+  github.update(42, { private: false });
+  await tick();
+  for (const installation of installations) {
+    const status = await installation.send("GET", "/v1/installation");
+    expect(await status.json()).toMatchObject({ mapping_state: "suspended" });
+    const response = await installation.send("POST", "/v1/requests", JSON.stringify({ submission_id: crypto.randomUUID(),
+      reporter_subject: subject, scope: "mine", summary: "Help", description: "Report" }));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "gq_support_not_configured" });
+  }
+  expect(logs.map((line) => JSON.parse(line))).toContainEqual(expect.objectContaining({
+    message: "Repository mapping suspended", annotations: expect.objectContaining({ reason: "public", alert: true }) }));
+  expect(mutations()).toHaveLength(0);
+});
+
+
+const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+  query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
+
+it("requires a passing sweep after suspension before an Operator can lift it", async () => {
+  const installation = await enroll(production);
+  github.update(42, { private: false });
+  await tick();
+  await expect(operator("unsuspend", production.slot, "operator-7", "verified-private")).rejects.toThrow("cannot be unsuspended");
+  github.update(42, { private: true });
+  // A same-millisecond check is not later than the suspension.
+  await tick();
+  await expect(operator("unsuspend", production.slot, "operator-7", "verified-private")).rejects.toThrow("cannot be unsuspended");
+  advance(SWEEP);
+  await tick();
+  expect(await (await installation.send("GET", "/v1/installation")).json()).toMatchObject({ mapping_state: "suspended" });
+  expect(logs.map((line) => JSON.parse(line))).toContainEqual(expect.objectContaining({
+    message: "Suspended repository verified safe; Operator lift required", annotations: expect.objectContaining({ repository: 42, alert: true }) }));
+  await expect(operator("unsuspend", production.slot, "operator-7", "verified-private")).resolves.toContain("Unsuspended repository 42");
+});
+
+
+it.each([
+  ["public", () => github.update(42, { private: false })],
+  ["archived", () => github.update(42, { archived: true })],
+  ["no_access", () => github.update(42, { installationId: 9 })],
+  ["no_access", () => github.suspend(7)],
+])("keeps last-known status through an unsafe sweep (%s) and healthy recovery", async (reason, change) => {
+  const staging = { ...production, slot: "shop/staging", environment: "staging" };
+  mappings = [production, staging];
+  const live = await enroll(production);
+  const test = await enroll(staging, "installation-b");
+  const request = await accept(live);
+  await tick();
+  advance(SWEEP);
+  github.edit(issueOf(), { state: "closed" });
+  change();
+  await tick();
+  expect(await statusOf(live, request.id)).toBe("open");
+  for (const installation of [live, test]) {
+    expect(await (await installation.send("GET", "/v1/installation")).json()).toMatchObject({ mapping_state: "suspended" });
+  }
+  expect(logs.map((line) => JSON.parse(line))).toContainEqual(expect.objectContaining({ message: "Repository mapping suspended",
+    annotations: expect.objectContaining({ repository: 42, reason, alert: true }) }));
+  github.update(42, { private: true, archived: false, installationId: 7 });
+  github.installation(7);
+  // A queued refresh and a healthy sweep must both preserve the suspended projection.
+  await requestStatusRefresh(stage.databases.shared, 42, issueOf().id, now);
+  advance(SWEEP);
+  await tick();
+  expect(await statusOf(live, request.id)).toBe("open");
+  expect(await (await test.send("GET", "/v1/installation")).json()).toMatchObject({ mapping_state: "suspended" });
+  expect(JSON.parse(await operator("status", production.slot))).toMatchObject({ suspension: { reason, verified_safe_at: now } });
+  expect(mutations()).toHaveLength(1);
+});
+
+
+it("invalidates a passing verification when a suspended repository becomes unsafe again", async () => {
+  github.update(42, { private: false });
+  await tick();
+  github.update(42, { private: true });
+  advance(MINUTE);
+  await tick();
+  github.update(42, { archived: true });
+  advance(SWEEP);
+  await tick();
+  await expect(operator("unsuspend", production.slot, "operator-7", "verified-private")).rejects.toThrow("cannot be unsuspended");
+  expect(JSON.parse(await operator("status", production.slot))).toMatchObject({
+    suspension: { reason: "public", suspended_at: START, verified_safe_at: null } });
+});
+
+
+it.each([false, true])("verifies each sweep from mint facts, with missing archived = %s", async (omitArchived) => {
+  if (omitArchived) github.mintOmits("archived");
+  await tick();
+  advance(SWEEP);
+  github.update(42, { archived: true });
+  await tick();
+  expect(github.requests.filter((r) => r.path.endsWith("/access_tokens"))).toHaveLength(2);
+  expect(github.requests.filter((r) => r.method === "GET" && r.path === "/repos/Quick-Release/repo-42"))
+    .toHaveLength(omitArchived ? 2 : 0);
+  expect(JSON.parse(await operator("status", production.slot))).toMatchObject({ suspension: { reason: "archived" } });
+});
+
+it("retries a transient verification failure without suspending the mapping", async () => {
+  github.next(() => new Response(null, { status: 503 }));
+  await tick();
+  expect(JSON.parse(await operator("status", production.slot))).toMatchObject({ suspension: null });
+  advance(MINUTE);
+  await tick();
+  expect(lists()).toHaveLength(1);
+  expect(logs.join("\n")).not.toMatch(/Repository mapping suspended|ghs_|Bearer/);
+});
+
+it("refuses an Operator lift if renewed unsafe evidence arrives during the passing check", async () => {
+  github.update(42, { private: false });
+  await tick();
+  github.update(42, { private: true });
+  advance(MINUTE);
+  github.mintOmits("archived");
+  github.next(() => undefined);
+  github.next(async () => {
+    // Another sweep observes loss of access while this one reads a stale healthy response.
+    await Effect.runPromise(suspendRepository(stage.databases.shared, 42, "no_access", now));
+    return Response.json({ id: 42, full_name: "Quick-Release/repo-42", private: true, archived: false });
+  });
+  await tick();
+  await expect(operator("unsuspend", production.slot, "operator-7", "verified-private")).rejects.toThrow("cannot be unsuspended");
 });

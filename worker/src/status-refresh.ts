@@ -26,7 +26,9 @@ export interface StatusRefreshOptions {
 }
 class RefreshStorageFailed extends Data.TaggedError("RefreshStorageFailed")<{}> {}
 const io = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: () => new RefreshStorageFailed() });
-const eligible = `tracking = 'active' AND issue_id IS NOT NULL AND NOT EXISTS
+const eligible = `tracking = 'active' AND issue_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM repository_state rs WHERE rs.repository_id = support_request.repository_id AND rs.suspended_reason IS NOT NULL)
+  AND NOT EXISTS
   (SELECT 1 FROM delivery_suppression s WHERE (s.scope = 'slot' AND s.reference = support_request.slot)
     OR (s.scope = 'request' AND s.reference = support_request.id))`;
 
@@ -87,6 +89,7 @@ const refreshStore = (db: QueryDatabase) => {
         FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.slot = r.slot AND i.seq = 0
         WHERE r.status_refresh_due_at IS NOT NULL AND r.status_refresh_next_at <= ? AND r.tracking = 'active'
           AND r.issue_id IS NOT NULL AND i.github_installation_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM repository_state rs WHERE rs.repository_id = r.repository_id AND rs.suspended_reason IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM delivery_permit p WHERE p.installation_id = i.github_installation_id AND p.provider_cooldown_until > ?)
           AND NOT EXISTS (SELECT 1 FROM delivery_suppression s WHERE (s.scope = 'slot' AND s.reference = r.slot)
             OR (s.scope = 'request' AND s.reference = r.id))
