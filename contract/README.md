@@ -5,7 +5,7 @@ These JSON cases belong to both implementations of [the API contract](../docs/su
 - `create.json`: browser payload, trailing JSON whitespace (`padding`, in bytes), and expected HTTP status. Serialize compactly as UTF-8 without escaping Unicode or slashes, then append the padding. This makes the 32 KiB boundary exact. Field lengths are Unicode code points after trimming.
 - `list.json`: pagination, cursor, and scope boundaries.
 - `local-errors.json`: browser session, grant, and connection failures at WordPress.
-- `resources.json`: public resource, whether its delivery/status pair is valid, and the create HTTP status. Valid cases are exercised as a resource, a list item, and a create acknowledgment. The WordPress test adapter adds its own trusted ownership metadata before forwarding the response.
+- `resources.json`: public resource, whether its delivery/status pair is valid, and the create HTTP status. Valid cases are exercised as a resource, a list item, and a create acknowledgment. The WordPress test adapter adds its own trusted ownership metadata before forwarding the response, and WordPress adds `own` to what it returns; the fixtures hold the Worker's shape, without `own`.
 - `signing.json`: a test-only Ed25519 key and signed requests with their exact canonical string, `Content-Digest` and signature. PHPUnit re-signs each case with `GQ_Support_Signer`; the Worker verifies each one and rejects every single-field mutation. The key signs nothing else.
 - `errors.json`: upstream HTTP status, create/read browser error codes, and browser status (read-time 504 maps to 503). Worker authentication failures intentionally become 503, distinct from browser authentication failures tested in `integration/access.php`.
 

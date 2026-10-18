@@ -11,6 +11,8 @@ export type SupportRequest = {
   created_at: string;
   delivery: 'accepted-pending' | 'delivered' | 'failed' | 'outcome-unknown';
   status: 'open' | 'closed' | null;
+  /** Set by WordPress after it verifies ownership: the current Reporter's own request. */
+  own: boolean;
 };
 type Session = { changed: boolean; site: boolean };
 type Phase = 'idle' | 'loading' | 'ready' | 'error';
@@ -23,7 +25,7 @@ const valid = (item: unknown): item is SupportRequest => {
   const value = item as Record<string, unknown> | null;
   return !!value && typeof value.id === 'string' && /^req_[0-9A-HJKMNP-TV-Z]{26}$/.test(value.id)
     && typeof value.title === 'string' && typeof value.description === 'string' && typeof value.created_at === 'string'
-    && (value.summary === null || typeof value.summary === 'string') && DELIVERY.includes(value.delivery as string)
+    && (value.summary === null || typeof value.summary === 'string') && typeof value.own === 'boolean' && DELIVERY.includes(value.delivery as string)
     && (value.delivery === 'delivered' ? value.status === 'open' || value.status === 'closed' : value.status === null);
 };
 

@@ -231,7 +231,8 @@ final class GQ_Support_Contract_Test extends TestCase {
 		$response              = $this->request( 'POST', '/requests', $payload );
 		self::assertSame( $fixture['valid'] ? $fixture['create_status'] : 504, $response->get_status() );
 		if ( $fixture['valid'] ) {
-			self::assertSame( $fixture['resource'], $response->get_data() );
+			// WordPress adds `own` after verifying the service's ownership metadata.
+			self::assertSame( $fixture['resource'] + array( 'own' => true ), $response->get_data() );
 			if ( 201 === $fixture['create_status'] ) {
 				self::assertStringEndsWith( '/requests/req_one', $response->get_headers()['Location'] );
 			}

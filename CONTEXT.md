@@ -13,7 +13,7 @@ A Client's project whose WordPress installation is connected to its existing Git
 
 **WordPress installation**:
 A configured WordPress site through which a Reporter submits and views support requests. Its environment distinguishes contexts such as production and staging.
-_Avoid_: Site when the deployment boundary matters
+_Avoid_: Site when the deployment boundary matters. In the widget's copy ("All requests on this site") and in `scope=site`, "site" means this installation's Visibility scope, because that is the word Reporters use.
 
 **Slot**:
 The Operator-approved place for one WordPress installation in one environment, such as `acme-shop/production`. Support requests belong to the Slot, so they survive a domain change and re-enrollment, while a copy enrolled elsewhere starts empty.

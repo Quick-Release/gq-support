@@ -134,6 +134,7 @@ try {
 	$gq_support_reply    = $gq_support_resource;
 	$gq_support_own      = $gq_support_request( 'GET', '/requests/req_one' );
 	$gq_support_assert( 200 === $gq_support_own->get_status() && ! isset( $gq_support_own->get_data()['provider_secret'] ) && ! isset( $gq_support_own->get_data()['reporter_subject'] ), 'Own read returns only public fields.' );
+	$gq_support_assert( true === $gq_support_own->get_data()['own'], 'WordPress marks the current Reporter\'s own request.' );
 	$gq_support_login( $gq_support_user );
 	$gq_support_reply = array(
 		'items'       => array(),
@@ -147,7 +148,11 @@ try {
 	$gq_support_reply['reporter_subject'] = 'another-reporter';
 	$gq_support_assert( 404 === $gq_support_request( 'GET', '/requests/req_one' )->get_status(), 'Other Reporter is hidden.' );
 	wp_get_current_user()->add_cap( 'gq_support_view_site_requests' );
-	$gq_support_assert( 200 === $gq_support_request( 'GET', '/requests/req_one' )->get_status(), 'Explicit site grant permits another Reporter read.' );
+	$gq_support_reply['own'] = true;
+	$gq_support_other        = $gq_support_request( 'GET', '/requests/req_one' );
+	$gq_support_assert( 200 === $gq_support_other->get_status(), 'Explicit site grant permits another Reporter read.' );
+	$gq_support_assert( false === $gq_support_other->get_data()['own'], 'Only WordPress decides own, never the service.' );
+	unset( $gq_support_reply['own'] );
 	$gq_support_reply['installation_id'] = 'same-client-other-installation';
 	$gq_support_assert( 404 === $gq_support_request( 'GET', '/requests/req_one' )->get_status(), 'Site manager cannot read another installation.' );
 	$gq_support_reply = array(

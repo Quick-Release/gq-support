@@ -75,6 +75,7 @@ export function Requests({ requests, site, disabled, onNewReport }: Props) {
               <li key={item.id} className="gq-support-item">
                 <button type="button" className="gq-support-item-toggle" aria-expanded={open} aria-controls={details} onClick={() => setExpanded(open ? null : item.id)}>
                   <span className="gq-support-item-title">{item.title}</span>
+                  {requests.scope === "site" && item.own && <span className="gq-support-badge">{__("Yours", textDomain)}</span>}
                   <span className={`gq-support-badge gq-support-badge-${item.delivery === "delivered" ? item.status : item.delivery}`}>{badge(item)}</span>
                 </button>
                 <div id={details} className="gq-support-item-details" hidden={!open}>

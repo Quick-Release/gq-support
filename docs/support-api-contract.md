@@ -56,7 +56,8 @@ The Submission ID is a reference, not authority. The Worker scopes it to (instal
   "description": "On the cart page, clicking Checkout does nothing. I expected the payment step.",
   "created_at": "2026-09-28T10:00:00Z",
   "delivery": "delivered",
-  "status": "open"
+  "status": "open",
+  "own": true
 }
 ```
 
@@ -64,6 +65,7 @@ The Submission ID is a reference, not authority. The Worker scopes it to (instal
 - `title` is `summary`, or the description's first line cut at a word boundary to about 80 characters.
 - `delivery` is one of `accepted-pending`, `delivered`, `failed`, or `outcome-unknown`. `locally-unsent` is a browser-only state and never goes over the wire.
 - `status` is `open` or `closed` once `delivered`, and `null` before that. GitHub is authoritative (ADR 0003).
+- `own` is `true` when the request belongs to the current Reporter. WordPress sets it after verifying the service's ownership metadata (below); the Worker never sends it, and any value it sends is discarded. It identifies no Reporter. The widget marks own requests only in `scope=site`, where a Support manager sees other Reporters' requests too.
 - Timestamps are UTC ISO 8601. The browser formats them in the site timezone.
 - Text is plain and is escaped when rendered. There are no comments, labels, assignees, or repository fields.
 
@@ -162,7 +164,7 @@ The WordPress routes use the logged-in cookie and `X-WP-Nonce` together; applica
 
 The service request attests `reporter_subject` and `scope` (`mine` or `site`). Creates put these fields in the signed JSON body; reads put them in the signed query string alongside the validated pagination fields. The browser cannot supply either field. The installation identity remains in the signing headers, and the service must resolve its approved Slot and repository from that credential. Subjects are random UUIDs stored in site-prefixed user metadata, partitioned by local installation identity; account deletion removes them and a replacement account receives a new subject. First use is serialized by a connection-owned MySQL/MariaDB named lock with a one-second wait; WordPress rereads metadata under the lock and fails closed if initialization fails.
 
-Each service resource also returns `installation_id` and `reporter_subject` as server-only ownership metadata. WordPress verifies both for own reads and creates, and the installation for explicitly granted site reads, before stripping the metadata and returning the public resource fields. Lists check every item. Unknown and mismatched resources produce the same 404. This is defense in depth: the Worker must independently authorize before returning any resource. Its route implementation and verifier belong to the service work; these WordPress integration tests stub that external boundary.
+Each service resource also returns `installation_id` and `reporter_subject` as server-only ownership metadata. WordPress verifies both for own reads and creates, and the installation for explicitly granted site reads, before stripping the metadata and returning the public resource fields plus `own`. Lists check every item. Unknown and mismatched resources produce the same 404. This is defense in depth: the Worker must independently authorize before returning any resource. Its route implementation and verifier belong to the service work; these WordPress integration tests stub that external boundary.
 
 The deferred widget uses the read-only native `admin-ajax.php?action=gq_support_session` operation to check the session on open, focus, visibility changes, and explicit submission. An opaque binding ties the tab to the original account, login session and site. Only a matching cookie session with its current grant receives a fresh REST nonce. A changed session clears tab-memory draft text; lost grants or a failed check pause the form and preserve the draft with a copy affordance. No background polling, persistent browser draft storage, automatic write replay, or extra support REST route is introduced. The report form sends one in-memory Submission ID per intent and reconciles ambiguous responses with the same frozen body. It stops automatic reconciliation while closed, after three attempts, or after a session failure; explicit retries after a failed delivery or body conflict use a new key. Full request-list and detail presentation belong to the projection workflow (#26).
 

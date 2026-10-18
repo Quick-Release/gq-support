@@ -18,7 +18,7 @@ test.afterAll(() => {
   wp(['eval', "GQ_Support_State::update(array('connection' => 'not_connected'));"]);
 });
 
-type Resource = { id: string; submission_id: string; title: string; summary: string | null; description: string; created_at: string; delivery: string; status: string | null };
+type Resource = { id: string; submission_id: string; title: string; summary: string | null; description: string; created_at: string; delivery: string; status: string | null; own: boolean };
 let sequence = 0;
 const resource = (fields: Partial<Resource> = {}): Resource => {
   sequence++;
@@ -26,7 +26,7 @@ const resource = (fields: Partial<Resource> = {}): Resource => {
     id: `req_01J8Z6Q4M1ZC7X0000000000${String(sequence).padStart(2, '0')}`,
     submission_id: `3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c${String(sequence).padStart(2, '0')}`,
     title: `Request ${sequence}`, summary: null, description: `Description ${sequence}`,
-    created_at: '2026-09-28T10:00:00Z', delivery: 'delivered', status: 'open', ...fields,
+    created_at: '2026-09-28T10:00:00Z', delivery: 'delivered', status: 'open', own: true, ...fields,
   };
 };
 
@@ -261,14 +261,18 @@ test('a Support manager reads the installation scope only while explicitly grant
   grantSite(true);
   try {
     const reads = await stubReads(page, (_call, query) => page1(query.get('scope') === 'site'
-      ? [resource({ title: 'Another Reporter request' }), resource({ title: 'My own request' })]
+      ? [resource({ title: 'Another Reporter request', own: false }), resource({ title: 'My own request' })]
       : [resource({ title: 'My own request' })]));
     await logIn(page);
     await openPanel(page);
     await showRequests(page);
     await expect(requestsPanel(page).getByRole('listitem')).toHaveCount(1);
+    // Every item in My requests is the Reporter's own, so nothing marks it.
+    await expect(requestsPanel(page).getByText('Yours', { exact: true })).toHaveCount(0);
     await requestsPanel(page).getByRole('combobox', { name: 'Show' }).selectOption({ label: 'All requests on this site' });
     await expect(requestsPanel(page).getByRole('button', { name: /Another Reporter request/ })).toBeVisible();
+    await expect(requestsPanel(page).getByRole('button', { name: /My own request/ })).toContainText('Yours');
+    await expect(requestsPanel(page).getByRole('button', { name: /Another Reporter request/ })).not.toContainText('Yours');
     expect(reads.map(query => query.get('scope'))).toEqual(['mine', 'site']);
 
     // A revoked grant drops the installation-wide projection at the next session check.

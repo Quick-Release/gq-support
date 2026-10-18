@@ -285,7 +285,7 @@ final class GQ_Support_REST {
 	}
 
 	/**
-	 * Verify service-side ownership metadata, then expose only public fields.
+	 * Verify service-side ownership metadata, then expose only public fields and whether the request is the current Reporter's.
 	 * The Worker must independently enforce this same scope before returning data.
 	 *
 	 * @param mixed  $item Service resource, including trusted ownership metadata.
@@ -306,7 +306,8 @@ final class GQ_Support_REST {
 		if ( ! in_array( $item['delivery'], array( 'accepted-pending', 'delivered', 'failed', 'outcome-unknown' ), true ) || ( 'delivered' === $item['delivery'] ? ! in_array( $item['status'], array( 'open', 'closed' ), true ) : null !== $item['status'] ) ) {
 			return self::error( 'gq_support_unavailable', 503 );
 		}
-		return array_intersect_key( $item, array_flip( $fields ) );
+		// Only WordPress decides `own`, from the metadata it just verified; a service-sent value is dropped.
+		return array_intersect_key( $item, array_flip( $fields ) ) + array( 'own' => $item['reporter_subject'] === $subject );
 	}
 
 	/**
