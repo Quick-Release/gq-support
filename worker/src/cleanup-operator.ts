@@ -1,4 +1,4 @@
-import { ERASABLE, erasureStatements, erasureStatus, erasureTargets, OFFBOARDING_GRACE_MS, purgeStatements, type Statement } from "./cleanup.ts";
+import { ERASABLE, erasureStatements, erasureStatus, OFFBOARDING_GRACE_MS, type Statement } from "./cleanup.ts";
 import type { OperatorOptions } from "./operator.ts";
 import { mappingFor } from "./repository-mappings.ts";
 import { sha256 } from "./signature.ts";
@@ -39,7 +39,8 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
     if (!subject) throw new Error("No Support requests match that reporter reference");
     const id = `era_${ulid(now)}`;
     await audit("erase", id, "operator-request");
-    await run(erasureStatements(id, slot, subject, await erasureTargets(matched), now));
+    // The CLI holds no digest key: the Worker's next pass purges the text and keeps the digest.
+    await run(erasureStatements(id, slot, subject, matched.map((row) => ({ requestId: row.id, titleDigest: null })), now));
     return id;
   }
   if (command === "offboard" && args.length === 3) {
@@ -55,13 +56,13 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
   if (!REQUEST.test(reference ?? "") || args.length !== 4) throw new Error(USAGE);
   const unresolved = "EXISTS (SELECT 1 FROM support_cleanup WHERE request_id = ? AND state = 'unresolved')";
   if (command === "cleanup-reconcile" && reason === "positive-evidence") {
-    const pinned = `${unresolved} AND EXISTS (SELECT 1 FROM delivery_intent WHERE request_id = ? AND seq = 0
-      AND github_installation_id IS NOT NULL AND attempt_started_at IS NOT NULL AND (owner IS NULL OR lease_expires_at <= ?))`;
-    if (!await audit("reconcile", reference!, reason, pinned, [reference!, reference!, now])) throw new Error("Cleanup cannot be reconciled");
+    const pinned = `EXISTS (SELECT 1 FROM support_cleanup WHERE request_id = ? AND state = 'unresolved'
+      AND intent_id IS NOT NULL AND github_installation_id IS NOT NULL AND repository_id IS NOT NULL AND attempt_started_at IS NOT NULL)`;
+    if (!await audit("reconcile", reference!, reason, pinned, [reference!])) throw new Error("Cleanup cannot be reconciled");
     // One more read-only hour. An erased request's known issue goes straight to
     // redaction; offboarding and retention never edit the Client's issues.
-    await query(`UPDATE support_cleanup SET state = CASE WHEN purpose = 'erasure' AND EXISTS (SELECT 1 FROM support_request
-        WHERE id = support_cleanup.request_id AND issue_id IS NOT NULL) THEN 'redacting' ELSE 'reconciling' END,
+    await query(`UPDATE support_cleanup SET state = CASE WHEN purpose = 'erasure' AND COALESCE(issues_json, '[]') != '[]'
+        THEN 'redacting' ELSE 'reconciling' END,
       window_until = ?, next_attempt_at = ?, reconciliation_json = NULL, last_error_class = NULL
       WHERE request_id = ? AND state = 'unresolved'`, [now + 3_600_000, now, reference!]);
     return "Cleanup reconciliation scheduled";
@@ -69,9 +70,9 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
   if (command === "cleanup-exception" && ["client-instructed", "operator-verified"].includes(reason ?? "")) {
     if (!await audit("exception", reference!, reason!, unresolved, [reference!])) throw new Error("Cleanup has no unresolved remote outcome");
     // Releases the restricted metadata. The erasure stays incomplete, and the tombstone window starts now.
-    await query(`UPDATE support_cleanup SET state = 'excepted', resolved_at = ?, title_digest = NULL, next_attempt_at = NULL, owner = NULL
-      WHERE request_id = ? AND state = 'unresolved'`, [now, reference!]);
-    await run(purgeStatements(reference!));
+    await query(`UPDATE support_cleanup SET state = 'excepted', resolved_at = ?, title_digest = NULL, next_attempt_at = NULL, owner = NULL,
+      intent_id = NULL, github_installation_id = NULL, repository_id = NULL, attempt_started_at = NULL, attempt_ended_at = NULL,
+      issues_json = NULL, reconciliation_json = NULL WHERE request_id = ? AND state = 'unresolved'`, [now, reference!]);
     return "Cleanup exception recorded";
   }
   throw new Error(USAGE);

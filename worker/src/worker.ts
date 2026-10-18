@@ -17,6 +17,7 @@ import { refreshStatus, type RefreshConfig } from "./status-refresh.ts";
 import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
+import { digestKey } from "./cleanup.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 
@@ -63,7 +64,9 @@ export default Cloudflare.Worker(
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
-      yield* scheduledTick({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh }).pipe(
+      // Derived from the App key, which never enters D1 (src/cleanup.ts).
+      const key = yield* Effect.promise(() => digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
+      yield* scheduledTick({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
       );
     }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));

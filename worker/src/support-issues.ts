@@ -1,6 +1,5 @@
 import * as Effect from "effect/Effect";
 import { GitHubGateway, OutcomeUnknown, ValidationRejected, type GitHubIssue, type GitHubTarget, type ReadIssueError } from "./github-gateway.ts";
-import { sha256 } from "./signature.ts";
 
 /** Trusted, pinned delivery inputs. Never construct these from Reporter request fields. */
 export interface SupportIssueIntent {
@@ -68,7 +67,10 @@ export type ReconciliationResult =
   | { readonly _tag: "Continue"; readonly progress: ReconciliationProgress }
   | { readonly _tag: "Unknown"; readonly reason: "no-match" | "shifted-pages" | "suspicious" | "multiple-matches"; readonly alert: boolean; readonly candidates: readonly IssueIdentity[] }
   | { readonly _tag: "Delivered"; readonly issue: GitHubIssue }
-  | { readonly _tag: "RedactionRequired"; readonly issue: IssueIdentity; readonly reviewTitle: boolean };
+  /** Every plausible copy: redacting a duplicate loses nothing, unlike binding it as the delivered issue. */
+  | { readonly _tag: "RedactionRequired"; readonly issues: readonly IssueIdentity[]; readonly reviewTitle: boolean };
+/** Bounds the copies one erasure scan may collect; more need an Operator. */
+const ERASURE_CANDIDATES = 10;
 
 const identityOf = ({ id, nodeId, number }: GitHubIssue): IssueIdentity => ({ id, nodeId, number });
 const firstLine = (issue: GitHubIssue) => issue.body?.split("\n", 1)[0];
@@ -90,11 +92,6 @@ export type RedactionResult =
   | { readonly _tag: "Redacted"; readonly residual: readonly ResidualCopy[] }
   | { readonly _tag: "Lost"; readonly residual: readonly ResidualCopy[] }
   | { readonly _tag: "NeedsReview"; readonly reason: "identity" | "marker" };
-/**
- * Keyed by the intent, so equal titles of different requests never compare
- * equal. Kept only while automatic cleanup may still retitle the issue.
- */
-export const titleDigest = (intentId: string, title: string) => sha256(JSON.stringify([intentId, title]));
 
 const prepareIssue = (intent: SupportIssueIntent) => Effect.gen(function* () {
   if (!validIntent(intent)) return yield* Effect.fail(new ValidationRejected({ status: 400, fields: ["intent"] }));
@@ -131,8 +128,9 @@ export const supportIssues = {
    * Erasure redaction: keeps the marker and attribution, replaces the
    * Reporter text, and replaces the title only while it provably is the one
    * derived at acceptance. Comments are never edited. One PATCH at most.
+   * `isDerivedTitle` is null once that can no longer be checked.
    */
-  redact: (target: GitHubTarget, intentId: string, identity: IssueIdentity, derivedTitleDigest: string | null,
+  redact: (target: GitHubTarget, intentId: string, identity: IssueIdentity, isDerivedTitle: ((title: string) => Promise<boolean>) | null,
     authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
     const gateway = yield* GitHubGateway;
     const read = yield* gateway.readIssue(target, identity.number).pipe(Effect.catchTags({
@@ -146,8 +144,8 @@ export const supportIssues = {
     if (first !== marker(intentId) || !attribution?.startsWith(ATTRIBUTION)) return { _tag: "NeedsReview", reason: "marker" } satisfies RedactionResult;
     const body = [first, attribution, "", "### Description", "", ERASED_TEXT].join("\n");
     const title = read.issue.title === ERASED_TITLE ? "erased"
-      : derivedTitleDigest === null ? "title_review"
-      : (yield* Effect.promise(() => titleDigest(intentId, read.issue.title))) === derivedTitleDigest ? "derived" : "retitled";
+      : isDerivedTitle === null ? "title_review"
+      : (yield* Effect.promise(() => isDerivedTitle(read.issue.title))) ? "derived" : "retitled";
     if (read.issue.body !== body || title === "derived") {
       yield* gateway.updateIssue(target, identity.number, { body, ...(title === "derived" ? { title: ERASED_TITLE } : {}) }, authorize);
     }
@@ -170,7 +168,8 @@ export const supportIssues = {
       query.attemptStartedAt, query.attemptEndedAt, query.knownIdentity ?? null, query.erasurePending]);
     if (!/^int_[A-Z0-9]+$/.test(query.intentId) || !query.botLogin.endsWith("[bot]") ||
         !Number.isFinite(query.attemptStartedAt) || !Number.isFinite(query.attemptEndedAt) || query.attemptEndedAt < query.attemptStartedAt ||
-        (progress && (progress.scope !== scope || !Number.isSafeInteger(progress.page) || progress.page < 2 || progress.page > 10_000 || progress.candidates.length > 2))) {
+        (progress && (progress.scope !== scope || !Number.isSafeInteger(progress.page) || progress.page < 2 || progress.page > 10_000 ||
+          progress.candidates.length > (query.erasurePending ? ERASURE_CANDIDATES : 2)))) {
       return yield* Effect.fail(new ValidationRejected({ status: 400, fields: ["reconciliation"] }));
     }
     const gateway = yield* GitHubGateway;
@@ -201,7 +200,7 @@ export const supportIssues = {
       if (firstLine(issue) === marker(query.intentId)) {
         if (!plausible(query, issue)) suspicious = true;
         if (!candidates.some((candidate) => sameIdentity(candidate, issue))) candidates.push(identityOf(issue));
-        if (candidates.length > 1) return unknown("multiple-matches", candidates.slice(0, 2));
+        if (candidates.length > (query.erasurePending ? ERASURE_CANDIDATES : 1)) return unknown("multiple-matches", candidates.slice(0, 2));
       } else if (issue.body?.includes(marker(query.intentId))) {
         // A moved/edited marker is suspicious, including one copied into Reporter text.
         suspicious = true;
@@ -214,10 +213,16 @@ export const supportIssues = {
     }
     if (suspicious) return unknown("suspicious", candidates);
     if (candidates.length === 0) return unknown("no-match", []);
+    if (query.erasurePending) {
+      for (const candidate of candidates) {
+        const current = yield* gateway.readIssue(query.target, candidate.number);
+        if (current._tag !== "Fresh" || !sameIdentity(current.issue, candidate) || !plausible(query, current.issue)) return unknown("suspicious", candidates);
+      }
+      return { _tag: "RedactionRequired", issues: candidates, reviewTitle: query.expectedIssue === null };
+    }
     const candidate = candidates[0]!;
     const current = yield* gateway.readIssue(query.target, candidate.number);
     if (current._tag !== "Fresh" || !sameIdentity(current.issue, candidate) || !plausible(query, current.issue)) return unknown("suspicious", candidates);
-    if (query.erasurePending) return { _tag: "RedactionRequired", issue: candidate, reviewTitle: query.expectedIssue === null };
     return { _tag: "Delivered", issue: current.issue };
   }),
 };
