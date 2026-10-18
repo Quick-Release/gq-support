@@ -35,15 +35,24 @@ export const unsafeReason = (error: { readonly _tag: string; readonly reason?: s
  */
 export const suspendRepository = (db: QueryDatabase, repositoryId: number, reason: SuspensionReason, now: number) => Effect.gen(function* () {
   const suspended = yield* Effect.tryPromise({
-    try: () => db.prepare(`INSERT INTO repository_state (repository_id, suspended_reason, suspended_at, observed_at) VALUES (?1, ?2, ?3, ?3)
-      ON CONFLICT (repository_id) DO UPDATE SET suspended_reason = excluded.suspended_reason, suspended_at = excluded.suspended_at
-      WHERE repository_state.suspended_reason IS NULL RETURNING repository_id`).bind(repositoryId, reason, now).first(),
+    try: async () => {
+      const [changed] = await db.batch([
+        db.prepare(`INSERT INTO repository_state (repository_id, suspended_reason, suspended_at, observed_at) VALUES (?1, ?2, ?3, ?3)
+          ON CONFLICT (repository_id) DO UPDATE SET suspended_reason = excluded.suspended_reason, suspended_at = excluded.suspended_at
+          WHERE repository_state.suspended_reason IS NULL RETURNING repository_id`).bind(repositoryId, reason, now),
+        // Any renewed unsafe observation invalidates a previous passing check,
+        // including when the first suspension's cause and time are retained.
+        db.prepare(`UPDATE repository_state SET verified_safe_at = NULL, unsafe_observed_at = MAX(COALESCE(unsafe_observed_at, 0), ?)
+          WHERE repository_id = ?`).bind(now, repositoryId),
+      ]);
+      return changed!.results.length > 0;
+    },
     catch: () => new SuspensionNotRecorded(),
   });
   if (suspended) {
     yield* Effect.logError("Repository mapping suspended").pipe(Effect.annotateLogs({ repository: repositoryId, reason, alert: true }));
   }
-  return suspended !== null;
+  return suspended;
 });
 
 /** The evidence an Operator states for each cause, after verifying it. */
@@ -55,7 +64,7 @@ const EVIDENCE: Readonly<Record<SuspensionReason, string>> = {
  * `operator unsuspend <slot> <opaque-actor> <evidence>` lifts the suspension
  * of the Slot's repository, so for every Slot mapped to it. Independent CLI
  * credentials authorize it; no HTTP route calls it. The next create still
- * checks the repository first, so a wrong call re-suspends at once.
+ * checks the repository first. A passing sweep after suspension is required.
  */
 export const unsuspendRepository = async (args: readonly string[], { query, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
   const [, slot, actor, evidence] = args;
@@ -69,10 +78,10 @@ export const unsuspendRepository = async (args: readonly string[], { query, mapp
   // Write-ahead audit, as for delivery resume: it records the attempt even if the update loses a race.
   const audit = await query(`INSERT INTO repository_audit (id, repository_id, actor, action, evidence, suspended_reason, suspended_at, occurred_at)
     SELECT ?, repository_id, ?, 'unsuspend', ?, suspended_reason, suspended_at, ? FROM repository_state
-    WHERE repository_id = ? AND suspended_reason = ? RETURNING id`, [id, actor!, evidence!, now, mapping.repositoryId, reason]);
-  if (audit.length !== 1) throw new Error("Repository cannot be unsuspended: it is not suspended for that cause");
+    WHERE repository_id = ? AND suspended_reason = ? AND verified_safe_at > suspended_at RETURNING id`, [id, actor!, evidence!, now, mapping.repositoryId, reason]);
+  if (audit.length !== 1) throw new Error("Repository cannot be unsuspended: it is not suspended for that cause with a later passing verification");
   const updated = await query(`UPDATE repository_state SET suspended_reason = NULL, suspended_at = NULL
-    WHERE repository_id = ? AND suspended_reason = ? AND EXISTS (SELECT 1 FROM repository_audit a
+    WHERE repository_id = ? AND suspended_reason = ? AND verified_safe_at > suspended_at AND EXISTS (SELECT 1 FROM repository_audit a
       WHERE a.id = ? AND a.suspended_at IS repository_state.suspended_at) RETURNING repository_id`, [mapping.repositoryId, reason, id]);
   if (updated.length !== 1) throw new Error("Unsuspend lost eligibility; inspect the audit and current state");
   const slots = mappings.filter((other) => other.repositoryId === mapping.repositoryId).map((other) => other.slot);

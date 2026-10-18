@@ -3,7 +3,8 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sweepDelivery } from "../src/delivery.ts";
-import { GitHubGateway } from "../src/github-gateway.ts";
+import { GitHubGateway, GitHubReader } from "../src/github-gateway.ts";
+import { scheduledTick } from "../src/scheduled.ts";
 import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
@@ -59,6 +60,12 @@ const sweep = () => Effect.runPromise(sweepDelivery({ db: stage.databases.shared
   now: () => now, random: () => 0 }).pipe(
   Effect.provide(GitHubGateway.layer({ clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem }).pipe(Layer.provide(github.layer))),
   Effect.provide(Logger.layer([Logger.map(Logger.formatJson, (line) => { logs.push(JSON.parse(line)); })]))));
+const verifySweep = () => {
+  const config = { clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem };
+  return Effect.runPromise(scheduledTick({ db: stage.databases.shared, mappings, botLogin: `${SLUG}[bot]`, now: () => now,
+    random: () => 0, refresh: { readsPerTick: 0 } }).pipe(
+    Effect.provide(Layer.mergeAll(GitHubGateway.layer(config), GitHubReader.layer(config)).pipe(Layer.provide(github.layer)))));
+};
 /** Waits out the shared mutation pacing between creates. */
 const deliver = async () => { advance(10_000); await sweep(); };
 const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
@@ -158,6 +165,8 @@ it("stays suspended after the repository is made private again, until an Operato
   expect(await mappingState(production)).toBe("suspended");
   expect((await submit(production)).status).toBe(403);
 
+  await expect(operator("unsuspend", "shop/staging", "operator-7", "verified-private")).rejects.toThrow("cannot be unsuspended");
+  await verifySweep();
   expect(JSON.parse(await operator("status", "shop/staging"))).toMatchObject({ suspension: { reason: "public", suspended_at: START + 10_000 } });
   // The evidence must answer the recorded cause.
   await expect(operator("unsuspend", "shop/staging", "operator-7", "access-restored")).rejects.toThrow("cannot be unsuspended");
@@ -179,7 +188,12 @@ it("re-suspends an unsuspended repository that is still unsafe at the next creat
   github.update(42, { archived: true });
   await accept(production);
   await deliver();
+  await expect(operator("unsuspend", "shop/production", "operator-7", "verified-unarchived")).rejects.toThrow("cannot be unsuspended");
+  github.update(42, { archived: false });
+  advance(60_000);
+  await verifySweep();
   await operator("unsuspend", "shop/production", "operator-7", "verified-unarchived");
+  github.update(42, { archived: true });
   await accept(production);
   await deliver();
   expect(issuePosts()).toHaveLength(0);

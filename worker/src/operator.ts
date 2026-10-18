@@ -58,7 +58,7 @@ export const runOperator = async (args: readonly string[], { query, recordRevoca
   const [key] = await query(`SELECT key_id, installation_id, origin, enrolled_at, revoked_at
     FROM installation_key WHERE slot = ? ORDER BY enrolled_at DESC, rowid DESC LIMIT 1`, [slot]);
   // Per repository, so it covers every Slot mapped to it. Lift it with `unsuspend`.
-  const [suspension] = await query(`SELECT suspended_reason AS reason, suspended_at FROM repository_state
+  const [suspension] = await query(`SELECT suspended_reason AS reason, suspended_at, verified_safe_at FROM repository_state
     WHERE repository_id = ? AND suspended_reason IS NOT NULL`, [mapping.repositoryId]);
   return JSON.stringify({ slot, environment: mapping.environment, key: key ?? null, suspension: suspension ?? null });
 };

@@ -25,7 +25,7 @@ export const scheduledTick = (options: ScheduledOptions): Effect.Effect<void, ne
     Effect.timeoutOption(12_000),
     Effect.catchCause(() => Effect.logError("Support status refresh failed")),
   );
-  yield* sweepStatus({ db: options.db, botLogin: options.botLogin,
+  yield* sweepStatus({ db: options.db, botLogin: options.botLogin, mappings: options.mappings,
     ...(options.now ? { now: options.now } : {}), ...(options.sweep ? { config: options.sweep } : {}) }).pipe(
     // Phase bounds total 57 seconds, ending before the next minute tick.
     Effect.timeoutOption(20_000),
