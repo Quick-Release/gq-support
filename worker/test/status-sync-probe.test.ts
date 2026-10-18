@@ -56,15 +56,18 @@ const deps = (): ProbeDeps => ({
     return handleRequest(request, stage.databases.shared, mappings);
   },
   gh: (args, stdin) => {
-    const path = args[1]!;
+    const path = args.find((arg) => arg.startsWith("repos/"))!;
     if (path === "repos/Quick-Release/gq-support-sandbox") return { id: SANDBOX, private: true };
     if (path.startsWith("repos/Quick-Release/gq-support-sandbox/issues?")) {
       expect(new URLSearchParams(path.split("?")[1]).get("creator")).toBe(BOT);
       return github.issues.map((issue) => ({ number: issue.number, title: issue.title }));
     }
     // Only the Developer's own changes: the fake records no App events or comments after creation.
-    if (path.includes("/events?")) return [{ actor: { login: BOT }, created_at: "2026-10-17T10:00:01Z" }, { actor: { login: "developer" }, created_at: iso(now) }];
-    if (path.includes("/comments?")) return [];
+    if (path.includes("/events?")) {
+      expect(args).toContain("--paginate");
+      return [[{ actor: { login: BOT }, created_at: "2026-10-17T10:00:01Z" }], [{ actor: { login: "developer" }, created_at: iso(now) }]];
+    }
+    if (path.includes("/comments?")) return [[]];
     const issue = github.issues.find((candidate) => path.endsWith(`/issues/${candidate.number}`))!;
     github.edit(issue, stdin as { state: "open" | "closed" }, now);
     return { state: issue.state, updated_at: issue.updated_at };
@@ -123,5 +126,6 @@ it("reports when the Reporter's installation first sees a suspended mapping", as
     if (++polls === 3) await Effect.runPromise(suspendRepository(stage.databases.shared, SANDBOX, "public", now).pipe(Effect.provide(Logger.layer([]))));
     await sleep(milliseconds);
   } });
-  expect(result).toEqual({ suspended: true, afterMs: 30_000 });
+  expect(result).toEqual({ suspended: true, afterMs: 30_000, createRefused: true });
+  expect(github.issues).toHaveLength(0);
 });

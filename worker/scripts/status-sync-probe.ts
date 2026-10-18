@@ -125,7 +125,7 @@ export const runProbe = async (command: string, options: { transitions?: number;
     if (!state.issueNumber) throw new Error("submit_first");
     const repository = deps.gh(["api", `repos/${SANDBOX}`]) as { id: number; private: boolean };
     if (repository.id !== SANDBOX_ID) throw new Error("sandbox_identity");
-    const started = new Date(deps.now()).toISOString();
+    const started = deps.now();
     for (let index = 0; index < (options.transitions ?? 1); index += 1) {
       const current = (await request()).status;
       const next = current === "open" ? "closed" : "open";
@@ -142,9 +142,11 @@ export const runProbe = async (command: string, options: { transitions?: number;
     }
     // Observing must never write to GitHub: no App events or comments after the Developer's first change.
     const issue = `repos/${SANDBOX}/issues/${state.issueNumber}`;
-    const events = deps.gh(["api", `${issue}/events?per_page=100`]) as { actor: { login: string } | null; created_at: string }[];
-    const comments = deps.gh(["api", `${issue}/comments?per_page=100`]) as { user: { login: string } | null }[];
-    const appWrites = events.filter((event) => event.actor?.login === BOT && event.created_at >= started).length +
+    const pages = <A>(path: string) => (deps.gh(["api", "--paginate", "--slurp", `${path}?per_page=100`]) as A[][]).flat();
+    const events = pages<{ actor: { login: string } | null; created_at: string }>(`${issue}/events`);
+    const comments = pages<{ user: { login: string } | null }>(`${issue}/comments`);
+    // GitHub reports whole seconds: compare instants, floored to the second the measurement started in.
+    const appWrites = events.filter((event) => event.actor?.login === BOT && Date.parse(event.created_at) >= Math.floor(started / 1000) * 1000).length +
       comments.filter((comment) => comment.user?.login === BOT).length;
     return { ...summarize(state.transitions), appWrites };
   }
@@ -156,7 +158,12 @@ export const runProbe = async (command: string, options: { transitions?: number;
       if (response.status !== 200) throw new Error(`installation_${response.status}`);
       return (await response.json() as { mapping_state: string }).mapping_state === "suspended" ? deps.now() : undefined;
     });
-    return { suspended: suspended !== undefined, afterMs: suspended === undefined ? null : suspended - started };
+    if (suspended === undefined) return { suspended: false, afterMs: null, createRefused: null };
+    // What the Reporter's form then gets: a create refused as not configured, with nothing written.
+    const refused = await call("POST", "/v1/requests", JSON.stringify({ submission_id: crypto.randomUUID(), reporter_subject: state.subject,
+      scope: "mine", summary: "GQ status sync probe while suspended", description: "Synthetic staging probe (#57). No client data." }));
+    const code = refused.status === 403 ? (await refused.json() as { code?: string }).code : undefined;
+    return { suspended: true, afterMs: suspended - started, createRefused: code === "gq_support_not_configured" };
   }
   if (command === "report") return summarize(state.transitions);
   throw new Error("command");

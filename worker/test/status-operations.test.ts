@@ -50,7 +50,7 @@ const operator = (...args: string[]) => runOperator(args, { mappings, now, recor
   query: async (sql, parameters) => (await db().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 const health = async () => JSON.parse(await operator("status-health")) as {
   healthy: boolean; dueRefreshes: number;
-  repositories: { repositoryId: number; lastSweptAt: string | null; sweeping: boolean; withinInterval: boolean }[];
+  repositories: { repositoryId: number; lastSweptAt: string | null; sweeping: boolean; suspended: boolean; withinInterval: boolean }[];
   suspensions: { repositoryId: number; reason: string; acknowledged: boolean }[];
 };
 const accept = async () => {
@@ -121,6 +121,7 @@ it.each([
   [["status-reconcile", "2026-10-17T11:00:00Z", "operator-1"]],
   [["status-reconcile", "2026-10-17T09:00:00Z", "an operator"]],
   [["status-health", "extra"]],
+  [["status-reconcil", "2026-10-17T09:00:00Z", "operator-1"]],
   [["status-repair", "2026-10-17T09:00:00Z", "operator-1"]],
   [["status-repair", "2026-10-17T09:30:00Z", "2026-10-17T09:00:00Z", "operator-1"]],
   [["status-repair", "2026-10-17T09:00:00Z", "2026-10-17T11:00:00Z", "operator-1"]],
@@ -161,6 +162,17 @@ it("lists suspensions as unacknowledged until a recorded repair acknowledges the
   await operator("status-repair", iso(START), iso(now), "operator-1");
   expect(await health()).toMatchObject({ healthy: true, suspensions: [{ repositoryId: 77, reason: "public", acknowledged: true }] });
   expect((await audit())[0]).toMatchObject({ suspended_repositories: "[77]" });
+
+  // Still public: every sweep of it fails verification and never completes, yet a repair can be recorded.
+  github.update(77, { private: false });
+  advance(SWEEP);
+  await tick();
+  advance(SWEEP);
+  await tick();
+  const unsafe = await health();
+  expect(unsafe.repositories.find((repository) => repository.repositoryId === 77)).toMatchObject({ suspended: true, withinInterval: false });
+  expect(unsafe).toMatchObject({ healthy: true, dueRefreshes: 0 });
+  expect(await operator("status-repair", iso(START), iso(now), "operator-1")).toBe("Recorded status repair for 2 repositories");
 
   // A later suspension of the same repository needs a new acknowledgement.
   await db().prepare("UPDATE repository_state SET suspended_reason = NULL, suspended_at = NULL WHERE repository_id = 77").run();

@@ -27,7 +27,8 @@ interface Health {
   readonly checkedAt: string;
   readonly dueRefreshes: number;
   readonly oldestDueAgeMs: number;
-  readonly repositories: readonly { repositoryId: number; lastSweptAt: string | null; sweepAgeMs: number | null; sweeping: boolean; withinInterval: boolean }[];
+  readonly repositories: readonly { repositoryId: number; lastSweptAt: string | null; sweepAgeMs: number | null; sweeping: boolean;
+    suspended: boolean; withinInterval: boolean }[];
   readonly suspensions: readonly { repositoryId: number; reason: string; suspendedAt: string | null; verifiedSafeAt: string | null; acknowledged: boolean }[];
 }
 
@@ -38,7 +39,8 @@ const health = async ({ query, mappings, now = Date.now() }: OperatorOptions): P
   const configured = JSON.stringify(mappings);
   const [due] = await query(`SELECT COUNT(*) AS count, MIN(status_refresh_due_at) AS oldest FROM support_request
     WHERE status_refresh_due_at IS NOT NULL AND ${refreshEligible}`, []);
-  const repositories = await query(`SELECT t.repository_id, s.last_swept_at, s.sweep_cursor IS NOT NULL AS sweeping
+  const repositories = await query(`SELECT t.repository_id, s.last_swept_at, s.sweep_cursor IS NOT NULL AS sweeping,
+      s.suspended_reason IS NOT NULL AS suspended
     FROM (${targets()}) t LEFT JOIN repository_state s ON s.repository_id = t.repository_id ORDER BY t.repository_id`, [configured]);
   // A repair audit recorded after a suspension began, naming its repository, acknowledges it.
   const suspensions = await query(`SELECT s.repository_id, s.suspended_reason, s.suspended_at, s.verified_safe_at,
@@ -52,14 +54,22 @@ const health = async ({ query, mappings, now = Date.now() }: OperatorOptions): P
     repositories: repositories.map((row) => {
       const age = typeof row.last_swept_at === "number" ? Math.max(0, now - row.last_swept_at) : null;
       return { repositoryId: Number(row.repository_id), lastSweptAt: iso(row.last_swept_at), sweepAgeMs: age,
-        sweeping: Boolean(row.sweeping), withinInterval: !row.sweeping && age !== null && age <= SWEEP_BOUND_MS };
+        sweeping: Boolean(row.sweeping), suspended: Boolean(row.suspended), withinInterval: !row.sweeping && age !== null && age <= SWEEP_BOUND_MS };
     }),
     suspensions: suspensions.map((row) => ({ repositoryId: Number(row.repository_id), reason: String(row.suspended_reason),
       suspendedAt: iso(row.suspended_at), verifiedSafeAt: iso(row.verified_safe_at), acknowledged: Boolean(row.acknowledged) })),
   };
-  return { healthy: report.dueRefreshes === 0 && report.repositories.every((repository) => repository.withinInterval) &&
+  return { healthy: report.dueRefreshes === 0 && behind(report.repositories) === 0 &&
     report.suspensions.every((suspension) => suspension.acknowledged), ...report };
 };
+
+/**
+ * Unsuspended repositories whose sweep is not current. A suspended one is
+ * excluded: its status is frozen, and while it stays unsafe its sweep cannot
+ * complete. The suspension list accounts for it instead.
+ */
+const behind = (repositories: Health["repositories"]) =>
+  repositories.filter((repository) => !repository.suspended && !repository.withinInterval).length;
 
 /**
  * `status-reconcile` starts a full reconciliation: every target repository's
@@ -95,7 +105,8 @@ const reconcile = async (args: readonly string[], options: OperatorOptions): Pro
 /**
  * `status-repair` records that recovery is confirmed for an outage window:
  * the due backlog is drained and every repository was swept within one
- * interval. It acknowledges the suspensions present at that time.
+ * interval, apart from suspended ones. It acknowledges the suspensions
+ * present at that time, including ones whose repository is still unsafe.
  */
 const repair = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
   const { query, now = Date.now() } = options;
@@ -105,9 +116,9 @@ const repair = async (args: readonly string[], options: OperatorOptions): Promis
     throw new Error(USAGE.repair);
   }
   const report = await health(options);
-  const behind = report.repositories.filter((repository) => !repository.withinInterval).length;
-  if (report.dueRefreshes > 0 || behind > 0) {
-    throw new Error(`Status not yet repaired: ${report.dueRefreshes} due refreshes, ${behind} repositories behind`);
+  const lagging = behind(report.repositories);
+  if (report.dueRefreshes > 0 || lagging > 0) {
+    throw new Error(`Status not yet repaired: ${report.dueRefreshes} due refreshes, ${lagging} repositories behind`);
   }
   await query(`INSERT INTO status_audit (id, actor, action, window_start, window_end, repositories, due_refreshes, suspended_repositories, occurred_at)
     VALUES (?, ?, 'repair', ?, ?, ?, 0, ?, ?)`, [crypto.randomUUID(), actor!, start, end, report.repositories.length,
@@ -118,6 +129,6 @@ const repair = async (args: readonly string[], options: OperatorOptions): Promis
 export const runStatusOperation = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
   if (args[0] === "status-reconcile") return reconcile(args, options);
   if (args[0] === "status-repair") return repair(args, options);
-  if (args.length !== 1) throw new Error(USAGE.health);
+  if (args[0] !== "status-health" || args.length !== 1) throw new Error(USAGE.health);
   return JSON.stringify(await health(options), null, 2);
 };
