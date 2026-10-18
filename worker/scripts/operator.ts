@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { runOperator } from "../src/operator.ts";
 import { repositoryMappings } from "../src/repository-mappings.ts";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status> <slot> --account-id <id> --database-id <id>";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend> <slot> [...] --account-id <id> --database-id <id>";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;

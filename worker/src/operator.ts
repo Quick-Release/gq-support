@@ -1,6 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { recoverDelivery } from "./delivery-recovery.ts";
+import { unsuspendRepository } from "./repository-suspension.ts";
 import { sha256 } from "./signature.ts";
 
 export type CredentialDatabase = Pick<D1Database, "prepare" | "batch">;
@@ -30,9 +31,10 @@ const enrollmentCode = (): string => {
 /** The operator command boundary; Cloudflare authentication belongs to the CLI adapter. */
 export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
+  if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile and unsuspend");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");
@@ -55,5 +57,8 @@ export const runOperator = async (args: readonly string[], { query, recordRevoca
   }
   const [key] = await query(`SELECT key_id, installation_id, origin, enrolled_at, revoked_at
     FROM installation_key WHERE slot = ? ORDER BY enrolled_at DESC, rowid DESC LIMIT 1`, [slot]);
-  return JSON.stringify({ slot, environment: mapping.environment, key: key ?? null });
+  // Per repository, so it covers every Slot mapped to it. Lift it with `unsuspend`.
+  const [suspension] = await query(`SELECT suspended_reason AS reason, suspended_at FROM repository_state
+    WHERE repository_id = ? AND suspended_reason IS NOT NULL`, [mapping.repositoryId]);
+  return JSON.stringify({ slot, environment: mapping.environment, key: key ?? null, suspension: suspension ?? null });
 };

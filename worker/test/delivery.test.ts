@@ -53,8 +53,7 @@ it("delivers an accepted report once and projects its verified status", async ()
 
 const advance = (milliseconds: number) => { now += milliseconds; vi.setSystemTime(now); };
 const respondToPost = (status: number, headers: Record<string, string> = {}) => {
-  github.next(() => undefined); // installation token
-  github.next(() => undefined); // repository safety
+  github.next(() => undefined); // installation token, with repository safety
   github.next(() => Response.json({ message: 'Provider response containing PRIVATE_DATA' }, { status, headers }));
 };
 
@@ -226,7 +225,6 @@ it("a stale success cannot overwrite state but remains discoverable by reconcili
 
 it("suppression and deadline are checked after token mint and repository safety", async () => {
   const request = await accept();
-  github.next(() => undefined);
   github.next(() => { advance(21_000); return undefined; });
   await sweep();
   expect(github.issues).toHaveLength(0);

@@ -254,6 +254,33 @@ marker, attempt window and conflicts through the provider contract. A negative
 scan still cannot create an issue. There is no WordPress or public HTTP recovery
 endpoint and no force-create action.
 
+### Suspended mappings
+
+Every create and metadata repair first mints a fresh repository-scoped token,
+which resolves the repository by numeric ID and refreshes its cached name. The
+mint response's `private` and `archived` facts decide whether to POST; only a
+mint that omits them costs one `GET /repos/{owner}/{name}`. A public or archived
+repository, or lost App access (a transfer, removal from the installation,
+deletion, or an uninstalled or suspended App), suspends the repository
+(`repository_state.suspended_reason`) and logs `Repository mapping suspended`
+with `alert: true`. The suspension covers every Slot mapped to that repository.
+Reporters then get `gq_support_not_configured` on submit, `GET /v1/installation`
+reports `mapping_state: "suspended"`, existing requests keep their last-known
+status, and accepted unsent work is held, not sent.
+
+No check ever lifts a suspension. After verifying the cause is resolved, an
+Operator runs:
+
+```sh
+pnpm operator unsuspend shop/production operator-7 verified-private --account-id <account-id> --database-id <database-id>
+```
+
+The evidence must match the recorded cause: `verified-private` (public),
+`verified-unarchived` (archived) or `access-restored` (lost access). `status`
+shows the current suspension. The command writes a `repository_audit` row before
+its conditional update. The next create checks the repository again, so an
+unsafe repository suspends again at once.
+
 Verification: `pnpm --filter gq-support-worker test`, `typecheck` and `load-test`.
 The delivery load test runs 24 Slots, including a busy Slot, across three provider
 installations against real local D1 with four competing sweeps and fake GitHub. It checks fairness beyond the frontier

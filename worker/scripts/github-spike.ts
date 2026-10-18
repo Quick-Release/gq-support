@@ -18,6 +18,7 @@ const integer = (name: string, required = true) => {
 
 const observed: Record<string, unknown> = {};
 let pretendUnarchived = false;
+let repositoryReads = 0;
 
 /** Records non-secret facts about raw responses before the gateway parses them. */
 const observingFetch: typeof fetch = async (input, init) => {
@@ -25,10 +26,16 @@ const observingFetch: typeof fetch = async (input, init) => {
   const url = new URL(input instanceof Request ? input.url : String(input));
   const method = init?.method ?? (input instanceof Request ? input.method : "GET");
   if (url.pathname.endsWith("/access_tokens") && response.status === 201) {
-    const repository = (await response.clone().json() as { repositories?: Record<string, unknown>[] }).repositories?.[0] ?? {};
+    const minted = await response.clone().json() as { repositories?: Record<string, unknown>[] };
+    const repository = minted.repositories?.[0] ?? {};
     observed.mintIncludesPrivate = typeof repository.private === "boolean";
     observed.mintIncludesArchived = typeof repository.archived === "boolean";
+    if (pretendUnarchived && "archived" in repository) {
+      // The gateway checks the mint's facts before POST; let it reach GitHub's own archived error.
+      return Response.json({ ...minted, repositories: [{ ...repository, archived: false }] }, { status: 201, headers: response.headers });
+    }
   }
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) repositoryReads++;
   if (method === "POST" && url.pathname.endsWith("/issues") && response.status !== 201) {
     const message = (await response.clone().json().catch(() => ({})) as { message?: unknown }).message;
     // A classification only: provider message text is never printed.
@@ -56,12 +63,15 @@ try {
     observed.repository = { private: repository.private, archived: repository.archived };
 
     const startedAt = Date.now();
+    repositoryReads = 0;
     const issue = yield* gateway.createIssue(target, {
       title: `Gateway spike ${new Date(startedAt).toISOString()}`,
       body: "<!-- gq-support:spike -->\nCreated by the GitHubGateway spike (#37). Safe to close.",
       labels: [label],
       assignees: [assignee],
     });
+    // 0 when the mint carries private and archived; 1 when the gateway had to read the repository (#39).
+    observed.createRepositoryReads = repositoryReads;
     observed.creator = issue.creator;
     observed.creatorIsSlugBot = issue.creator === `${config.slug}[bot]`;
     observed.labelApplied = issue.labels.includes(label);

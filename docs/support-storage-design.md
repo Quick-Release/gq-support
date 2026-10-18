@@ -126,7 +126,7 @@ The query uses `list_mine` (an index search, not a scan), and rows read are abou
 4. Serialize service-authorized create dispatch per **GitHub App installation**, across all its Slots. A drained uncertain attempt stays unknown but does not indefinitely block unrelated requests. This does not fence an already-running GitHub server-side operation.
 5. Webhook handling is fetch-and-overwrite, so duplicate and out-of-order deliveries do no harm. Correctness never depends on a webhook arriving.
 6. Sweeps and fetches use the repository pinned on the row, never the current mapping.
-7. After a restore (ADR 0016), every intent that is not `delivered` becomes `outcome_unknown`, and the revocation and erasure log is replayed before the Worker serves traffic.
+7. After a restore (ADR 0016), every intent that is not `delivered` becomes `outcome_unknown`, and the revocation, erasure and suspension logs are replayed before the Worker serves traffic. A restore never lifts a repository suspension.
 
 ## Isolation
 

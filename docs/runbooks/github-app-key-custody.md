@@ -247,14 +247,17 @@ only point it at a staging-installed **private sandbox** repository with an
 existing label and an assignable collaborator. Optionally add an archived
 sandbox repository. It prints only these observations:
 
-- whether the scoped mint response includes `private` and `archived`;
+- whether the scoped mint response includes `private` and `archived`, and how
+  many repository reads the create needed (`createRepositoryReads`);
 - the created issue's creator login, and whether it equals `<slug>[bot]`;
 - whether the label and assignee were applied on create;
 - the creator-filtered list visibility delay;
 - the archived-repository create status, whether GitHub's message mentions archiving, and the typed failure the gateway mapped it to.
 
-The gateway reads privacy and archived state live before every create, so it
-does not depend on the mint-response answer. Record the results under the live
+Before every create or repair, the gateway mints a fresh scoped token and uses
+its `private` and `archived` facts (#39). It makes one repository read only when
+the mint omits them, so the answer sets whether a create costs one GitHub call
+before the POST or two. Either answer is safe. Record the results under the live
 evidence below, and update `src/github-gateway.ts` if the creator format or the
 archived error differs from what it expects.
 

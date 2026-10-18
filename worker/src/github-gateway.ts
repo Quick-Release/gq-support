@@ -104,6 +104,8 @@ export type CreateIssueError =
   | ValidationRejected
   | OutcomeUnknown;
 
+/** Private, not archived and reachable, or the reason it is not. */
+export type VerifyRepositoryError = GatewayError | RepositoryNotPrivate | RepositoryArchived;
 export type ReadIssueError = GatewayError | IssueMoved | IssueGone;
 export type RepairIssueError = ReadIssueError | ValidationRejected | RepositoryNotPrivate | RepositoryArchived;
 
@@ -154,6 +156,9 @@ interface InstallationToken {
   readonly token: Redacted.Redacted<string>;
   /** `owner/name` at mint time: an address, never identity. */
   readonly fullName: string;
+  /** Safety facts from the mint response, when GitHub included them. */
+  readonly private: boolean | undefined;
+  readonly archived: boolean | undefined;
   /** Clock time of the mint, and when the token stops being reused. */
   readonly mintedAt: number;
   readonly refreshAt: number;
@@ -214,6 +219,8 @@ const issueFrom = (value: unknown): GitHubIssue | undefined => {
 export class GitHubGateway extends Context.Service<GitHubGateway, {
   /** The repository's current name, privacy and archived state, read live. */
   readonly repository: (target: GitHubTarget) => Effect.Effect<RepositoryState, GatewayError>;
+  /** The check before every write; a failure's `unsafeReason` (src/repository-suspension.ts) says whether to suspend. */
+  readonly verifyRepository: (target: GitHubTarget) => Effect.Effect<RepositoryState, VerifyRepositoryError>;
   /**
    * Sends exactly one POST, only after a live check that the repository is
    * private and not archived. Never retried here: an OutcomeUnknown must be
@@ -245,6 +252,8 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
  */
 export class GitHubReader extends Context.Service<GitHubReader, {
   readonly repository: (target: GitHubTarget) => Effect.Effect<RepositoryState, GatewayError>;
+  /** The sweep's safety check, from its own read-only mint (#53). */
+  readonly verifyRepository: (target: GitHubTarget) => Effect.Effect<RepositoryState, VerifyRepositoryError>;
   /**
    * One page of App-created issues updated at or after `since` (epoch ms),
    * oldest change first, pull requests excluded.
@@ -259,7 +268,7 @@ export class GitHubReader extends Context.Service<GitHubReader, {
   );
 
   static readonly layer = (config: GitHubAppConfig) => Layer.effect(GitHubReader, connect(config, READ).pipe(
-    Effect.map(({ repository, listIssuesSince, readIssue }) => ({ repository, listIssuesSince, readIssue })),
+    Effect.map(({ repository, verifyRepository, listIssuesSince, readIssue }) => ({ repository, verifyRepository, listIssuesSince, readIssue })),
   ));
 }
 
@@ -330,6 +339,8 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
     return {
       token: Redacted.make(minted.token),
       fullName: repository.full_name,
+      private: typeof repository.private === "boolean" ? repository.private : undefined,
+      archived: typeof repository.archived === "boolean" ? repository.archived : undefined,
       mintedAt: now,
       refreshAt: expiresAt - REFRESH_MARGIN_MS,
     } satisfies InstallationToken;
@@ -377,10 +388,23 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
     }),
   );
 
-  const createIssue = (target: GitHubTarget, issue: NewIssue, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
-    const state = yield* repository(target);
+  /**
+   * Mints a fresh repository-scoped token, which also refreshes the cached
+   * name, and checks its facts. Only a mint without them costs one read.
+   */
+  const verifyRepository = (target: GitHubTarget) => Effect.gen(function* () {
+    yield* Cache.invalidate(tokens, keyOf(target));
+    const token = yield* Cache.get(tokens, keyOf(target));
+    const state = token.private !== undefined && token.archived !== undefined
+      ? { id: target.repositoryId, fullName: token.fullName, private: token.private, archived: token.archived }
+      : yield* repository(target);
     if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
     if (state.archived) return yield* Effect.fail(new RepositoryArchived());
+    return state;
+  });
+
+  const createIssue = (target: GitHubTarget, issue: NewIssue, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.gen(function* () {
+    yield* verifyRepository(target);
     const result = yield* call(target, (repository) => HttpClientRequest.post(`${repository}/issues`).pipe(
       HttpClientRequest.bodyJsonUnsafe(issue),
     // Sent, but no complete answer: GitHub may have created the issue.
@@ -450,9 +474,7 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
 
   const repair = (target: GitHubTarget, number: number, field: "labels" | "assignees", values: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
     Effect.gen(function* () {
-      const state = yield* repository(target);
-      if (!state.private) return yield* Effect.fail(new RepositoryNotPrivate());
-      if (state.archived) return yield* Effect.fail(new RepositoryArchived());
+      yield* verifyRepository(target);
       const { status, headers, body, now } = yield* call(target, (repository) =>
         HttpClientRequest.post(`${repository}/issues/${number}/${field}`).pipe(
           HttpClientRequest.bodyJsonUnsafe({ [field]: values }),
@@ -460,6 +482,8 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       if (status === 200 && (field === "labels" ? logins(body, "name") !== undefined : issueFrom(body) !== undefined)) return;
       if (status === 400 || status === 422) return yield* Effect.fail(new ValidationRejected({ status, fields: [field] }));
       if (status === 410) return yield* Effect.fail(new IssueGone());
+      // As for reads: a 404 is a missing issue only if the repository is still reachable.
+      if (status === 404) return yield* repository(target).pipe(Effect.andThen(Effect.fail(new IssueGone())));
       // Do not follow mutation redirects, even within GitHub.
       return yield* Effect.fail(failure(status, headers, body, now));
     });
@@ -482,6 +506,7 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
 
   return {
     repository: logged("repository", repository),
+    verifyRepository: logged("verifyRepository", verifyRepository),
     createIssue: logged("createIssue", createIssue),
     listAppIssues: logged("listAppIssues", listAppIssues),
     readIssue: logged("readIssue", readIssue),

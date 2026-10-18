@@ -135,16 +135,17 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     ]);
     if (results[0].meta.changes !== 1 || results[1].results.length !== 1) return rejected();
     if (request.method === "DELETE") return json({ revoked: true });
+    const suspended = Boolean(results[1].results[0].suspended_reason);
     if (requests) {
       // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
       const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
       return await handleSupportRequests(request, url, body, storageFor(key.slot),
-        { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId,
+        { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId, suspended,
           ...(mapping.githubInstallationId && mapping.clientOriginLabel ? { delivery: { githubInstallationId: mapping.githubInstallationId,
             environment: mapping.environment, clientOriginLabel: mapping.clientOriginLabel, defaultDeveloper: mapping.defaultDeveloper } } : {}),
         }, now);
     }
-    return json({ ...binding(key, mapping), mapping_state: results[1].results[0].suspended_reason ? "suspended" : "active" });
+    return json({ ...binding(key, mapping), mapping_state: suspended ? "suspended" : "active" });
   } catch {
     // Neither SQL errors nor request data (including Enrollment codes) enter logs/responses.
     return json({ code: "service_unavailable", message: "Service unavailable." }, 503);
