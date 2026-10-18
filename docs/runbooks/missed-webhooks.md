@@ -18,7 +18,7 @@ handler is idempotent, but status repair does not depend on redelivery.
 
 Operator commands run from `worker/` with your own Cloudflare credentials, as in
 the [Worker README](../../worker/README.md#operator-commands). Add
-`--account-id <account-id> --database-id <database-id>` for the intended stage
+`--stage <staging|prod> --account-id <account-id> --database-id <database-id>` for the intended stage
 to every `pnpm operator` command below. Use an opaque actor ID, not an email
 address.
 

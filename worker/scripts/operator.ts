@@ -5,16 +5,18 @@ import { join } from "node:path";
 import { URL } from "node:url";
 import { parseArgs } from "node:util";
 import { runOperator } from "../src/operator.ts";
-import { repositoryMappings } from "../src/repository-mappings.ts";
+import { stageMappings } from "../src/repository-mappings.ts";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard> <slot> [...] --account-id <id> --database-id <id> [--ledger-database-id <id>]";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
 try {
   const { positionals, values } = parseArgs({ allowPositionals: true, options: {
-    "account-id": { type: "string" }, "database-id": { type: "string" }, "ledger-database-id": { type: "string" },
+    stage: { type: "string" }, "account-id": { type: "string" }, "database-id": { type: "string" }, "ledger-database-id": { type: "string" },
   } });
+  const stage = values.stage;
+  if (stage !== "staging" && stage !== "prod") throw new Error(usage);
   const accountId = values["account-id"], databaseId = values["database-id"], ledgerId = values["ledger-database-id"];
   if (!accountId || !/^[a-f0-9]{32}$/i.test(accountId) || !databaseId || !/^[a-f0-9-]{36}$/i.test(databaseId) ||
     (ledgerId !== undefined && !/^[a-f0-9-]{36}$/i.test(ledgerId))) throw new Error(usage);
@@ -43,7 +45,8 @@ try {
     return results[0].results;
   };
   const output = await runOperator(positionals, {
-    mappings: repositoryMappings,
+    // Only the target stage's reviewed mappings; the database IDs must belong to the same stage.
+    mappings: stageMappings[stage],
     query: d1("SupportDB"),
     ...(ledgerId ? { ledger: d1("SupportLedger") } : {}),
     recordRevocation: async (keyId, revokedAt) => {
