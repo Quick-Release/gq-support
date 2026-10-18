@@ -401,9 +401,16 @@ describe("resource scope", () => {
 describe("intake quotas", () => {
   const at = (ms: number) => vi.useFakeTimers({ toFake: ["Date"], now: ms });
   const T0 = Date.UTC(2026, 9, 16, 12);
+  // Concurrent creates, each retried with the same key on a 503, as the API contract
+  // tells the plugin to. Under CI load local D1 can fail a call outright, which is a
+  // correct 503, not a quota decision; a deterministic 503 still fails after three tries.
   const many = (installation: Installation, count: number, subject: (n: number) => string, offset = 0) =>
-    Promise.all(Array.from({ length: count }, (_, n) =>
-      submit(installation, { submission_id: submissionId(offset + n), description: `Report ${offset + n}` }, subject(n))));
+    Promise.all(Array.from({ length: count }, async (_, n) => {
+      for (let attempt = 1; ; attempt += 1) {
+        const response = await submit(installation, { submission_id: submissionId(offset + n), description: `Report ${offset + n}` }, subject(n));
+        if (response.status !== 503 || attempt === 3) return response;
+      }
+    }));
   const statuses = (responses: Response[]) => responses.map((response) => response.status).sort();
 
   it("allows exactly five concurrent creates per Reporter in ten minutes, without debiting same-key replays", async () => {
@@ -570,14 +577,21 @@ describe("key rotation races", () => {
   });
 
   it("leaves exactly one active key when two enrollments into one Slot race", async () => {
-    const [a, b] = await Promise.all([
+    // The later batch revokes the earlier key, so the loser may already see its own
+    // key revoked and get 400 (code not valid) instead of a binding.
+    const settled = await Promise.allSettled([
       clients.enroll("acme-shop/production", "installation-a"),
       clients.enroll("acme-shop/production", "installation-a"),
     ]);
+    const enrolled = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    expect(settled.filter((result) => result.status === "rejected").map((result) => String((result as PromiseRejectedResult).reason)))
+      .toEqual(enrolled.length === 2 ? [] : ["Error: Enrollment failed: 400"]);
     const active = await db.prepare("SELECT key_id FROM installation_key WHERE slot = 'acme-shop/production' AND revoked_at IS NULL").all<{ key_id: string }>();
     expect(active.results).toHaveLength(1);
-    const winner = active.results[0]!.key_id === a.keyId ? a : b;
-    const loser = winner === a ? b : a;
-    expect([(await list(winner)).status, (await list(loser)).status, (await list(production)).status]).toEqual([200, 403, 403]);
+    const winner = enrolled.find((installation) => installation.keyId === active.results[0]!.key_id)!;
+    expect(winner).toBeDefined();
+    expect((await list(winner)).status).toBe(200);
+    for (const loser of enrolled.filter((installation) => installation !== winner)) expect((await list(loser)).status).toBe(403);
+    expect((await list(production)).status).toBe(403);
   });
 });
