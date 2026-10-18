@@ -13,6 +13,8 @@ Namespace: `gq-support/v1`. The namespace is the version, and responses carry no
 | `GET /requests?scope=site` | `gq_support_view_site_requests` | List every request from this installation, read-only |
 | `GET /requests/{id}` | own: submit; other's: view-site | Read one request |
 
+WordPress privacy tools reach the Worker without a REST route: the personal data exporter and eraser, and the deleted-user hook, call signed `GET /v1/export`, `POST /v1/erasures` and `GET /v1/erasures/{id}` directly ([privacy design](support-privacy-design.md#worker-contract)).
+
 Every other path returns 404. There are no receipt, message, state, reply, close/reopen, or attachment routes. Delivery outcome is a field on the request resource. Adding any of these routes needs a new decision (ADR 0009).
 
 Every route has a `permission_callback` that checks the cookie session, the `wp_rest` nonce, current site membership, and the capability. Object access is checked again at the Worker for the installation plus either the attested Reporter subject or a freshly attested view-site grant. An unknown request, and a request outside the caller's scope, both return **404**, so the response never reveals that the request exists. `scope=site` never means cross-installation.
