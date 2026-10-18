@@ -357,3 +357,39 @@ Deployed staging rotation completed on **2026-10-17**:
 The registration, custody and staging rotation acceptance for #36 is complete.
 Repository installation and scoped-token behavior belong to #37; receiver
 activation belongs to #12; production rollout remains gated by #20.
+
+## Live evidence — 2026-10-18
+
+PR #64 merged the scheduled Repository mapping suspension checks as
+`fcd58d6b77ef637779f7d9c0e5e3d37caf1fdbf4`.
+[Staging deployment 39128221413](https://github.com/Quick-Release/gq-support/actions/runs/39128221413)
+passed typecheck, all 329 Worker tests and the post-deploy custody audit. The
+Worker remains `gqsupportworker-worker-staging-fzos3ewkrboeduj2` in the Tipme
+account. No production deployment was performed.
+
+The staging App was installed as installation `172696674`, with selected
+repository access restricted to the private sandbox
+[`Quick-Release/gq-support-sandbox`](https://github.com/Quick-Release/gq-support-sandbox)
+(repository ID `1424354303`). Grants are exactly Issues write and Metadata read.
+This installation is spike infrastructure; it adds no approved Slot mappings to
+the Worker's empty registry.
+
+[Gateway spike 39129327430](https://github.com/Quick-Release/gq-support/actions/runs/39129327430)
+passed against that sandbox on **2026-10-18**:
+
+- `mintIncludesPrivate: true`, `mintIncludesArchived: true`;
+  the repository was private and unarchived.
+- `createRepositoryReads: 0`: the fresh mint carried both safety facts, so
+  verification needed no additional repository GET.
+- Creator `getquick-support-staging[bot]`, `creatorIsSlugBot: true`.
+- `client-support` label and assignee `vvaz` both applied.
+- Creator-filtered listing visible after `7770` milliseconds.
+- Created [sandbox issue #1](https://github.com/Quick-Release/gq-support-sandbox/issues/1).
+
+The optional archived-repository live probe was not run. Scheduled-entry tests
+with fake GitHub and real local D1 cover public, archived, removed access,
+suspended installation, healthy recovery without automatic lifting, shared
+production/staging Slots and the one-read fallback when mint facts are omitted.
+[Issue #53](https://github.com/Quick-Release/gq-support/issues/53#issuecomment-6250185320)
+records the completion evidence. Webhook activation and production rollout keep
+their separate gates.
