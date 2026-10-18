@@ -52,6 +52,7 @@ for scenario in state no-remote-calls legacy-upgrade enroll interrupted-setup te
   wp eval-file plugin/tests/integration/connection.php "$scenario"
 done
 wp eval-file plugin/tests/integration/access.php
+wp eval-file plugin/tests/integration/privacy.php
 ddev exec --dir /var/www/html/plugin composer install --quiet
 wp eval-file plugin/tests/contract/run.php
 # Verify actual public and admin HTTP responses, not hook registrations.

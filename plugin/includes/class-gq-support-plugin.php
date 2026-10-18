@@ -42,6 +42,7 @@ final class GQ_Support_Plugin {
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_launcher' ) );
 		add_action( 'admin_footer', array( __CLASS__, 'render_launcher' ) );
 		add_action( 'admin_print_footer_scripts', array( __CLASS__, 'render_deferred_assets' ), 20 );
+		self::register_privacy();
 
 		if ( is_admin() ) {
 			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-setup-page.php';
@@ -53,6 +54,25 @@ final class GQ_Support_Plugin {
 			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-cli.php';
 			WP_CLI::add_command( 'gq-support', GQ_Support_CLI::class );
 		}
+	}
+
+	/**
+	 * Privacy tools, user deletion and the privacy guide fire rarely: their
+	 * class loads only when one of these hooks does.
+	 */
+	private static function register_privacy(): void {
+		$lazy = static function ( string $method ): callable {
+			return static function ( ...$args ) use ( $method ) {
+				require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
+				return GQ_Support_Privacy::$method( ...$args );
+			};
+		};
+		add_filter( 'wp_privacy_personal_data_exporters', $lazy( 'register_exporter' ) );
+		add_filter( 'wp_privacy_personal_data_erasers', $lazy( 'register_eraser' ) );
+		add_action( 'admin_init', $lazy( 'add_policy_content' ) );
+		add_action( 'delete_user', $lazy( 'erase_deleted_user' ) );
+		add_action( 'wpmu_delete_user', $lazy( 'erase_deleted_network_user' ) );
+		add_action( 'gq_support_retry_erasure', $lazy( 'retry_erasure' ), 10, 2 );
 	}
 
 	/** Load support controllers only when WordPress initializes REST. */
