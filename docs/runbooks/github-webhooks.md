@@ -91,12 +91,12 @@ payload is not JSON). Tampered bytes fail HMAC before parsing.
 
 The live checklist (completion evidence follows below):
 
-- Confirm the live hook target type and ID, including `ping`, `issues`,
-  `installation` and `installation_repositories`. The expected type is
+- Confirm the live hook target type and ID on the sandbox's issue and
+  installation deliveries. The expected type is
   `integration`; the public documentation describes these headers without
   enumerating all type values. Record only the type and numeric App ID.
 - Measure exact UTF-8 byte lengths of real issue and installation payloads,
-  including long issue text and a large selected-repository installation.
+  including long issue text, and record the installation's repository scope.
   Record event/action, byte length and the maximum per event, never content.
   Use those measurements and headroom to finalize the provisional cap.
 - Rotate and redeliver a pre-rotation delivery; record whether GitHub used the
@@ -178,3 +178,63 @@ spike workflow reads these from GitHub's stored delivery response headers. It
 never estimates raw bytes by reserializing GitHub's parsed JSON and never prints
 payloads, signatures, arbitrary response headers or secrets. These diagnostic
 headers are disabled again by the final deployment.
+
+## Live completion evidence — 2026-10-18
+
+Completed against staging App `5355960` (`getquick-support-staging`),
+installation `172696674`, selected access to the single private sandbox
+`Quick-Release/gq-support-sandbox` (repository `1424354303`). No production
+deployment or App configuration change was performed.
+
+- [Initial deployment](https://github.com/Quick-Release/gq-support/actions/runs/39131980807)
+  passed. The runner configured the App through its JWT-authenticated webhook
+  API, then the authenticated browser session enabled **Active** with TLS
+  verification retained. The sandbox's synthetic
+  [issue #2](https://github.com/Quick-Release/gq-support-sandbox/issues/2) was
+  opened, closed, reopened and closed. The installation was suspended and
+  restored successfully by the lifecycle probe.
+- [Real delivery collection](https://github.com/Quick-Release/gq-support/actions/runs/39132657565)
+  observed `X-GitHub-Hook-Installation-Target-Type: integration` and
+  `X-GitHub-Hook-Installation-Target-ID: 5355960` on all six original issue and
+  installation deliveries. All returned empty `204`. Exact receiver byte
+  counts were 75,747–75,766 for the synthetic Unicode issue events and
+  3,007–3,009 for installation suspend/unsuspend. These measurements finalize
+  the 1 MiB cap for the current scope, with approximately 13.8x headroom over
+  the largest observed payload.
+- [Overlap probe](https://github.com/Quick-Release/gq-support/actions/runs/39132951634)
+  after the rotated deployment verified the new key as `current` and the old
+  key as `previous`, both empty `204`. The other stage's App target returned an
+  empty `401`. The raw 66-byte probe includes Unicode and CRLF, and passed the
+  actual deployed Effect conversion and Web Crypto verifier.
+- [Rotation redelivery collection](https://github.com/Quick-Release/gq-support/actions/runs/39133150919)
+  observed the saved pre-rotation event redelivered at
+  `2026-10-18T13:48:02.869Z`. GitHub signed it with the **current** secret;
+  the receiver verified the same 75,766 raw bytes and returned empty `204`.
+  The retained GUID proves this was the earlier event, not a fresh issue event.
+- [Previous-key retirement](https://github.com/Quick-Release/gq-support/actions/runs/39133270727)
+  deployed with the previous binding absent. A signature made with the old
+  key then returned empty `401`; the current key returned empty `204`;
+  another stage's target returned empty `401`. The runner removed
+  `SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET` from the staging Environment after
+  this proof.
+- [Post-retirement redelivery collection](https://github.com/Quick-Release/gq-support/actions/runs/39133463338)
+  observed that same pre-rotation event again at
+  `2026-10-18T13:52:17.522Z`: **current** key, 75,766 bytes, empty `204`.
+- [Final normal deployment](https://github.com/Quick-Release/gq-support/actions/runs/39133610178)
+  passed typecheck, **388 tests across 18 files**, deployed App-key verification,
+  and the custody audit (`custody: passed`).
+  [Final direct probe](https://github.com/Quick-Release/gq-support/actions/runs/39133809972)
+  confirmed current-key `204`, other-stage `401`, empty bodies and absent
+  diagnostic headers. `SUPPORT_GITHUB_WEBHOOK_DIAGNOSTICS` is `false`; the
+  previous secret source is absent. The sandbox issue is closed and its App
+  installation is restored.
+
+The receiver allowlist remains empty throughout: no delivery handler, gateway
+mutation or D1 capability was added. Existing request-boundary tests assert
+that every rejection leaves D1 unresolved. The stage's operational sweep and
+delivery behavior remain independent of these synthetic webhook hints.
+
+The collector initially encountered GitHub's 64-bit delivery IDs, which exceed
+JavaScript's safe integer range. IDs are now preserved as decimal strings;
+the detail-lookup regression test uses a real-sized ID. No payloads, HMAC
+signatures or secrets were retained in the evidence report.
