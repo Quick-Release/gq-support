@@ -378,7 +378,15 @@ observation, up to 10 seconds late. That is stricter than
 keeps. Deliveries still reach the receiver and get `401`, so the rejection
 alert path is exercised. That differs from a literally wrong URL: a wrong URL
 fails only in GitHub's delivery log and produces no receiver signal. Freshness
-falls back to the sweep in both cases.
+falls back to the sweep in both cases. A literal wrong-URL rehearsal is not
+scripted. GitHub's delivery log is its only evidence.
+
+Two criteria cannot be fully met by this tooling alone. "Webhook `5xx` or `401`
+alerts fire" needs #20's alert routing: until then a run can show only the
+`401` delivery statuses and the structured rejection log lines. "At once with
+webhooks" for a suspension needs #40, below. Lags are local clock minus
+GitHub's `updated_at`, so run the probe on an NTP-synchronised machine; any
+skew adds directly to every lag.
 
 Procedure (from `worker/`, Operator credentials for staging):
 
@@ -398,8 +406,9 @@ Procedure (from `worker/`, Operator credentials for staging):
 4. **Suspension:** make the sandbox public with
    `gh repo edit Quick-Release/gq-support-sandbox --visibility public --accept-visibility-change-consequences`,
    and immediately start `watch-suspension --state <file> --timeout-minutes 20`.
-   It passes when the mapping shows `suspended` (WordPress then shows
-   `gq_support_not_configured`) within one sweep. "At once with webhooks" needs
+   It passes when the mapping shows `suspended` within one sweep and
+   `createRefused` is `true`: the probe's next submission gets
+   `403 gq_support_not_configured`, which WordPress shows on the form. "At once with webhooks" needs
    #40's `public`/`repository` handlers; the current allowlist has only issue
    actions. Make the sandbox private again. After a passing sweep, run
    `unsuspend <sandbox-slot> <actor> verified-private`.
@@ -410,8 +419,8 @@ Procedure (from `worker/`, Operator credentials for staging):
 | Webhooks working, p95 `updated_at` → Reporter observation | ≤ 2 min | not run |
 | Webhooks working, App writes after observation | 0 | not run |
 | Webhook broken, each close/reopen observed | ≤ 17 min | not run |
-| Webhook broken, `401` deliveries and rejection log | present | not run |
-| Sandbox public → `suspended` | ≤ one sweep | not run |
+| Webhook broken, `401` deliveries and rejection log | present (alerts need #20) | not run |
+| Sandbox public → `suspended`, create refused `not_configured` | ≤ one sweep | not run |
 
 Remaining spike answers (from [Verify in spike](#verify-in-spike)):
 

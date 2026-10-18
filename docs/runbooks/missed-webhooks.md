@@ -28,6 +28,8 @@ Each of these is a structured Worker log event (Workers Logs). Alert routing
 belongs to [#20](https://github.com/Quick-Release/gq-support/issues/20); until
 it lands, query the logs directly.
 
+These are not yet alerts: nothing pages an Operator until #20 routes them.
+
 | Signal | Event | Likely cause |
 |---|---|---|
 | Webhook `401` | `GitHub webhook rejected` with `reason: signature`, counter `github_webhook_rejections_total` | Secret mismatch, often right after a rotation |
@@ -107,21 +109,24 @@ closes them within 24 hours.
 pnpm operator status-health
 ```
 
-It prints counts and times only. Recovery is confirmed when `healthy` is
-`true`:
+It prints counts and times only. Recovery is confirmed when:
 
 - `dueRefreshes` is `0`: the due backlog is drained.
-- Every entry in `repositories` has `withinInterval: true`: its last completed
-  sweep is within one interval (15 minutes, plus two for the Cron minute and
-  fetch) and none is still in progress.
-- Every entry in `suspensions` has `acknowledged: true`.
+- Every entry in `repositories` that is not `suspended` has
+  `withinInterval: true`: its last completed sweep is within one interval
+  (15 minutes, plus two for the Cron minute and fetch) and none is still in
+  progress. A suspended repository's status is frozen, and while it stays
+  unsafe its sweep cannot complete. The suspension list accounts for it.
+- Every entry in `suspensions` is one you have handled.
 
-A new suspension is unacknowledged until a repair record (step 6) names it.
-Before recording, handle each one: contact the Client, and lift it with
-`pnpm operator unsuspend` only after a later passing sweep, as described in the
-[Worker README](../../worker/README.md#suspended-mappings). If `healthy` stays
-`false` for several intervals, go back to step 1. The sweep or refresh path
-itself is failing.
+`healthy` is `true` only when, in addition, every suspension is
+`acknowledged`. A new suspension stays unacknowledged until the repair record
+in step 6 names it. So before recording, handle each one: contact the Client,
+and lift it with `pnpm operator unsuspend` only after a later passing sweep,
+as described in the
+[Worker README](../../worker/README.md#suspended-mappings). If the backlog or
+an unsuspended repository's sweep does not recover within a few intervals, go
+back to step 1. The sweep or refresh path itself is failing.
 
 ## 6. Record
 
@@ -130,7 +135,7 @@ pnpm operator status-repair 2026-10-18T09:40:00Z 2026-10-18T10:25:00Z operator-7
 ```
 
 The window is the outage start and the fix time. The command refuses until the
-backlog is drained and every repository is within one interval. It then stores
+backlog is drained and every unsuspended repository is within one interval. It then stores
 an audit row in `status_audit` with the actor, the time, the window, the
 repository count, the due count and the IDs of the repositories suspended at
 that time. Recording those IDs is the Operator's acknowledgement of those
