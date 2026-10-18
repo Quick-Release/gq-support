@@ -15,6 +15,15 @@ This covers the **plain-text MVP** only: Submitted text, Support status and Deli
 3. extend export and erasure to cover its data, including abandoned uploads for #15;
 4. add its tests to the list at the end of this document.
 
+The [Report context decision](support-context-design.md) narrows this gate: minimal, disclosed, removable WordPress/support-plugin versions and a coarse originating screen are approved for future MVP implementation; rich Technical details remain deferred and explicitly opt-in. Default context uses disclosure and removal controls, not the technical-details opt-in. Neither category is enabled merely by this decision: its inventory, review flow, export/erasure handling and adversarial/performance checks must ship together. Optional context is excluded from Reporter list/read projections and all logs.
+
+| Approved future context | Collection and access | Retention and deletion owner |
+|---|---|---|
+| WordPress/support-plugin versions; coarse originating screen | Reviewed/removable by Reporter; service and private Project repository collaborators only | Browser draft/review memory follows draft lifecycle; D1 delivery-intent context cleared at terminal delivery outcome; GitHub context follows repository policy and Reporter erasure |
+| PHP version, database engine/version, active theme slug/version (deferred) | Explicit technical-details action plus per-field preview/removal; same destination/access | Same limits/lifecycle as minimal context; no enablement before the optional-feature privacy gate |
+
+The field-by-field source, trust, purpose, sensitivity and exclusion inventory is in the context decision. Export includes still-retained context even though the Reporter projection omits it. Erasure removes context from D1 and the App-authored GitHub body; history/notifications/Developer quotations remain residual-copy exceptions. No extra retention store is authorized for preview or retries. The existing Environment and opaque attribution remain separate and subject to ADR 0018.
+
 ## Data inventory and retention
 
 | Data | Where | Purpose | Access | Retention | Deletion owner |

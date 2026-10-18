@@ -64,6 +64,8 @@ Constraints and indexes:
 | `attempts`, `first_attempt_at`, `lease_expires_at`, `next_attempt_at`, `last_error_class` | Delivery bookkeeping. The error is a class only, never a provider body |
 | `context_json` | Server-side context from #14 that goes into the issue body. Set to `NULL` when the intent reaches a terminal state |
 
+The [Report context decision](support-context-design.md) defines this as a frozen, reviewed, bounded context snapshot, not live diagnostic output. Its implementation must extend intake schemas, intent fingerprinting, fixtures and storage together; existing code does not yet collect it. Clear it on terminal outcome and privacy cleanup; never append recollected fields during delivery/recovery. Keep only the existing restricted metadata when uncertain-outcome erasure requires reconciliation.
+
 Index `due (next_attempt_at) WHERE state IN ('pending', 'outcome_unknown')` and `leases (lease_expires_at) WHERE state = 'in_flight'`.
 
 The API `delivery` field comes from the create intent: `pending` and `in_flight` → `accepted-pending`, `outcome_unknown` → `outcome-unknown`, and `delivered`/`failed` keep their names.

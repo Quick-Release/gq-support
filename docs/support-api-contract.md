@@ -2,6 +2,8 @@
 
 Decision record for [issue #6](https://github.com/Quick-Release/gq-support/issues/6). It specifies the browser → WordPress REST contract and the WordPress → Worker transport adapter. [ADR 0009](adr/0009-project-repository-intake-and-reporter-scoped-projection.md) limits the surface to issue intake and a Reporter-scoped projection, and the [support security design](support-security-design.md) owns the authentication and authorization rules this contract relies on. [CONTEXT.md](../CONTEXT.md) defines the terms. This is a contract, not a claim that it is implemented.
 
+The [Report context decision](support-context-design.md) specifies a gated extension to create: reviewed removable default context, a server-authenticated preview envelope, frozen context in the idempotent intent, and matching PHP/Worker fixtures. It keeps the three REST routes and the 32 KB body cap. Until that extension lands end to end, the no-context create schema below remains in force. Rich technical details are deferred beyond the MVP.
+
 ## Routes
 
 Namespace: `gq-support/v1`. The namespace is the version, and responses carry no separate version field. Routes are registered on `rest_api_init`, always, including on an unconfigured installation.
