@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { forgetLogIn, logIn } from '../performance/test-site.cjs';
 
 // The My requests projection (#26), with the gq-support REST routes stubbed. The service-side
 // scope checks are covered by worker/test and plugin/tests/contract.
@@ -11,6 +12,7 @@ const grantSite = (granted: boolean) => wp(['eval', `get_role('administrator')->
 test.beforeAll(() => {
   wp(['eval', "GQ_Support_State::update(array('connection' => 'connected')); get_role('administrator')->add_cap('gq_support_submit_requests');"]);
   wp(['user', 'update', 'admin', '--user_pass=launcher-test-password']);
+  forgetLogIn();
   grantSite(false);
 });
 test.afterAll(() => {
@@ -52,14 +54,6 @@ async function stubReads(page: Page, reply: (call: number, query: URLSearchParam
 }
 
 const page1 = (items: Resource[], next: string | null = null) => ({ status: 200, body: { items, next_cursor: next } });
-
-async function logIn(page: Page, user = 'admin', password = 'launcher-test-password') {
-  await page.goto(`${site}/wp-login.php`);
-  await page.locator('#user_login').fill(user);
-  await page.locator('#user_pass').fill(password);
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(/wp-admin/);
-}
 
 async function openPanel(page: Page) {
   await page.goto(`${site}/wp-admin/`);

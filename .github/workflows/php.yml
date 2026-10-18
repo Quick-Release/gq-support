@@ -78,7 +78,7 @@ jobs:
         run: composer analyse -- --error-format=github
 
   lifecycle-integration:
-    name: WordPress lifecycle and browser acceptance (DDEV)
+    name: WordPress ${{ matrix.wordpress.wp-version || 'latest' }} ${{ matrix.suite }} (DDEV)
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
@@ -86,11 +86,14 @@ jobs:
       # A failure in one WordPress version must not cancel, and hide, the other's result.
       fail-fast: false
       matrix:
-        include:
+        wordpress:
           - wp-version: '6.5.0' # Oldest supported.
             woocommerce-version: '9.4.3' # Newest WooCommerce that supports WordPress 6.5.
           - wp-version: '' # Current latest.
             woocommerce-version: ''
+        # The browser counter gate (performance.spec.ts) and the other specs run in parallel,
+        # each on its own site; the multisite and Plugin Check steps run with acceptance.
+        suite: [acceptance, performance]
     defaults:
       run:
         working-directory: .
@@ -114,12 +117,13 @@ jobs:
           pnpm exec playwright install --with-deps chromium
       - name: Single-site lifecycle and HTTP
         env:
-          WP_VERSION: ${{ matrix.wp-version }}
+          WP_VERSION: ${{ matrix.wordpress.wp-version }}
         run: bash plugin/tests/integration/run.sh
       # Runs on the single site that run.sh leaves behind, before multisite conversion.
-      - name: Launcher browser acceptance
+      - name: Browser ${{ matrix.suite }}
         env:
-          WOOCOMMERCE_VERSION: ${{ matrix.woocommerce-version }}
+          WOOCOMMERCE_VERSION: ${{ matrix.wordpress.woocommerce-version }}
+          GQ_SUPPORT_BROWSER_SUITE: ${{ matrix.suite }}
         run: |
           ddev wp --path=.test-site plugin install woocommerce ${WOOCOMMERCE_VERSION:+--version=$WOOCOMMERCE_VERSION} --activate
           pnpm test:browser
@@ -129,14 +133,15 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results-${{ matrix.wp-version || 'latest' }}
+          name: playwright-results-${{ matrix.wordpress.wp-version || 'latest' }}-${{ matrix.suite }}
           path: test-results/
       - name: Multisite lifecycle and cleanup
+        if: matrix.suite == 'acceptance'
         run: bash plugin/tests/integration/multisite.sh
       # The Plugin Check action tries to download Requires Plugins from WP.org.
       # GETQUICK Design is private; this DDEV site already has the test fixture.
       - name: Plugin Check
-        if: matrix.wp-version == ''
+        if: matrix.wordpress.wp-version == '' && matrix.suite == 'acceptance'
         run: |
           ddev wp --path=.test-site plugin install plugin-check --activate
           ddev wp --path=.test-site plugin check gq-support \

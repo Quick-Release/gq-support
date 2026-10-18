@@ -2,7 +2,7 @@ import { test, expect, type Page, type Request } from '@playwright/test';
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
-import { adminPassword, logIn, probe, probeSource, site, sync, wp } from '../performance/test-site.cjs';
+import { adminPassword, forgetLogIn, logIn, probe, probeSource, site, sync, wp } from '../performance/test-site.cjs';
 
 // Deterministic counter gate (docs/research/idle-performance-budgets.md, B1, B4, B8, B10–B13).
 // Every probe runs with and without its negative control: gq-probe.php injects one violation,
@@ -34,6 +34,7 @@ test.beforeAll(() => {
   wp(['plugin', 'activate', 'gq-support']);
   setConnection('connected');
   wp(['user', 'update', 'admin', `--user_pass=${adminPassword}`]);
+  forgetLogIn();
 });
 
 test.afterAll(() => {
