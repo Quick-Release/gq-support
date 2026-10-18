@@ -6,7 +6,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [configure, probe, installation, collect, redeliver, retire]
+        options: [configure, config, break, probe, installation, collect, redeliver, retire]
         required: true
       request_id:
         description: Non-secret correlation ID for the local runner

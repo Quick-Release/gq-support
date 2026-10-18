@@ -3,6 +3,8 @@
 
 Run each phase from the repo root; --state stores sanitized progress only.
 The App's Active checkbox is the only browser step between setup and exercise.
+`config`, `break` and `restore` serve the missed-webhook runbook and its
+staging drill (#57); they need no earlier phase.
 """
 import argparse
 import datetime
@@ -31,7 +33,8 @@ def gh(*args, stdin=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["setup", "exercise", "collect", "rotate", "redeliver", "retire", "finish", "report"])
+    parser.add_argument("phase", choices=["setup", "exercise", "collect", "rotate", "redeliver", "retire", "finish", "report",
+                                          "config", "break", "restore"])
     parser.add_argument("--state", default="/tmp/gq-support-55.json")
     args = parser.parse_args()
     path = pathlib.Path(args.state)
@@ -200,6 +203,24 @@ def main():
         if state["final_probe"]["current"]["key"] is not None:
             raise RuntimeError("diagnostic headers remain enabled; inspect the final deployment before completion")
         state["finish"] = True
+        save()
+    elif args.phase == "config":
+        # URL/content type/TLS and whether a secret is set; GitHub never returns the secret itself.
+        state["config"] = workflow("config")
+        save()
+        print(json.dumps(state["config"]), flush=True)
+    elif args.phase == "break":
+        # Staging drill only: deliveries keep reaching the receiver and fail with 401.
+        state["broken"] = workflow("break")
+        save()
+    elif args.phase == "restore":
+        workflow("configure")
+        state["restored"] = workflow("config")
+        restored = state["restored"]
+        if restored["url"] == "unexpected" or restored["contentType"] != "json" or not restored["tlsVerified"] \
+                or not restored["secretConfigured"]:
+            raise RuntimeError("webhook configuration not restored; inspect the saved run")
+        state["restore_probe"] = workflow("probe")
         save()
     elif args.phase == "report":
         maxima = {}

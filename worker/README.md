@@ -69,6 +69,21 @@ Concurrent revoke commands in one checkout are refused by `revocations.lock`;
 if a process dies, inspect its log and remove the stale lock before retrying.
 Do not remove records. Coordinate ledger changes across operator checkouts.
 
+Status recovery after missed webhooks or a long outage has three commands. They
+write only sweep bookkeeping and a counts-only `status_audit` row; the
+[missed-webhook runbook](../docs/runbooks/missed-webhooks.md) gives the order:
+
+```sh
+pnpm operator status-health --account-id <account-id> --database-id <database-id>
+pnpm operator status-reconcile <ISO-outage-start> <opaque-actor> --account-id <account-id> --database-id <database-id>
+pnpm operator status-repair <ISO-window-start> <ISO-window-end> <opaque-actor> --account-id <account-id> --database-id <database-id>
+```
+
+`status-health` reports the due refresh backlog, each repository's last sweep and
+active suspensions. `status-reconcile` makes every mapped or tracked repository's
+next sweep list from the outage start. `status-repair` refuses until the backlog
+is drained and every sweep is current, and acknowledges the suspensions it records.
+
 The full restore gate, including runtime rotation/self-revocation history,
 restore epochs and suppression replay, remains rollout work in #20; this CLI
 ledger alone is not evidence that a restored database is safe to serve traffic.
