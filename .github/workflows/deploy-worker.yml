@@ -1,4 +1,5 @@
 name: Deploy Support Worker
+run-name: Deploy Support Worker (${{ inputs.stage }}) ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -8,6 +9,9 @@ on:
         required: true
         type: choice
         options: [staging, prod]
+      request_id:
+        description: Optional non-secret correlation ID
+        required: false
 
 permissions:
   contents: read
@@ -49,6 +53,7 @@ jobs:
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
           GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
           GITHUB_WEBHOOK_PREVIOUS_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET }}
+          GITHUB_WEBHOOK_DIAGNOSTICS: ${{ inputs.stage == 'staging' && vars.SUPPORT_GITHUB_WEBHOOK_DIAGNOSTICS == 'true' && 'true' || 'false' }}
         run: |
           set -euo pipefail
           node scripts/verify-github-app.ts "$DEPLOY_STAGE"

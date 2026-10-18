@@ -102,3 +102,74 @@ The implementation session had no stage App or webhook secrets in its process
 environment. No stage deployment, App configuration change, actual payload
 measurement or rotation/redelivery rehearsal is claimed. Keep #55's live-spike
 acceptance item open until these observations are recorded in the issue.
+
+## Automated staging procedure
+
+The operator runner uses the existing authenticated `gh` CLI. Run from the repo
+root after the automation is on `main`. It never downloads the App private key.
+GitHub Actions uses the existing encrypted staging source for App JWTs. Random
+HMAC secrets are sent directly to `gh secret set` on stdin and never written to
+the progress file, arguments or console. The progress file contains only public
+run URLs, delivery IDs, status codes, byte counts and key classifications.
+
+1. Run `python3 scripts/github-webhook-staging.py setup`. This sets staging's
+   public App ID `5355960`, creates a random current secret and an encrypted
+   duplicate previous source, enables temporary staging diagnostics, deploys
+   through Alchemy, configures the App's JSON webhook URL/secret/TLS through its
+   API, and checks current/wrong-stage signatures. The duplicate source lets
+   rotation retain the original secret without retrieving encrypted CI values.
+   Setup refuses to overwrite an existing current secret without its original
+   progress file. The default progress file is `/tmp/gq-support-55.json`;
+   use `--state <path>` consistently to keep another location.
+2. In the staging App's
+   [General settings](https://github.com/organizations/Quick-Release/settings/apps/getquick-support-staging),
+   check **Active**, verify the configured Worker URL and enabled SSL
+   verification, then choose **Save changes**. Do not replace the secret field.
+   The browser agent can perform this when the session is authenticated; the
+   App webhook configuration API exposes URL/content type/secret/TLS but not
+   the Active toggle. Do not activate the production App.
+3. Run `python3 scripts/github-webhook-staging.py exercise`. It verifies that
+   repository `1424354303` is the private sandbox, creates a synthetic Unicode
+   issue, closes/reopens/closes it, and suspends/restores only staging's sandbox
+   installation `172696674` to produce lifecycle events. The restoration runs
+   even when suspension fails. It collects real delivery headers and their
+   actual receiver byte counts and saves a pre-rotation delivery ID.
+4. Run `python3 scripts/github-webhook-staging.py rotate`. It creates a new
+   current secret, keeps the old encrypted previous source, deploys both, tests
+   their acceptance, then updates GitHub's webhook secret to the new current
+   value. This order avoids a gap between producer and receiver configurations.
+5. Run `python3 scripts/github-webhook-staging.py redeliver`. It redelivers the
+   saved pre-rotation event and records the receiver's `current`/`previous`
+   classification. GitHub redelivery is asynchronous: if the runner reports no
+   completed attempt yet, run `collect` before retrying and inspect the saved
+   workflow/delivery IDs. This is a deliberate rehearsal, not an automatic
+   production redelivery service.
+6. Run `python3 scripts/github-webhook-staging.py retire`. A CI job deploys with
+   the previous runtime secret absent while retaining its encrypted source in
+   that job's memory. It proves a signature made with the old key gets `401`
+   and the new key gets `204`, then the local runner deletes the previous CI
+   source. Do not dispatch another deployment between these steps.
+7. Run `python3 scripts/github-webhook-staging.py finish`. It requires verified
+   issue and installation byte measurements, disables temporary diagnostics,
+   deploys again, and repeats current/wrong-stage checks. This final deployment
+   also runs the normal App-key custody audit. Production remains unchanged.
+8. Run `python3 scripts/github-webhook-staging.py report`. Record the workflow
+   URLs, real target headers, pre-rotation redelivery signer, rejection after
+   retirement, and maximum raw payload bytes in #55. Compare those maxima and
+   headroom with the cap, document its final rationale, and close the issue once
+   every acceptance item has evidence.
+
+Each workflow wait is bounded to 20 minutes and prints its owned run URL.
+On failure, stop and inspect that URL before retrying; a timed-out workflow may
+still be active. Do not rerun setup with a new state path to bypass its guard.
+If a retirement run succeeded but deleting its encrypted source failed, remove
+`SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET` from the staging Environment before
+another normal deployment, or that deployment would restore the old binding.
+
+Temporary diagnostics are gated by both the staging slug and a disabled-by-default
+config flag. Only successful verified responses include `X-GQ-Webhook-Bytes`
+(the exact raw byte count) and `X-GQ-Webhook-Key` (`current` or `previous`). The
+spike workflow reads these from GitHub's stored delivery response headers. It
+never estimates raw bytes by reserializing GitHub's parsed JSON and never prints
+payloads, signatures, arbitrary response headers or secrets. These diagnostic
+headers are disabled again by the final deployment.

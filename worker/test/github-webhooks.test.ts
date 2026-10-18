@@ -49,6 +49,19 @@ it("acknowledges a signed delivery without installation authentication or D1 acc
   const { response, logs } = await send(request('{"action":"closed"}'));
   expect(response.status).toBe(204);
   expect(logs).toEqual([]);
+  expect(response.headers.get("X-GQ-Webhook-Bytes")).toBeNull();
+});
+
+it("exposes only verified byte count and key classification during a staging spike", async () => {
+  const body = '{"description":"café 🐙"}';
+  const options = { ...config, diagnostics: true, previousSecret: "old-test-secret" };
+  const { response } = await send(request(body), options);
+  expect(response.headers.get("X-GQ-Webhook-Bytes")).toBe(String(Buffer.byteLength(body)));
+  expect(response.headers.get("X-GQ-Webhook-Key")).toBe("current");
+  const previous = await send(request(body, { "X-Hub-Signature-256": signature(body, options.previousSecret) }), options);
+  expect(previous.response.headers.get("X-GQ-Webhook-Key")).toBe("previous");
+  const rejected = await send(request(body, { "X-Hub-Signature-256": signature("tampered") }), options);
+  expect(rejected.response.headers.get("X-GQ-Webhook-Bytes")).toBeNull();
 });
 
 // GitHub's independent published vector is not JSON: the JSON rejection proves

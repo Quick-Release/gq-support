@@ -33,6 +33,7 @@ export default Cloudflare.Worker(
     const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
     const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
     const appId = yield* Config.String("GITHUB_APP_ID").pipe(Config.withDefault(""));
+    const webhookDiagnostics = yield* Config.Boolean("GITHUB_WEBHOOK_DIAGNOSTICS").pipe(Config.withDefault(false));
     // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
     const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
       Config.map(Option.filter((value) => value >= minimum)));
@@ -77,6 +78,7 @@ export default Cloudflare.Worker(
         const env = yield* WorkerEnvironment;
         const context = yield* WorkerExecutionContext;
         webhookReceiver ??= createGitHubWebhookReceiver({ appId,
+          diagnostics: webhookDiagnostics && slug === "getquick-support-staging",
           secret: typeof env.GITHUB_WEBHOOK_SECRET === "string" ? env.GITHUB_WEBHOOK_SECRET : undefined,
           previousSecret: typeof env.GITHUB_WEBHOOK_PREVIOUS_SECRET === "string" ? env.GITHUB_WEBHOOK_PREVIOUS_SECRET : undefined,
         });

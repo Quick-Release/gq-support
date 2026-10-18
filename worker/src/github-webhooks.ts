@@ -10,17 +10,19 @@ interface WebhookConfig {
   readonly appId: string;
   readonly secret?: string;
   readonly previousSecret?: string;
+  readonly diagnostics?: boolean;
 }
 type Rejection = "configuration" | "content_type" | "headers" | "body_size" | "body_read" |
   "signature" | "target" | "json";
 
 /** One receiver per isolate. Keys are imported lazily once, never per delivery. */
-export const createGitHubWebhookReceiver = ({ appId, secret, previousSecret }: WebhookConfig) => {
+export const createGitHubWebhookReceiver = ({ appId, secret, previousSecret, diagnostics = false }: WebhookConfig) => {
   let keys: Promise<readonly CryptoKey[]> | undefined;
   const importKeys = () => keys ??= Promise.all([secret!, ...(previousSecret ? [previousSecret] : [])].map((value) =>
     crypto.subtle.importKey("raw", new TextEncoder().encode(value), { name: "HMAC", hash: "SHA-256" }, false, ["verify"])));
 
-  const verify = async (request: Request, waitUntil: (task: Promise<void>) => void): Promise<Rejection | undefined> => {
+  const verify = async (request: Request, waitUntil: (task: Promise<void>) => void):
+    Promise<Rejection | { bytes: number; key: "current" | "previous" }> => {
     if (!secret || !/^[1-9][0-9]*$/.test(appId)) return "configuration";
     if (request.headers.get("content-type")?.split(";")[0]!.trim().toLowerCase() !== "application/json") return "content_type";
     const signature = request.headers.get("x-hub-signature-256") ?? "";
@@ -49,9 +51,12 @@ export const createGitHubWebhookReceiver = ({ appId, secret, previousSecret }: W
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     const digest = Uint8Array.from(signature.slice(7).match(/../g)!, (hex) => parseInt(hex, 16));
     let valid = false;
+    let matchedKey: "current" | "previous" = "current";
     try {
-      for (const key of await importKeys()) {
-        if (await crypto.subtle.verify("HMAC", key, digest, bytes)) { valid = true; break; }
+      for (const [index, key] of (await importKeys()).entries()) {
+        if (await crypto.subtle.verify("HMAC", key, digest, bytes)) {
+          valid = true; matchedKey = index === 0 ? "current" : "previous"; break;
+        }
       }
     } catch { return "configuration"; }
     if (!valid) return "signature";
@@ -61,16 +66,19 @@ export const createGitHubWebhookReceiver = ({ appId, secret, previousSecret }: W
         request.headers.get("x-github-hook-installation-target-id") !== appId) return "target";
     // The event/action allowlist is intentionally empty in #55. No handler,
     // gateway or D1 capability is reachable from this receiver.
+    return { bytes: size, key: matchedKey };
   };
 
   return (request: Request, waitUntil: (task: Promise<void>) => void) => Effect.gen(function* () {
-    const reason = yield* Effect.promise(() => verify(request, waitUntil));
-    if (reason) {
+    const result = yield* Effect.promise(() => verify(request, waitUntil));
+    if (typeof result === "string") {
       yield* Metric.update(webhookRejections, 1);
-      yield* Effect.logWarning("GitHub webhook rejected").pipe(Effect.annotateLogs({ reason }));
+      yield* Effect.logWarning("GitHub webhook rejected").pipe(Effect.annotateLogs({ reason: result }));
       return new Response(null, { status: 401 });
     }
-    return new Response(null, { status: 204 });
+    return new Response(null, { status: 204, headers: diagnostics ? {
+      "X-GQ-Webhook-Bytes": String(result.bytes), "X-GQ-Webhook-Key": result.key,
+    } : undefined });
   });
 };
 
