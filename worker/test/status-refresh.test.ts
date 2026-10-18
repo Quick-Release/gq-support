@@ -52,7 +52,8 @@ const list = async (installation: Installation) => {
 };
 const statusOf = async (installation: Installation, id: string) => (await list(installation)).find((item) => item.id === id)?.status;
 const tickEffect = (refresh: Partial<RefreshConfig> = {}, random = () => 0) => {
-  const config = { clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem };
+  // A GitHub call that never answers times out on the real clock: keep that short.
+  const config = { clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem, requestTimeoutMs: 1_000 };
   return scheduledTick({ db: stage.databases.shared, mappings, botLogin: BOT, now: () => now, random, sweep: { pagesPerTick: 0 }, refresh })
     .pipe(Effect.provide(Layer.mergeAll(GitHubGateway.layer(config), GitHubReader.layer(config)).pipe(Layer.provide(github.layer))),
       Effect.provide(Logger.layer([Logger.map(Logger.formatJson, (line) => { logs.push(line); })])));

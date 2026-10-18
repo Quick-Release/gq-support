@@ -52,13 +52,16 @@ jobs:
     name: PHPCS + PHPStan
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # GitHub's image ships PHP 8.3, so setup-php installs nothing; installing 8.4 took ~55 s.
+    # The tool's PHP does not change results: PHPStan checks the phpVersion range in
+    # phpstan.neon.dist, and Composer resolves for the platform pinned in composer.json.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.3"
           coverage: none
           tools: composer:v2, cs2pr
 

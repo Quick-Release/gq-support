@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["load/**/*.load.ts"],
+    globalSetup: ["test/d1-scratch.setup.ts"],
     testTimeout: 600_000,
   },
 });
