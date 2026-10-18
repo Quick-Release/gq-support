@@ -11,10 +11,13 @@ staging App-key replacement/revocation passed live authentication checks. Stagin
 CI deployment, Worker authentication, the custody audit and the Worker-side
 replacement/revocation rehearsal have passed; see the runbook for evidence.
 
-`src/repository-mappings.ts` is the reviewed Repository mapping registry. It is
-intentionally empty until real Slots are approved. Each entry includes Slot,
-Client, WordPress project, authoritative environment, numeric GitHub repository
-ID and default Developer. Deploy mapping changes through Alchemy. Removing an
+`src/repository-mappings.ts` is the reviewed Repository mapping registry, with
+one list per deployed stage. A Worker picks its stage's list from its App
+slug, which deployment pins per stage, and any other stage gets none.
+Production's list is empty until real Slots are approved. Staging maps only
+the synthetic sandbox repository. Each entry includes Slot, Client, WordPress
+project, authoritative environment, numeric GitHub repository ID, pinned GitHub
+App installation and default Developer. Deploy mapping changes through Alchemy. Removing an
 entry denies its keys after deployment; request payloads cannot override it.
 
 ## Cloudflare credentials
@@ -43,16 +46,17 @@ credential; application and deployment processes receive the child token.
 ## Operator commands
 
 Use the database ID from the intended Alchemy stage's outputs and the GETQUICK
-Cloudflare account ID. The CLI requires both explicitly and always targets
+Cloudflare account ID, with `--stage` naming the same stage: the CLI checks
+Slots against that stage's mappings. The CLI requires all three explicitly and always targets
 remote D1. Run from `worker/` using your own Wrangler login or Cloudflare
 credentials with D1 read/write access; no operator credential is bound to the
 Worker and there is no operator HTTP endpoint.
 
 ```sh
 pnpm exec wrangler login
-pnpm operator enroll shop/production --account-id <account-id> --database-id <database-id>
-pnpm operator status shop/production --account-id <account-id> --database-id <database-id>
-pnpm operator revoke shop/production --account-id <account-id> --database-id <database-id>
+pnpm operator enroll shop/production --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator status shop/production --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator revoke shop/production --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
 `enroll` prints a grouped base32 code with 128 random bits, valid for 30 minutes.
@@ -74,9 +78,9 @@ write only sweep bookkeeping and a counts-only `status_audit` row; the
 [missed-webhook runbook](../docs/runbooks/missed-webhooks.md) gives the order:
 
 ```sh
-pnpm operator status-health --account-id <account-id> --database-id <database-id>
-pnpm operator status-reconcile <ISO-outage-start> <opaque-actor> --account-id <account-id> --database-id <database-id>
-pnpm operator status-repair <ISO-window-start> <ISO-window-end> <opaque-actor> --account-id <account-id> --database-id <database-id>
+pnpm operator status-health --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator status-reconcile <ISO-outage-start> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator status-repair <ISO-window-start> <ISO-window-end> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
 `status-health` reports the due refresh backlog, each repository's last sweep and
@@ -94,14 +98,14 @@ cleanup pass mirrors the rest. Commands that suppress or record an erasure need
 `--ledger-database-id <ledger-database-id>` (the stack outputs it):
 
 ```sh
-pnpm operator erase shop/production <opaque-actor> <rs_reference> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
-pnpm operator offboard shop/production <opaque-actor> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator erase shop/production <opaque-actor> <rs_reference> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator offboard shop/production <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 After a Time Travel restore of `SupportDB`, record it before anything else:
 
 ```sh
-pnpm operator restore-recorded <opaque-actor> time-travel-restore --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator restore-recorded <opaque-actor> time-travel-restore --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 Each Worker then answers `503` and skips its sweeps until it has replayed the
@@ -278,7 +282,7 @@ are log events for operations to route, not outbound notifications.
 An independent Operator may resume a **failed**, confirmed non-created request:
 
 ```sh
-pnpm operator resume shop/production int_<id> 2026-10-18T12:00:00Z operator-7 permissions-restored --account-id <account-id> --database-id <database-id>
+pnpm operator resume shop/production int_<id> 2026-10-18T12:00:00Z operator-7 permissions-restored --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
 Supply an opaque actor, an explicit deadline within the next 24 hours and one of
@@ -321,7 +325,7 @@ including during individual refreshes. After a passing sweep later than the
 suspension, an Operator runs:
 
 ```sh
-pnpm operator unsuspend shop/production operator-7 verified-private --account-id <account-id> --database-id <database-id>
+pnpm operator unsuspend shop/production operator-7 verified-private --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
 The evidence must match the recorded cause: `verified-private` (public),

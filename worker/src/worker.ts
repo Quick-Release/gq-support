@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { createGitHubWebhookReceiver, type GitHubWebhookReceiver } from "./github-webhooks.ts";
 import { handleWorkerRequest } from "./worker-http.ts";
-import { repositoryMappings } from "./repository-mappings.ts";
+import { mappingsForSlug } from "./repository-mappings.ts";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { SupportDB, SupportLedger } from "./support-db.ts";
 import { sweepDelivery } from "./delivery.ts";
@@ -41,6 +41,8 @@ export default Cloudflare.Worker(
     const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
     const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
     const appId = yield* Config.String("GITHUB_APP_ID").pipe(Config.withDefault(""));
+    // Only this stage's reviewed mappings: the slug is pinned per stage at deployment.
+    const repositoryMappings = mappingsForSlug(slug);
     const webhookDiagnostics = yield* Config.Boolean("GITHUB_WEBHOOK_DIAGNOSTICS").pipe(Config.withDefault(false));
     // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
     const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,

@@ -353,16 +353,17 @@ been measured on staging yet**. The results table below stays empty until a
 live run, and #57's measurement criteria stay open. The Operator steps are in
 the [missed-webhook runbook](../runbooks/missed-webhooks.md).
 
-Prerequisites, none of which are met yet:
+Prerequisites:
 
-1. #56's issue handlers on `main` and deployed to staging. The deploy workflow
-   runs only from `main`, and the #55 evidence was taken with an empty allowlist.
+1. #56's issue handlers deployed to staging. They are on `main` (#79), but
+   staging deploys only when an Operator runs **Deploy Worker** for staging,
+   and the #55 evidence was taken with an empty allowlist. That deploy also
+   applies migrations 0012–0016 to staging D1.
 2. A staging Slot mapped to the sandbox repository `1424354303`, pinned to the
-   staging installation `172696674`. **Decision needed:** `repositoryMappings`
-   has no stage scope, so an entry there is also deployed to production.
-   Production would sweep the sandbox with the production App, fail the mint
-   and record a `no_access` suspension in production D1. Scope mappings by
-   stage, or accept and document that outcome, before adding the entry.
+   staging installation `172696674`. Decided 2026-10-18: mappings are keyed by
+   stage (`stageMappings` in `worker/src/repository-mappings.ts`), so the Slot
+   `gq-support-sandbox/staging` is deployed to staging only. Production never
+   sweeps the sandbox, so it records no `no_access` suspension.
 3. The sandbox holds only synthetic issues, since the suspension scenario
    makes it public for a few minutes.
 
@@ -390,7 +391,7 @@ skew adds directly to every lag.
 
 Procedure (from `worker/`, Operator credentials for staging):
 
-1. `pnpm operator enroll <sandbox-slot> …`, then pipe the code to
+1. `pnpm operator enroll gq-support-sandbox/staging …`, then pipe the code to
    `node scripts/status-sync-probe.ts enroll --state <file>` on stdin, and run
    `node scripts/status-sync-probe.ts submit --state <file>`.
 2. **Webhooks working:** `node scripts/status-sync-probe.ts measure --state <file> --transitions 20 --timeout-minutes 5`.
@@ -411,7 +412,7 @@ Procedure (from `worker/`, Operator credentials for staging):
    `403 gq_support_not_configured`, which WordPress shows on the form. "At once with webhooks" needs
    #40's `public`/`repository` handlers; the current allowlist has only issue
    actions. Make the sandbox private again. After a passing sweep, run
-   `unsuspend <sandbox-slot> <actor> verified-private`.
+   `unsuspend gq-support-sandbox/staging <actor> verified-private`.
 5. Record the results below, and revoke the probe Slot.
 
 | Scenario | Target | Measured |
