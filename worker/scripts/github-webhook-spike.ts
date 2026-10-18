@@ -67,11 +67,14 @@ export const runWebhookSpike = async (operation: string, env = process.env, requ
   if (operation === "redeliver") {
     if (!/^[1-9][0-9]*$/.test(env.SPIKE_DELIVERY_ID ?? "")) throw new Error("delivery_id");
     await api(`/app/hook/deliveries/${env.SPIKE_DELIVERY_ID}/attempts`, "POST");
-    return { redeliveryRequested: Number(env.SPIKE_DELIVERY_ID) };
+    return { redeliveryRequested: env.SPIKE_DELIVERY_ID };
   }
   if (operation === "collect") {
-    const deliveries = await (await api("/app/hook/deliveries?per_page=100")).json() as Array<{
-      id: number; guid: string; delivered_at: string; redelivery: boolean; event: string; action: string | null; status_code: number;
+    // GitHub's live delivery IDs exceed Number.MAX_SAFE_INTEGER. Preserve the
+    // decimal token before JSON.parse can round it and turn a detail GET into 404.
+    const list = await (await api("/app/hook/deliveries?per_page=100")).text();
+    const deliveries = JSON.parse(list.replace(/("id"\s*:\s*)([0-9]+)/g, '$1"$2"')) as Array<{
+      id: string; guid: string; delivered_at: string; redelivery: boolean; event: string; action: string | null; status_code: number;
     }>;
     const rows = [];
     for (const delivery of deliveries) {

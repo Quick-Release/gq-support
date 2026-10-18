@@ -34,7 +34,7 @@ it("collects actual receiver byte counts, never serialized payload estimates or 
     }, payload: { body: "Private report content" } }, response: { headers: { "X-GQ-Webhook-Bytes": "65536", "X-GQ-Webhook-Key": "previous" } } });
   });
   expect(JSON.stringify(result)).not.toMatch(/Private report|private-signature|current-test-secret/);
-  expect(result).toMatchObject({ deliveries: [{ id: 12, bytes: 65536, key: "previous", targetType: "integration", targetId: "5355960" }] });
+  expect(result).toMatchObject({ deliveries: [{ id: "12", bytes: 65536, key: "previous", targetType: "integration", targetId: "5355960" }] });
 });
 
 it("always attempts to restore the sandbox installation after suspension fails", async () => {
@@ -57,7 +57,18 @@ it("keeps pending delivery responses without inventing byte measurements", async
     ]);
     return Response.json({ url: STAGING_WEBHOOK, request: null, response: null });
   });
-  expect(result).toMatchObject({ deliveries: [{ id: 13, bytes: null, key: null }] });
+  expect(result).toMatchObject({ deliveries: [{ id: "13", bytes: null, key: null }] });
+});
+
+it("preserves GitHub's 64-bit delivery IDs in detail and redelivery URLs", async () => {
+  const result = await runWebhookSpike("collect", env, async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/app") return Response.json(app);
+    if (path === "/app/hook/deliveries") return new Response('[{"id":3849000772266098688,"delivered_at":"2026-10-18T12:00:00Z","event":"issues","action":"opened","status_code":204,"redelivery":false}]');
+    expect(path).toBe("/app/hook/deliveries/3849000772266098688");
+    return Response.json({ url: STAGING_WEBHOOK, request: { headers: {} }, response: { headers: {} } });
+  });
+  expect(result).toMatchObject({ deliveries: [{ id: "3849000772266098688" }] });
 });
 
 it("denies production configuration before any mutation", async () => {
