@@ -7,6 +7,7 @@ import { GitHubAppSecret, GitHubAppSecretProvider } from "./deploy/github-app-se
 import { appConfig, verifyApp } from "./deploy/github-app.ts";
 import { SupportDB } from "./src/support-db.ts";
 import Worker from "./src/worker.ts";
+import { validateWebhookSecrets } from "./deploy/github-webhook-secrets.ts";
 
 export default Alchemy.Stack(
   "GQSupportWorker",
@@ -20,7 +21,10 @@ export default Alchemy.Stack(
       // Read-only preflight before declaring any resources. Secret values stay
       // in this process, outside the resource graph and persisted plan/state.
       yield* Effect.tryPromise({
-        try: () => verifyApp(appConfig(stack.stage, process.env), process.env.GITHUB_APP_PRIVATE_KEY ?? ""),
+        try: async () => {
+          const app = await verifyApp(appConfig(stack.stage, process.env), process.env.GITHUB_APP_PRIVATE_KEY ?? "");
+          validateWebhookSecrets(process.env, app.appId);
+        },
         catch: () => new Error("GitHub App preflight failed; see the key custody runbook"),
       }).pipe(Effect.orDie);
     }

@@ -14,7 +14,7 @@ const env = {
   CLOUDFLARE_API_TOKEN: "test-deployment-token",
 };
 const app = {
-  slug: "getquick-support-staging", client_id: "Iv1.staging",
+  id: 123, slug: "getquick-support-staging", client_id: "Iv1.staging",
   owner: { login: "Quick-Release", type: "Organization" },
   permissions: { issues: "write", metadata: "read" },
   events: ["repository", "issues", "public"],
@@ -90,7 +90,7 @@ describe("GitHub App provisioning boundary", () => {
       return Response.json({ success: true });
     });
     expect(calls).toHaveLength(2);
-    expect(Object.keys(result).sort()).toEqual(["clientId", "fingerprint", "slug", "stage"]);
+    expect(Object.keys(result).sort()).toEqual(["appId", "clientId", "fingerprint", "slug", "stage"]);
   });
 
   it.each(["github", "cloudflare"])("sanitizes %s failures even when a transport error contains secrets", async (provider) => {

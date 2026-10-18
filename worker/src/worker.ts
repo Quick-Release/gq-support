@@ -4,8 +4,8 @@ import * as Config from "effect/Config";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Result from "effect/Result";
-import { handleRequest } from "./installation-api.ts";
+import { createGitHubWebhookReceiver, type GitHubWebhookReceiver } from "./github-webhooks.ts";
+import { handleWorkerRequest } from "./worker-http.ts";
 import { repositoryMappings } from "./repository-mappings.ts";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { SupportDB } from "./support-db.ts";
@@ -16,6 +16,8 @@ import type { RefreshConfig } from "./status-refresh.ts";
 import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
+
+let webhookReceiver: GitHubWebhookReceiver | undefined;
 
 export default Cloudflare.Worker(
   "Worker",
@@ -30,6 +32,7 @@ export default Cloudflare.Worker(
     const database = yield* Cloudflare.D1.QueryDatabase(yield* SupportDB);
     const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
     const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
+    const appId = yield* Config.String("GITHUB_APP_ID").pipe(Config.withDefault(""));
     // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
     const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
       Config.map(Option.filter((value) => value >= minimum)));
@@ -71,12 +74,15 @@ export default Cloudflare.Worker(
       }),
       fetch: Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        const web = HttpServerRequest.toWebResult(request);
-        if (Result.isFailure(web)) return HttpServerResponse.empty({ status: 400 });
-        const db = yield* database.raw;
-        const response = yield* Effect.promise(() => handleRequest(web.success, db, repositoryMappings));
-        if (web.success.method === "POST" && new URL(web.success.url).pathname === "/v1/requests" && response.status === 202) {
-          const context = yield* WorkerExecutionContext;
+        const env = yield* WorkerEnvironment;
+        const context = yield* WorkerExecutionContext;
+        webhookReceiver ??= createGitHubWebhookReceiver({ appId,
+          secret: typeof env.GITHUB_WEBHOOK_SECRET === "string" ? env.GITHUB_WEBHOOK_SECRET : undefined,
+          previousSecret: typeof env.GITHUB_WEBHOOK_PREVIOUS_SECRET === "string" ? env.GITHUB_WEBHOOK_PREVIOUS_SECRET : undefined,
+        });
+        const response = yield* handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
+          (task) => context.raw.waitUntil(task));
+        if (request.method === "POST" && new URL(request.url, "https://support.invalid").pathname === "/v1/requests" && response.status === 202) {
           yield* context.waitUntil(deliver);
         }
         return HttpServerResponse.fromWeb(response);

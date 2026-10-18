@@ -47,15 +47,15 @@ export async function verifyApp(config: AppConfig, pem: string, request = fetch)
     });
     if (!response.ok) throw new Error();
     const app = await response.json() as {
-      slug: string; client_id: string; owner: { login: string; type: string };
+      id: number; slug: string; client_id: string; owner: { login: string; type: string };
       permissions: Record<string, string>; events: string[];
     };
-    if (app.slug !== config.slug || app.client_id !== config.clientId ||
+    if (!Number.isSafeInteger(app.id) || app.id <= 0 || app.slug !== config.slug || app.client_id !== config.clientId ||
         app.owner.login !== "Quick-Release" || app.owner.type !== "Organization" ||
         JSON.stringify(Object.entries(app.permissions).sort()) !== JSON.stringify(Object.entries(permissions).sort()) ||
         JSON.stringify([...app.events].sort()) !== JSON.stringify(events)) throw new Error();
     const publicKey = createPublicKey(pem).export({ type: "spki", format: "der" });
-    return { ...config, fingerprint: createHash("sha256").update(publicKey).digest("base64") };
+    return { ...config, appId: app.id, fingerprint: createHash("sha256").update(publicKey).digest("base64") };
   } catch {
     // Never propagate crypto, transport or provider errors: they can contain
     // key material, Authorization headers or raw provider responses.

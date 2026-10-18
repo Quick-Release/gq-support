@@ -2,6 +2,7 @@ import { Resource } from "alchemy/Resource";
 import * as Provider from "alchemy/Provider";
 import * as Effect from "effect/Effect";
 import { provisionAppKey } from "./github-app.ts";
+import { provisionWebhookSecrets } from "./github-webhook-secrets.ts";
 import { checkDeployedGitHubApp, DeployedGitHubAppCheckError } from "./check-deployed-github-app.ts";
 
 type GitHubAppSecret = Resource<
@@ -19,6 +20,7 @@ export const GitHubAppSecretProvider = () => Provider.succeed(GitHubAppSecret, {
   reconcile: ({ news }) => Effect.tryPromise({
     try: async () => {
       const metadata = await provisionAppKey(news.stage, news.workerName);
+      await provisionWebhookSecrets(news.workerName, metadata.appId);
       const evidence = await checkDeployedGitHubApp(metadata, news.workerName);
       return { ...metadata, ...evidence };
     },

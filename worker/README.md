@@ -2,6 +2,8 @@
 
 GitHub App registration, stage secrets, CI deployment, key rotation and incident
 response are in the [key custody runbook](../docs/runbooks/github-app-key-custody.md).
+The signed GitHub webhook route, stage HMAC secret sources, rotation and pending
+live-spike checks are in the [webhook runbook](../docs/runbooks/github-webhooks.md).
 Staging/prod Alchemy deployments now require that stage's App credentials and
 run a read-only registration preflight before declaring resources. Development
 stages do not receive an App key. Both Apps and encrypted CI sources are set up;
