@@ -175,6 +175,9 @@ def main():
         save()
     elif args.phase == "retire":
         require("rotation_redelivery")
+        if state.get("retire"):
+            print("Previous secret already retired; continue with finish")
+            return
         state["retired_probe"] = workflow("retire")
         gh("secret", "delete", "SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET", "--repo", REPO, "--env", "staging")
         state["retire"] = True
@@ -188,6 +191,8 @@ def main():
         variable("SUPPORT_GITHUB_WEBHOOK_DIAGNOSTICS", "false")
         workflow("deploy")
         state["final_probe"] = workflow("probe")
+        if state["final_probe"]["current"]["key"] is not None:
+            raise RuntimeError("diagnostic headers remain enabled; inspect the final deployment before completion")
         state["finish"] = True
         save()
     elif args.phase == "report":

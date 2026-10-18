@@ -24,7 +24,7 @@ export const runWebhookSpike = async (operation: string, env = process.env, requ
         "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "gq-support-webhook-spike" },
       body: body === undefined ? undefined : JSON.stringify(body), redirect: "error", signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) throw new Error("github_api");
+    if (!response.ok) throw new Error(`github_api_${response.status}`);
     return response;
   };
 
@@ -41,6 +41,7 @@ export const runWebhookSpike = async (operation: string, env = process.env, requ
     return { configured: true, url: STAGING_WEBHOOK, appId: APP_ID };
   }
   if (operation === "probe" || operation === "retired-probe") {
+    if (operation === "retired-probe" && !env.GITHUB_WEBHOOK_PREVIOUS_SECRET) throw new Error("configuration");
     const current = await probe(env.GITHUB_WEBHOOK_SECRET);
     const wrongStage = await probe(env.GITHUB_WEBHOOK_SECRET, "5355963");
     const previous = env.GITHUB_WEBHOOK_PREVIOUS_SECRET ? await probe(env.GITHUB_WEBHOOK_PREVIOUS_SECRET) : undefined;
@@ -76,11 +77,11 @@ export const runWebhookSpike = async (operation: string, env = process.env, requ
     for (const delivery of deliveries) {
       if (env.SPIKE_SINCE && delivery.delivered_at < env.SPIKE_SINCE) continue;
       const detail = await (await api(`/app/hook/deliveries/${delivery.id}`)).json() as {
-        url: string; request: { headers: Record<string, string> }; response: { headers: Record<string, string> };
+        url: string; request: { headers: Record<string, string> } | null; response: { headers: Record<string, string> } | null;
       };
       if (detail.url !== STAGING_WEBHOOK) continue;
-      const sent = new Headers(detail.request.headers);
-      const received = new Headers(detail.response.headers);
+      const sent = new Headers(detail.request?.headers ?? {});
+      const received = new Headers(detail.response?.headers ?? {});
       const type = sent.get("x-github-hook-installation-target-type");
       const id = sent.get("x-github-hook-installation-target-id");
       const key = received.get("x-gq-webhook-key");
@@ -100,8 +101,11 @@ export const runWebhookSpike = async (operation: string, env = process.env, requ
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try { console.log(`GQ_WEBHOOK_EVIDENCE=${JSON.stringify(await runWebhookSpike(process.argv[2]))}`); }
-  catch {
-    console.error("Staging webhook spike failed; credentials, signatures and payloads suppressed");
+  catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const reason = /^(github_api_[0-9]{3}|configuration|probe_assertion|installation_identity|delivery_id|operation)$/.test(message)
+      ? message : error instanceof TypeError ? "type_error" : "unexpected";
+    console.error(`Staging webhook spike failed (${reason}); credentials, signatures and payloads suppressed`);
     process.exitCode = 1;
   }
 }

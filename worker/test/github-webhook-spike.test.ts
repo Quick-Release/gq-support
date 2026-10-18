@@ -48,6 +48,18 @@ it("always attempts to restore the sandbox installation after suspension fails",
   expect(methods).toEqual(["PUT", "DELETE"]);
 });
 
+it("keeps pending delivery responses without inventing byte measurements", async () => {
+  const result = await runWebhookSpike("collect", env, async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/app") return Response.json(app);
+    if (path === "/app/hook/deliveries") return Response.json([
+      { id: 13, delivered_at: "2026-10-18T12:00:00Z", event: "installation", action: "suspend", redelivery: false, status_code: 0 },
+    ]);
+    return Response.json({ url: STAGING_WEBHOOK, request: null, response: null });
+  });
+  expect(result).toMatchObject({ deliveries: [{ id: 13, bytes: null, key: null }] });
+});
+
 it("denies production configuration before any mutation", async () => {
   let mutations = 0;
   await expect(runWebhookSpike("configure", { ...env, GITHUB_APP_SLUG: "getquick-support" }, async (_, init) => {
