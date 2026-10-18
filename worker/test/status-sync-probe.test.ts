@@ -24,12 +24,15 @@ let github: ReturnType<typeof makeFakeGitHub>;
 let now: number;
 let saved: ProbeState | undefined;
 let printed: string[];
+/** An App event during the measurement, which the probe must count as a write. */
+let lateAppEvent: boolean;
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"], now: START });
   now = START;
   saved = undefined;
   printed = [];
+  lateAppEvent = false;
   stage = await localStage(["shared"]);
   github = makeFakeGitHub();
   github.installation(172696674);
@@ -62,12 +65,16 @@ const deps = (): ProbeDeps => ({
       expect(new URLSearchParams(path.split("?")[1]).get("creator")).toBe(BOT);
       return github.issues.map((issue) => ({ number: issue.number, title: issue.title }));
     }
-    // Only the Developer's own changes: the fake records no App events or comments after creation.
+    // Only the Developer's own changes unless a test adds a late App event: the fake records no App comments.
     if (path.includes("/events?")) {
-      expect(args).toContain("--paginate");
-      return [[{ actor: { login: BOT }, created_at: "2026-10-17T10:00:01Z" }], [{ actor: { login: "developer" }, created_at: iso(now) }]];
+      // A full first page, so the probe must read the second: a late App event there counts.
+      const page = Number(new URLSearchParams(path.split("?")[1]).get("page"));
+      return page === 1
+        ? Array.from({ length: 100 }, () => ({ actor: { login: "developer" }, created_at: iso(now) }))
+        : page === 2 ? [{ actor: { login: BOT }, created_at: "2026-10-17T10:00:01Z" },
+          ...lateAppEvent ? [{ actor: { login: BOT }, created_at: iso(now) }] : []] : [];
     }
-    if (path.includes("/comments?")) return [[]];
+    if (path.includes("/comments?")) return [];
     const issue = github.issues.find((candidate) => path.endsWith(`/issues/${candidate.number}`))!;
     github.edit(issue, stdin as { state: "open" | "closed" }, now);
     return { state: issue.state, updated_at: issue.updated_at };
@@ -96,10 +103,12 @@ it("enrolls, submits, finds its sandbox issue and measures each transition from 
   expect(JSON.stringify(saved)).not.toContain(code);
 
   expect(await runProbe("submit", {}, deps())).toEqual({ submitted: true, issueNumber: github.issues[0]!.number });
+  lateAppEvent = true;
   const summary = await runProbe("measure", { transitions: 2, timeoutMinutes: 20 }, deps());
 
   // Sweep-only: no webhook in this test, so each change waits for the 15-minute sweep.
-  expect(summary).toMatchObject({ transitions: 2, observed: 2, appWrites: 0 });
+  // The one App event after the measurement started is on the second page; the creation-time one is before it.
+  expect(summary).toMatchObject({ transitions: 2, observed: 2, appWrites: 1 });
   expect(saved!.transitions.map((transition) => transition.state)).toEqual(["closed", "open"]);
   for (const transition of saved!.transitions) {
     expect(transition.lagMs).toBeGreaterThan(0);
