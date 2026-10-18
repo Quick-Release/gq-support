@@ -7,6 +7,7 @@ import { sha256 } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { DAY, DRAIN_MS, EXECUTION_MS, deliveryStore, type DeliveryRow } from "./delivery-store.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
+import { ledgerStore } from "./ledger.ts";
 
 export interface DeliveryOptions {
   readonly db: QueryDatabase;
@@ -14,6 +15,8 @@ export interface DeliveryOptions {
   readonly botLogin: string;
   readonly now?: () => number;
   readonly random?: () => number;
+  /** The suppression ledger (src/ledger.ts): checked again immediately before every create. */
+  readonly ledger?: QueryDatabase | null;
 }
 const io = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: () => new OutcomeUnknown() });
 const reconcileAt = (since: number, count: number) => since + ([60_000, 300_000, 900_000, 3_600_000][count] ?? (count - 2) * 3_600_000);
@@ -82,6 +85,9 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         if (now() >= deadline) return yield* Effect.fail(new OutcomeUnknown());
         const permitted = yield* io(() => store.authorized(row, now()));
         if (!permitted || now() >= deadline) return yield* Effect.fail(new OutcomeUnknown());
+        // A suppression the main database lost to a restore still holds here.
+        const ledger = options.ledger;
+        if (ledger && (yield* io(() => ledgerStore(ledger).suppressed(row.slot, row.request_id)))) return yield* Effect.fail(new OutcomeUnknown());
       });
       const delivered = (issue: GitHubIssue) => finish({ state: 'delivered', issue, next: now() + 10_000,
         repair: !issue.labels.includes(intent.clientOriginLabel) || !issue.assignees.includes(intent.defaultDeveloper) });

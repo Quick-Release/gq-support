@@ -11,7 +11,7 @@ const ERASURE_ID = /^era_[0-9A-HJKMNP-TV-Z]{26}$/;
  * means the erasure is recorded: creates are suppressed and the text purged.
  */
 export const handleErasures = async (request: Request, url: URL, body: string, db: QueryDatabase, storage: SlotStorage,
-  digestKey: CryptoKey | null, now: number): Promise<Response> => {
+  options: { readonly digestKey: CryptoKey | null; readonly ledger: QueryDatabase | null }, now: number): Promise<Response> => {
   if (url.search) return invalid();
   if (request.method === "POST") {
     if (url.pathname !== "/v1/erasures") return notFound();
@@ -24,7 +24,7 @@ export const handleErasures = async (request: Request, url: URL, body: string, d
     if (limited) return limited;
     let id: string | undefined;
     try {
-      id = await recordErasure(db, storage.slot, subject, now, digestKey);
+      id = await recordErasure(db, storage.slot, subject, now, options.digestKey, options.ledger);
     } catch {
       // A concurrent request may have opened it first; otherwise nothing was recorded.
       try {

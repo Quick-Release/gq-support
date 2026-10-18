@@ -52,6 +52,11 @@ export const json = (body: unknown, status: number, headers: Record<string, stri
 export const error = (code: string, status: number, headers: Record<string, string> = {}) => json({ code }, status, headers);
 export const invalid = () => error("gq_support_invalid_request", 400);
 export const notFound = () => error("gq_support_not_found", 404);
+/**
+ * The SET clause that purges a request's Submitted text, subject, Submission
+ * ID and digest. `erased_at` (set alongside) hides it from every projection.
+ */
+export const PURGED_TEXT = `summary = '', description = '', title = '', reporter_subject = '', submission_id = id, body_digest = ''`;
 
 // PHP's trim(), which WordPress applies before forwarding, not JavaScript's wider one.
 const trim = (text: string) => text.replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, "");

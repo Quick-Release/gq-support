@@ -1,6 +1,7 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import type { OperatorOptions } from "./operator.ts";
+import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
+import { ledgerStore, removal } from "./ledger.ts";
 import { mappingFor } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
 
@@ -66,7 +67,7 @@ const EVIDENCE: Readonly<Record<SuspensionReason, string>> = {
  * credentials authorize it; no HTTP route calls it. The next create still
  * checks the repository first. A passing sweep after suspension is required.
  */
-export const unsuspendRepository = async (args: readonly string[], { query, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
+export const unsuspendRepository = async (args: readonly string[], { query, mappings, now = Date.now(), ledger }: OperatorOptions): Promise<string> => {
   const [, slot, actor, evidence] = args;
   if (args.length !== 4 || !/^[A-Za-z0-9_-]{1,64}$/.test(actor ?? "") || !Object.values(EVIDENCE).includes(evidence ?? "")) {
     throw new Error(`Usage: operator unsuspend <slot> <opaque-actor> <${Object.values(EVIDENCE).join("|")}>`);
@@ -84,6 +85,8 @@ export const unsuspendRepository = async (args: readonly string[], { query, mapp
     WHERE repository_id = ? AND suspended_reason = ? AND verified_safe_at > suspended_at AND EXISTS (SELECT 1 FROM repository_audit a
       WHERE a.id = ? AND a.suspended_at IS repository_state.suspended_at) RETURNING repository_id`, [mapping.repositoryId, reason, id]);
   if (updated.length !== 1) throw new Error("Unsuspend lost eligibility; inspect the audit and current state");
+  // After the lift: a lost ledger write keeps the suspension there, the safe direction.
+  if (ledger) await ledgerStore(asQueryDatabase(ledger)).record([removal("suspension", String(mapping.repositoryId))], now);
   const slots = mappings.filter((other) => other.repositoryId === mapping.repositoryId).map((other) => other.slot);
   return `Unsuspended repository ${mapping.repositoryId} for ${slots.join(", ")}`;
 };

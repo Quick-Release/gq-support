@@ -1,5 +1,5 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import { handleRequest } from "../src/installation-api.ts";
+import { handleRequest, type InstallationApiOptions } from "../src/installation-api.ts";
 import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 
@@ -41,8 +41,8 @@ export interface Installation {
 }
 
 /** An enrolled-installation harness over the public HTTP boundary and the operator CLI seam. */
-export const harness = (db: D1Database, mappings: readonly RepositoryMapping[]) => {
-  const send = (request: Request, config = mappings) => handleRequest(request, db, config);
+export const harness = (db: D1Database, mappings: readonly RepositoryMapping[], options: InstallationApiOptions = {}) => {
+  const send = (request: Request, config = mappings) => handleRequest(request, db, config, options);
   const operator = (command: string, slot: string, now?: number) => runOperator([command, slot], {
     query: async (sql, parameters) => (await db.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings, now,

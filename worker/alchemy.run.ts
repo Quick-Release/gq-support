@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Output from "alchemy/Output";
 import { GitHubAppSecret, GitHubAppSecretProvider } from "./deploy/github-app-secret.ts";
 import { appConfig, verifyApp } from "./deploy/github-app.ts";
-import { SupportDB } from "./src/support-db.ts";
+import { SupportDB, SupportLedger } from "./src/support-db.ts";
 import Worker from "./src/worker.ts";
 import { validateWebhookSecrets } from "./deploy/github-webhook-secrets.ts";
 
@@ -29,6 +29,7 @@ export default Alchemy.Stack(
       }).pipe(Effect.orDie);
     }
     const database = yield* SupportDB;
+    const ledger = yield* SupportLedger;
     const worker = yield* Worker;
     if (stack.stage === "staging" || stack.stage === "prod") {
       // workerName is a stable attribute, which Alchemy can resolve before a
@@ -46,6 +47,8 @@ export default Alchemy.Stack(
       // Recorded so a lost state store can adopt the database by name.
       databaseName: database.databaseName,
       databaseId: database.databaseId,
+      ledgerDatabaseName: ledger.databaseName,
+      ledgerDatabaseId: ledger.databaseId,
     };
   }),
 );

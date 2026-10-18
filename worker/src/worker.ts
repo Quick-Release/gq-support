@@ -9,7 +9,7 @@ import { createGitHubWebhookReceiver, type GitHubWebhookReceiver } from "./githu
 import { handleWorkerRequest } from "./worker-http.ts";
 import { repositoryMappings } from "./repository-mappings.ts";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
-import { SupportDB } from "./support-db.ts";
+import { SupportDB, SupportLedger } from "./support-db.ts";
 import { sweepDelivery } from "./delivery.ts";
 import { GitHubGateway, GitHubReader } from "./github-gateway.ts";
 import { scheduledTick } from "./scheduled.ts";
@@ -18,10 +18,13 @@ import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
+import { restoreGate } from "./ledger.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
 let titleDigestKey: Promise<CryptoKey | null> | undefined;
+// Per isolate: nothing serves or sweeps until a recorded restore has been replayed (src/ledger.ts).
+const restored = restoreGate();
 
 export default Cloudflare.Worker(
   "Worker",
@@ -34,6 +37,7 @@ export default Cloudflare.Worker(
     // Binds SupportDB. Routes reach Slot-owned records only through
     // createStorageFor (src/storage.ts), with the binding's `raw` database as `shared`.
     const database = yield* Cloudflare.D1.QueryDatabase(yield* SupportDB);
+    const ledgerDatabase = yield* Cloudflare.D1.QueryDatabase(yield* SupportLedger);
     const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
     const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
     const appId = yield* Config.String("GITHUB_APP_ID").pipe(Config.withDefault(""));
@@ -56,7 +60,8 @@ export default Cloudflare.Worker(
       const env = yield* WorkerEnvironment;
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
-      yield* sweepDelivery({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]` }).pipe(
+      const ledger = yield* ledgerDatabase.raw;
+      yield* sweepDelivery({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]` }).pipe(
         Effect.provide(GitHubGateway.live({ clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY })),
       );
     }).pipe(Effect.timeoutOption(25_000), Effect.catchCause(() => Effect.logError("Support delivery sweep failed")));
@@ -65,9 +70,11 @@ export default Cloudflare.Worker(
       const env = yield* WorkerEnvironment;
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
+      const ledger = yield* ledgerDatabase.raw;
+      if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) return yield* Effect.logError("Support restore replay pending");
       const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
       const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
-      yield* scheduledTick({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
+      yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
       );
     }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));
@@ -90,6 +97,11 @@ export default Cloudflare.Worker(
         const services = yield* Effect.context<RuntimeContext>();
         const key = yield* Effect.promise(() => titleDigestKey ??= typeof env.GITHUB_APP_PRIVATE_KEY === "string"
           ? digestKey(env.GITHUB_APP_PRIVATE_KEY) : Promise.resolve(null));
+        const ledger = yield* ledgerDatabase.raw;
+        const db = yield* database.raw;
+        if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) {
+          return HttpServerResponse.fromWeb(Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } }));
+        }
         const response = yield* handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
           (task) => context.raw.waitUntil(task), {
             mappings: repositoryMappings, botLogin: `${slug}[bot]`,
@@ -101,7 +113,7 @@ export default Cloudflare.Worker(
               })));
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
-          }, { digestKey: key });
+          }, { digestKey: key, ledger });
         if (request.method === "POST" && new URL(request.url, "https://support.invalid").pathname === "/v1/requests" && response.status === 202) {
           yield* context.waitUntil(deliver);
         }
