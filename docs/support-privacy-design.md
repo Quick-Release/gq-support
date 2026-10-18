@@ -61,7 +61,7 @@ These routes are signed like every other call from WordPress to the Worker ([API
 | `POST /v1/erasures` | Idempotent per `(slot, reporter_subject)` while an erasure is open. Returns `202` with an erasure `id` once the erasure is **recorded**: written to the main D1 and to the suppression ledger. A failed write returns `503` and nothing has been recorded. |
 | `GET /v1/erasures/{id}` | State, counts (`purged`, `redacted`, `pending`), and a list of residual-copy kinds. It never includes text. |
 
-The Operator CLI has `erase <slot> --subject-hash <h>` for erasures the Client asks for outside WordPress, and `erasure close <id>` once an Operator has reviewed the residual copies. Both are audited.
+The Operator CLI has `erase <slot> <actor> <reporter-reference>` for erasures the Client asks for outside WordPress, where the reference is the `rs_…` hash on the issue, and `erasure close <id>` once an Operator has reviewed the residual copies. Both are audited. `erase`, `erasure-status`, `cleanup-reconcile`, `cleanup-exception` and `offboard` are implemented ([#46](https://github.com/Quick-Release/gq-support/issues/46)); the signed routes, `erasure close` and the WordPress eraser are not yet.
 
 ### Erasure states
 
@@ -140,7 +140,7 @@ The Reporter subject is stored in user meta, so it disappears when the user is d
 | Disconnect (site admin) | Keys deleted | Best-effort key revocation. Records stay under retention |
 | Deactivate | None | None |
 | Uninstall | Local state, key and capability grants deleted. No remote call | None. Records stay under retention |
-| **Offboarding** (`revoke <slot>` by an Operator) | n/a | Key revoked. After a **30-day grace period**, all of the Slot's `support_request` and `delivery_intent` rows are hard-purged, with a Slot tombstone in the ledger. Keys and revocation rows are kept. GitHub issues are never touched: they belong to the Client's repository |
+| **Offboarding** (`offboard <slot>`, then `revoke <slot>`, by an Operator) | n/a | Key revoked. After a **30-day grace period**, all of the Slot's `support_request` and `delivery_intent` rows are hard-purged, with a Slot tombstone in the ledger. Keys and revocation rows are kept. GitHub issues are never touched: they belong to the Client's repository |
 
 None of these touches another Slot's records, the Project repository itself, or the shared Cloudflare resources.
 
@@ -157,6 +157,16 @@ None of these touches another Slot's records, the Project repository itself, or 
 The [delivery decision](support-delivery-design.md) rejects a negative marker scan as proof of non-creation. Erasure immediately prevents new creates. Once active attempts no longer need it, purge Summary, Description, derived title, context and unnecessary subject/Submission-ID/digest data. Keep a restricted record containing only opaque request/intent IDs, pinned provider mapping, attempt window, discovered issue IDs and suppression/erasure progress needed to find and redact a possible issue. Erasure stays incomplete while that outcome is unresolved, including after the 24-hour automatic reconciliation window. If a late-discovered issue cannot have its title safely compared because the original title/digest was already purged, redact the report body and require Operator review of the title; do not retain erased text to preserve that comparison.
 
 Never-confirmed-delivered reports reaching 12 months from acceptance also lose their Submitted text. Uncertain cases retain only restricted remote-outcome review metadata, not report content. Offboarding still purges Slot content after its 30-day grace period and leaves Client GitHub issues untouched; it must suppress future creates and track already uncertain delivery. Do not use an empty scan, retention purge or tombstone expiry to claim successful remote erasure.
+
+**Implemented** ([#46](https://github.com/Quick-Release/gq-support/issues/46), migration `0012`, `worker/src/cleanup.ts`):
+
+- Recording an erasure suppresses each request and blanks its Summary, Description, title, subject, Submission ID and digest in one batch; the running attempt keeps its own copy. `erased_at` hides the row from every Reporter projection. Only a title digest keyed by the intent is kept, so automatic redaction can still replace a derived title; it is dropped when automatic cleanup ends.
+- The minute cleanup pass waits for each request's last authorized execution to drain, then purges known non-creations, redacts known issues and reconciles uncertain creates read-only on the delivery schedule, for 24 hours from capture. After that the record is `unresolved` (`needs_review`, residual `remote_outcome`) until `cleanup-reconcile` finds the issue or `cleanup-exception` releases its metadata; the exception never completes the erasure.
+- A restored row with a tombstone stays suppressed, so it is never delivered, and the next cleanup pass purges it again. Hiding it before that pass depends on the ADR 0016 replay before traffic.
+- Resolved erasure tombstones and their request suppressions are compacted 45 days after resolution. Unresolved records are never compacted.
+- Retention purges never-delivered rows 12 months from acceptance and closed delivered rows 12 months after the last observed close; uncertain ones keep a minimal `retention` review record. Offboarding suppresses the Slot at once and purges its content after 30 days without touching GitHub; uncertain ones keep a minimal `offboarding` review record.
+
+Still open: the tombstones and suppressions live in the main D1, so the separate ledger D1 and its replay before traffic (ADR 0016) remain a production gate; the title digest is guessable for short titles while it exists (at most the 24-hour automatic window); several marker matches are never redacted automatically and need an Operator; and an erasure cannot reach requests whose subject retention or offboarding already purged.
 
 ## GitHub and provider limitations
 

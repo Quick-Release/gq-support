@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vitest";
 import { GitHubGateway } from "../src/github-gateway.ts";
-import { supportIssues, type ReconciliationQuery, type SupportIssueIntent } from "../src/support-issues.ts";
+import { supportIssues, titleDigest, type ReconciliationQuery, type SupportIssueIntent } from "../src/support-issues.ts";
 import { BOT, CLIENT_ID, makeFakeGitHub, SLUG, type FakeGitHub } from "./fake-github.ts";
 
 const START = Date.parse("2026-10-17T10:00:00Z");
@@ -280,4 +280,33 @@ describe("Support issues", () => {
     }));
   });
 
+  it("redacts once, idempotently, keeping the marker and attribution", async () => {
+    const github = setup();
+    await run(github, Effect.gen(function* () {
+      const created = yield* supportIssues.create(intent);
+      const digest = yield* Effect.promise(() => titleDigest(intent.intentId, intent.title));
+      expect(yield* supportIssues.redact(target, intent.intentId, created, digest)).toEqual({ _tag: "Redacted", residual: ["edit_history"] });
+      expect(github.issues[0]!.title).toBe("Support request (erased)");
+      expect(github.issues[0]!.body).toBe(`${created.body!.split("\n", 2).join("\n")}\n\n### Description\n\nSupport request text erased at the Reporter's request.`);
+      // A rerun after a lost result sends nothing more.
+      expect(yield* supportIssues.redact(target, intent.intentId, created, digest)).toEqual({ _tag: "Redacted", residual: ["edit_history"] });
+    }));
+    expect(github.requests.filter((r) => r.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("never edits an issue whose marker or identity changed, and reports moved or deleted issues", async () => {
+    const github = setup();
+    await run(github, Effect.gen(function* () {
+      const created = yield* supportIssues.create(intent);
+      github.edit(github.issues[0]!, { body: `Moved marker\n${created.body}` });
+      expect(yield* supportIssues.redact(target, intent.intentId, created, null)).toEqual({ _tag: "NeedsReview", reason: "marker" });
+      expect(yield* supportIssues.redact(target, intent.intentId, { ...created, nodeId: "I_other" }, null)).toEqual({ _tag: "NeedsReview", reason: "identity" });
+      github.issues[0]!.movedTo = "https://api.github.com/repos/Quick-Release/elsewhere/issues/1";
+      expect(yield* supportIssues.redact(target, intent.intentId, created, null)).toEqual({ _tag: "Lost", residual: ["transferred"] });
+      github.issues[0]!.movedTo = undefined;
+      github.issues[0]!.deleted = true;
+      expect(yield* supportIssues.redact(target, intent.intentId, created, null)).toEqual({ _tag: "Lost", residual: [] });
+    }));
+    expect(github.requests.filter((r) => r.method === "PATCH")).toHaveLength(0);
+  });
 });
