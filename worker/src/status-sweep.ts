@@ -1,7 +1,7 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
-import { GitHubReader, type GitHubIssue } from "./github-gateway.ts";
+import { GitHubReader, type GitHubIssue, type VerifyRepositoryError } from "./github-gateway.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
 import type { QueryDatabase } from "./storage.ts";
@@ -48,7 +48,10 @@ const io = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: ()
  */
 interface SweepTarget {
   readonly repositoryId: number;
+  /** The currently approved installation, or the historical one if no mapping remains. */
   readonly installationId: number;
+  /** Historical issue reads never adopt a replacement mapping's installation. */
+  readonly statusInstallationId: number | null;
 }
 
 interface SweepState {
@@ -74,20 +77,27 @@ const statusStore = (db: QueryDatabase) => {
   return {
     /**
      * Approved mappings, including those without requests, plus repositories
-     * pinned on tracked history. Conflicting installations are reported, not guessed at.
+     * pinned on tracked history. Safety uses the approved installation; status
+     * reads stay pinned to history after App reinstallation. Conflicts within
+     * either source are reported, not guessed at.
      */
-    async targets(mappings: readonly RepositoryMapping[]): Promise<{ repositoryId: number; installationId: number | null }[]> {
-      return (await statement(`SELECT repository_id AS repositoryId,
-          CASE WHEN COUNT(DISTINCT installation_id) = 1 THEN MIN(installation_id) END AS installationId
-        FROM (
-          SELECT r.repository_id, i.github_installation_id AS installation_id
+    async targets(mappings: readonly RepositoryMapping[]): Promise<{ repositoryId: number; installationId: number | null; statusInstallationId: number | null }[]> {
+      return (await statement(`WITH targets AS (
+          SELECT r.repository_id, i.github_installation_id AS installation_id, 0 AS configured
           FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.slot = r.slot AND i.seq = 0
           WHERE r.issue_id IS NOT NULL AND r.tracking = 'active' AND i.github_installation_id IS NOT NULL
           UNION ALL
-          SELECT json_extract(value, '$.repositoryId'), json_extract(value, '$.githubInstallationId')
+          SELECT json_extract(value, '$.repositoryId'), json_extract(value, '$.githubInstallationId'), 1
           FROM json_each(?) WHERE json_extract(value, '$.githubInstallationId') IS NOT NULL
-        ) GROUP BY repository_id`, JSON.stringify(mappings))
-        .all<{ repositoryId: number; installationId: number | null }>()).results;
+        ) SELECT repository_id AS repositoryId,
+          CASE WHEN MAX(configured) = 1 THEN
+            CASE WHEN COUNT(DISTINCT CASE WHEN configured = 1 THEN installation_id END) = 1
+              THEN MIN(CASE WHEN configured = 1 THEN installation_id END) END
+          ELSE CASE WHEN COUNT(DISTINCT installation_id) = 1 THEN MIN(installation_id) END END AS installationId,
+          CASE WHEN COUNT(DISTINCT CASE WHEN configured = 0 THEN installation_id END) <= 1
+            THEN COALESCE(MIN(CASE WHEN configured = 0 THEN installation_id END), MIN(installation_id)) END AS statusInstallationId
+        FROM targets GROUP BY repository_id`, JSON.stringify(mappings))
+        .all<{ repositoryId: number; installationId: number | null; statusInstallationId: number | null }>()).results;
     },
     /** Registers new repositories, then reads each one's sweep state and its installation's shared cooldown. */
     async states(targets: readonly SweepTarget[], now: number): Promise<SweepState[]> {
@@ -101,12 +111,12 @@ const statusStore = (db: QueryDatabase) => {
           FROM repository_state WHERE repository_id IN (SELECT value FROM json_each(?))`, ids),
       ]);
       const cooldowns = await statement(`SELECT installation_id, provider_cooldown_until FROM delivery_permit
-        WHERE installation_id IN (SELECT value FROM json_each(?))`, JSON.stringify(targets.map((target) => target.installationId)))
+        WHERE installation_id IN (SELECT value FROM json_each(?))`, JSON.stringify(targets.flatMap((target) => [target.installationId, target.statusInstallationId])))
         .all<{ installation_id: number; provider_cooldown_until: number }>();
       return states!.results.map((state) => {
         const target = targets.find((candidate) => candidate.repositoryId === state.repository_id)!;
-        const cooldown = cooldowns.results.find((row) => row.installation_id === target.installationId);
-        return { ...state, cooldown_until: cooldown?.provider_cooldown_until ?? 0 };
+        const cooldown = cooldowns.results.filter((row) => row.installation_id === target.installationId || row.installation_id === target.statusInstallationId);
+        return { ...state, cooldown_until: Math.max(0, ...cooldown.map((row) => row.provider_cooldown_until)) };
       });
     },
     /** Resumes the sweep in progress, or starts one from the last sweep minus the skew allowance. */
@@ -215,7 +225,18 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
   for (const state of due) {
     if (pages <= 0 || now() >= deadline) break;
     const target = targets.find((candidate) => candidate.repositoryId === state.repository_id)!;
-    if (cooling.has(target.installationId)) continue;
+    if (cooling.has(target.installationId) || (target.statusInstallationId !== null && cooling.has(target.statusInstallationId))) continue;
+    const incomplete = (error: VerifyRepositoryError, installationId = target.installationId) => Effect.gen(function* () {
+      const reason = unsafeReason(error);
+      // Historical access loss does not prove the current approved mapping unsafe.
+      if (reason && installationId === target.installationId) yield* suspendRepository(options.db, target.repositoryId, reason, now());
+      if (error._tag === "RateLimited") {
+        cooling.add(installationId);
+        yield* io(() => store.cooldown(installationId, error.until));
+      }
+      yield* Effect.logWarning("Support status sweep incomplete").pipe(
+        Effect.annotateLogs({ repository: target.repositoryId, error: error._tag }));
+    });
     const sweep = Effect.gen(function* () {
       let position = yield* io(() => store.begin(target, now(), config.skewMs));
       const verifiedAt = now();
@@ -223,15 +244,7 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
       if (Result.isFailure(verification)) {
         // A failed mint still spends this repository's share of the tick.
         pages -= 1;
-        const error = verification.failure;
-        const reason = unsafeReason(error);
-        if (reason) yield* suspendRepository(options.db, target.repositoryId, reason, now());
-        if (error._tag === "RateLimited") {
-          cooling.add(target.installationId);
-          yield* io(() => store.cooldown(target.installationId, error.until));
-        }
-        return yield* Effect.logWarning("Support status sweep incomplete").pipe(
-          Effect.annotateLogs({ repository: target.repositoryId, error: error._tag }));
+        return yield* incomplete(verification.failure);
       }
       const safety = yield* io(() => store.verified(target.repositoryId, verifiedAt));
       if (safety?.suspended_reason) {
@@ -243,20 +256,19 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
         yield* io(() => store.apply(target, [], position, null, now()));
         return;
       }
+      if (target.statusInstallationId === null) {
+        pages -= 1;
+        yield* Effect.logError("Support status sweep skipped conflicting historical installations").pipe(
+          Effect.annotateLogs({ repository: target.repositoryId, alert: true }));
+        yield* io(() => store.apply(target, [], position, null, now()));
+        return;
+      }
       for (let taken = 0; taken < config.pagesPerRepository && pages > 0 && now() < deadline; taken += 1) {
         pages -= 1;
         const listed = yield* Effect.result(reader.listIssuesSince(
-          { installationId: target.installationId, repositoryId: target.repositoryId }, position.cursor, position.page));
+          { installationId: target.statusInstallationId, repositoryId: target.repositoryId }, position.cursor, position.page));
         if (Result.isFailure(listed)) {
-          const error = listed.failure;
-          const reason = unsafeReason(error);
-          if (reason) yield* suspendRepository(options.db, target.repositoryId, reason, now());
-          if (error._tag === "RateLimited") {
-            cooling.add(target.installationId);
-            yield* io(() => store.cooldown(target.installationId, error.until));
-          }
-          return yield* Effect.logWarning("Support status sweep incomplete").pipe(
-            Effect.annotateLogs({ repository: target.repositoryId, error: error._tag }));
+          return yield* incomplete(listed.failure, target.statusInstallationId);
         }
         const next = listed.success.hasNextPage ? after(position, listed.success.issues) : null;
         // The query already filters by creator; anything else is never the service's to project.

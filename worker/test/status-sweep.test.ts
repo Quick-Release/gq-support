@@ -464,3 +464,35 @@ it("refuses an Operator lift if renewed unsafe evidence arrives during the passi
   await tick();
   await expect(operator("unsuspend", production.slot, "operator-7", "verified-private")).rejects.toThrow("cannot be unsuspended");
 });
+
+
+it.each([false, true])("verifies the current mapping despite historical installation conflicts (lost access = %s)", async (lostAccess) => {
+  const installation = await enroll(production);
+  const request = await accept(installation);
+  await tick();
+  mappings = [{ ...production, githubInstallationId: 8 }];
+  github.installation(8);
+  github.update(42, { installationId: lostAccess ? 9 : 8, private: lostAccess });
+  advance(SWEEP);
+  await tick();
+  expect(github.requests.at(-1)?.path).toBe("/app/installations/8/access_tokens");
+  expect(await (await installation.send("GET", "/v1/installation")).json()).toMatchObject({ mapping_state: "suspended" });
+  expect(await statusOf(installation, request.id)).toBe("open");
+});
+
+
+it("keeps historical issue reads pinned while verifying a healthy replacement installation", async () => {
+  const installation = await enroll(production);
+  const request = await accept(installation);
+  await tick();
+  mappings = [{ ...production, githubInstallationId: 8 }];
+  github.installation(8);
+  github.update(42, { installationId: 8 });
+  github.requests.length = 0;
+  advance(SWEEP);
+  await tick();
+  expect(github.requests.filter((r) => r.path.endsWith("/access_tokens")).map((r) => r.path))
+    .toEqual(["/app/installations/8/access_tokens", "/app/installations/7/access_tokens"]);
+  expect(await (await installation.send("GET", "/v1/installation")).json()).toMatchObject({ mapping_state: "active" });
+  expect(await statusOf(installation, request.id)).toBe("open");
+});
