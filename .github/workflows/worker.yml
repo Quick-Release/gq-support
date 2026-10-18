@@ -46,7 +46,9 @@ jobs:
     name: Typecheck + tests
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # The suite is CPU-bound across test files: 4 vCPUs take about half as long as 2,
+    # so the per-vCPU-minute cost stays about the same.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

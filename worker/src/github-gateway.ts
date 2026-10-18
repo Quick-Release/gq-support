@@ -37,6 +37,8 @@ export interface GitHubAppConfig {
   readonly slug: string;
   /** PKCS#8 PEM; GitHub's PKCS#1 download is converted once at custody. */
   readonly privateKeyPem: string;
+  /** How long one GitHub call may take before it counts as no response. Defaults to 10 s; tests on the real clock shorten it. */
+  readonly requestTimeoutMs?: number;
 }
 
 /** The App key is missing or invalid, or GitHub rejected the App JWT. */
@@ -292,7 +294,7 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       HttpClientRequest.bearerToken(Redacted.value(authorization)),
     )).pipe(
       Effect.flatMap((response) => readBody(response).pipe(Effect.map((body) => ({ response, body })))),
-      Effect.timeoutOption(REQUEST_TIMEOUT_MS),
+      Effect.timeoutOption(config.requestTimeoutMs ?? REQUEST_TIMEOUT_MS),
       Effect.flatMap(Option.match({ onNone: () => Effect.fail(new NoResponse()), onSome: Effect.succeed })),
       // Transport errors carry the request, headers included: drop them.
       Effect.mapError(() => new NoResponse()),
