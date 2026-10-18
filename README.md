@@ -134,3 +134,11 @@ pnpm dev:worker
 # deploy the Cloudflare worker
 pnpm deploy:worker
 ```
+
+### Browser tests before a push
+
+`main` only accepts pull requests that pass CI (`Asset size gate`, `PHP result`, `Worker result`). For quicker feedback, lefthook's `pre-push` hook runs the Playwright specs affected by the pushed files against the shared DDEV test site (`gq-support-lifecycle-testsite`, created by `plugin/tests/integration/run.sh`). It usually takes under a minute, and it skips when the site is not running.
+
+- The site is shared by every checkout and agent on this machine, and the specs change its state, so runs take turns behind a lock.
+- From a worktree, the site serves a copy of that worktree's `plugin/` for the run, then points back at the main checkout's `plugin/`. Run tests on the shared site through this script, not by hand at the same time.
+- Skip it with `GQ_SUPPORT_SKIP_PRE_PUSH=1 git push`. CI still runs everything.
