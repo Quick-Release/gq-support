@@ -26,7 +26,8 @@ export interface StatusRefreshOptions {
 }
 class RefreshStorageFailed extends Data.TaggedError("RefreshStorageFailed")<{}> {}
 const io = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: () => new RefreshStorageFailed() });
-const eligible = `tracking = 'active' AND issue_id IS NOT NULL
+/** Rows the refresher drains: actively tracked, on an unsuspended repository, not suppressed. */
+export const refreshEligible = `tracking = 'active' AND issue_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM repository_state rs WHERE rs.repository_id = support_request.repository_id AND rs.suspended_reason IS NOT NULL)
   AND NOT EXISTS
   (SELECT 1 FROM delivery_suppression s WHERE (s.scope = 'slot' AND s.reference = support_request.slot)
@@ -38,7 +39,7 @@ const eligible = `tracking = 'active' AND issue_id IS NOT NULL
 export const requestStatusRefresh = (db: QueryDatabase, repositoryId: number, issueId: number, now: number) =>
   db.prepare(`UPDATE support_request SET status_refresh_due_at = COALESCE(status_refresh_due_at, ?3),
       status_refresh_generation = status_refresh_generation + 1
-    WHERE repository_id = ?1 AND issue_id = ?2 AND ${eligible}`).bind(repositoryId, issueId, now).run();
+    WHERE repository_id = ?1 AND issue_id = ?2 AND ${refreshEligible}`).bind(repositoryId, issueId, now).run();
 
 interface Candidate {
   id: string;
@@ -70,7 +71,7 @@ const refreshStore = (db: QueryDatabase) => {
       const fence = `EXISTS (SELECT 1 FROM status_refresh_pass WHERE id = 1 AND started_at = ? AND cursor = ?)`;
       await db.batch([
         sql(`UPDATE support_request SET status_refresh_due_at = ?, status_refresh_generation = status_refresh_generation + 1
-          WHERE id IN (SELECT value FROM json_each(?)) AND status_refresh_due_at IS NULL AND ${eligible} AND ${fence}`,
+          WHERE id IN (SELECT value FROM json_each(?)) AND status_refresh_due_at IS NULL AND ${refreshEligible} AND ${fence}`,
           now, JSON.stringify(rows.map((row) => row.id)), pass.started_at, pass.cursor),
         rows.length === config.dailyBatchSize
           ? sql(`UPDATE status_refresh_pass SET cursor = ? WHERE id = 1 AND started_at = ? AND cursor = ?`,
@@ -81,7 +82,7 @@ const refreshStore = (db: QueryDatabase) => {
     },
     async age(now: number) {
       const row = await sql(`SELECT MIN(status_refresh_due_at) AS oldest FROM support_request
-        WHERE status_refresh_due_at IS NOT NULL AND ${eligible}`).first<{ oldest: number | null }>();
+        WHERE status_refresh_due_at IS NOT NULL AND ${refreshEligible}`).first<{ oldest: number | null }>();
       return row?.oldest == null ? 0 : Math.max(0, now - row.oldest);
     },
     async candidates(now: number, limit: number) {
@@ -99,7 +100,7 @@ const refreshStore = (db: QueryDatabase) => {
     async claim(row: Candidate, owner: string, now: number) {
       return sql(`UPDATE support_request SET status_refresh_owner = ?, status_refresh_attempted_at = ?,
           status_refresh_next_at = ?, status_refresh_attempts = status_refresh_attempts + 1
-        WHERE id = ? AND status_refresh_due_at IS NOT NULL AND status_refresh_next_at <= ? AND ${eligible}
+        WHERE id = ? AND status_refresh_due_at IS NOT NULL AND status_refresh_next_at <= ? AND ${refreshEligible}
           AND NOT EXISTS (SELECT 1 FROM delivery_permit WHERE installation_id = ? AND provider_cooldown_until > ?)
         RETURNING status_etag, status_refresh_generation, status_refresh_attempts`,
         owner, now, now + 60_000, row.id, now, row.installationId, now).first<Claim>();
@@ -107,21 +108,21 @@ const refreshStore = (db: QueryDatabase) => {
     async apply(row: Candidate, claim: Claim, owner: string, result: IssueRead | "lost", now: number) {
       const observe = result === "lost"
         ? sql(`UPDATE support_request SET status = 'closed', tracking = 'lost', status_etag = NULL, status_observed_at = ?
-            WHERE id = ? AND status_refresh_owner = ? AND status_refresh_generation = ? AND ${eligible}`,
+            WHERE id = ? AND status_refresh_owner = ? AND status_refresh_generation = ? AND ${refreshEligible}`,
             now, row.id, owner, claim.status_refresh_generation)
         : result._tag === "NotModified"
           ? sql(`UPDATE support_request SET status_observed_at = MAX(COALESCE(status_observed_at, 0), ?)
-              WHERE id = ? AND status_etag IS ? AND ${eligible}`, now, row.id, claim.status_etag)
+              WHERE id = ? AND status_etag IS ? AND ${refreshEligible}`, now, row.id, claim.status_etag)
           : sql(`UPDATE support_request SET status = ?, status_source_updated_at = ?, status_etag = ?,
                 status_observed_at = MAX(COALESCE(status_observed_at, 0), ?)
-              WHERE id = ? AND issue_id = ? AND ${eligible}
+              WHERE id = ? AND issue_id = ? AND ${refreshEligible}
                 AND (status_source_updated_at IS NULL OR status_source_updated_at <= ?)`,
             result.issue.state, Date.parse(result.issue.updatedAt), result.etag, now, row.id, result.issue.id, Date.parse(result.issue.updatedAt));
       const results = await db.batch([
         observe,
         sql(`UPDATE support_request SET status_refresh_due_at = NULL, status_refresh_attempts = 0,
             status_refresh_next_at = 0, status_refresh_owner = NULL
-          WHERE id = ? AND status_refresh_owner = ? AND status_refresh_generation = ? AND ${result === "lost" ? "tracking = 'lost'" : eligible}`,
+          WHERE id = ? AND status_refresh_owner = ? AND status_refresh_generation = ? AND ${result === "lost" ? "tracking = 'lost'" : refreshEligible}`,
           row.id, owner, claim.status_refresh_generation),
         // A newer wake-up is still owed, but need not wait for the old claim to expire.
         sql(`UPDATE support_request SET status_refresh_next_at = 0, status_refresh_owner = NULL

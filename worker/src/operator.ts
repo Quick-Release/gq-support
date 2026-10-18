@@ -4,6 +4,7 @@ import { recoverDelivery } from "./delivery-recovery.ts";
 import { runCleanupOperator } from "./cleanup-operator.ts";
 import { unsuspendRepository } from "./repository-suspension.ts";
 import { sha256 } from "./signature.ts";
+import { runStatusOperation } from "./status-operations.ts";
 
 export type CredentialDatabase = Pick<D1Database, "prepare" | "batch">;
 export interface OperatorOptions {
@@ -36,9 +37,10 @@ export const runOperator = async (args: readonly string[], { query, recordRevoca
   if (["erase", "erasure-status", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
     return runCleanupOperator(args, { query, recordRevocation, mappings, now });
   }
+  if (args[0]?.startsWith("status-")) return runStatusOperation(args, { query, recordRevocation, mappings, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, cleanup-reconcile, cleanup-exception and offboard");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, cleanup-reconcile, cleanup-exception, offboard and status-<health|reconcile|repair>");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

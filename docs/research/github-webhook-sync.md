@@ -212,6 +212,8 @@ Rate considerations:
 4. **Confirm:** due-row backlog drained, every repository's `last_swept_at` within one interval, no unacknowledged suspensions.
 5. **Record:** an audit entry with actor, time, window and counts. No payloads or content.
 
+The published, command-level version is the [missed-webhook runbook](../runbooks/missed-webhooks.md).
+
 ## Freshness expectations
 
 Targets, to be measured in the spike and staging, under normal GitHub and Cloudflare availability:
@@ -343,6 +345,91 @@ Deterministic Worker tests with a fake GitHub Layer, a controlled clock and inje
 - Rate limits for token mints.
 - The largest real payloads for the subscribed events, to set the body cap.
 - Measured delivery latency and projection lag, to confirm the freshness targets.
+
+## Staging verification (#57)
+
+Status on 2026-10-18: the procedure and tooling are ready, but **nothing has
+been measured on staging yet**. The results table below stays empty until a
+live run, and #57's measurement criteria stay open. The Operator steps are in
+the [missed-webhook runbook](../runbooks/missed-webhooks.md).
+
+Prerequisites, none of which are met yet:
+
+1. #56's issue handlers on `main` and deployed to staging. The deploy workflow
+   runs only from `main`, and the #55 evidence was taken with an empty allowlist.
+2. A staging Slot mapped to the sandbox repository `1424354303`, pinned to the
+   staging installation `172696674`. **Decision needed:** `repositoryMappings`
+   has no stage scope, so an entry there is also deployed to production.
+   Production would sweep the sandbox with the production App, fail the mint
+   and record a `no_access` suspension in production D1. Scope mappings by
+   stage, or accept and document that outcome, before adding the entry.
+3. The sandbox holds only synthetic issues, since the suspension scenario
+   makes it public for a few minutes.
+
+Tooling. `worker/scripts/status-sync-probe.ts` acts as the Reporter's
+installation over the public installation API, and as the Developer through
+`gh`. It never prints keys, signatures or request text. Its state file holds
+the probe's private key: keep it `0600` outside the repository, then revoke the
+probe Slot. It polls every 10 seconds to stay within the Reporter read budget,
+so each lag is measured from GitHub's `updated_at` to the Reporter's first
+observation, up to 10 seconds late. That is stricter than
+`status_observed_at`. `scripts/github-webhook-staging.py` gains `config`,
+`break` and `restore`. `break` sets a random App webhook secret that nobody
+keeps. Deliveries still reach the receiver and get `401`, so the rejection
+alert path is exercised. That differs from a literally wrong URL: a wrong URL
+fails only in GitHub's delivery log and produces no receiver signal. Freshness
+falls back to the sweep in both cases.
+
+Procedure (from `worker/`, Operator credentials for staging):
+
+1. `pnpm operator enroll <sandbox-slot> …`, then pipe the code to
+   `node scripts/status-sync-probe.ts enroll --state <file>` on stdin, and run
+   `node scripts/status-sync-probe.ts submit --state <file>`.
+2. **Webhooks working:** `node scripts/status-sync-probe.ts measure --state <file> --transitions 20 --timeout-minutes 5`.
+   The probe alternately closes and reopens the issue. It passes when `p95Ms` is at most `120000`
+   and `appWrites` is `0` (no App events or comments after the first change).
+   Each transition's `githubUpdatedAt` must be later than the previous one.
+3. **Webhook broken:** from the repo root, run `python3 scripts/github-webhook-staging.py break --state <progress>`, then
+   `measure --transitions 2 --timeout-minutes 20`. It passes when each lag is at most 17 minutes.
+   Run `python3 scripts/github-webhook-staging.py collect` for the `401`
+   delivery statuses, and check Workers Logs for
+   `GitHub webhook rejected` with `reason: signature`. Then run `restore` and
+   rehearse runbook steps 5–6 (`status-health`, `status-repair`).
+4. **Suspension:** make the sandbox public with
+   `gh repo edit Quick-Release/gq-support-sandbox --visibility public --accept-visibility-change-consequences`,
+   and immediately start `watch-suspension --state <file> --timeout-minutes 20`.
+   It passes when the mapping shows `suspended` (WordPress then shows
+   `gq_support_not_configured`) within one sweep. "At once with webhooks" needs
+   #40's `public`/`repository` handlers; the current allowlist has only issue
+   actions. Make the sandbox private again. After a passing sweep, run
+   `unsuspend <sandbox-slot> <actor> verified-private`.
+5. Record the results below, and revoke the probe Slot.
+
+| Scenario | Target | Measured |
+|---|---|---|
+| Webhooks working, p95 `updated_at` → Reporter observation | ≤ 2 min | not run |
+| Webhooks working, App writes after observation | 0 | not run |
+| Webhook broken, each close/reopen observed | ≤ 17 min | not run |
+| Webhook broken, `401` deliveries and rejection log | present | not run |
+| Sandbox public → `suspended` | ≤ one sweep | not run |
+
+Remaining spike answers (from [Verify in spike](#verify-in-spike)):
+
+| Question | Answer |
+|---|---|
+| Body byte-identical through `toWebResult` | Yes: local tests, and live 75,766-byte deliveries verified (#55) |
+| Hook target headers | `integration` and the numeric App ID `5355960` (#55) |
+| Redelivery of a pre-rotation delivery | Signed with the **current** secret, also after the previous key was retired (#55) |
+| `installation_target` delivered by default | Not observed |
+| App bot `login` | `getquick-support-staging[bot]` (#53). Its numeric `id` was not recorded |
+| Close and reopen advance `updated_at` | Pending: step 2 checks it |
+| Transferred issue read with the old repository's token | Not observed |
+| Suspended installation still receives webhooks | Not observed. #55 saw only the `installation` suspend/unsuspend events themselves |
+| Event for a repository made `internal` | Not observed |
+| Mint response includes `archived` | Yes, with `private` (#53) |
+| Token mint rate limits | Not observed |
+| Largest real payloads | 75,766 bytes (issues), 3,009 bytes (installation) (#55) |
+| Delivery latency and projection lag | Pending: steps 2 and 3 |
 
 ## Sources
 

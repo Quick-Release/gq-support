@@ -21,6 +21,37 @@ it("configures only staging's HTTPS JSON webhook without returning its secret", 
   expect(JSON.stringify(result)).not.toContain(env.GITHUB_WEBHOOK_SECRET);
 });
 
+it("checks the webhook configuration without returning its secret", async () => {
+  const result = await runWebhookSpike("config", env, async (url, init) => {
+    if (String(url).endsWith("/app")) return Response.json(app);
+    expect(String(url)).toBe("https://api.github.com/app/hook/config");
+    expect(init?.method).toBe("GET");
+    return Response.json({ url: STAGING_WEBHOOK, content_type: "json", insecure_ssl: "0", secret: "current-test-secret" });
+  });
+  expect(result).toEqual({ url: STAGING_WEBHOOK, contentType: "json", tlsVerified: true, secretConfigured: true });
+  expect(JSON.stringify(result)).not.toContain(env.GITHUB_WEBHOOK_SECRET);
+});
+
+it("reports an unexpected webhook URL without echoing it", async () => {
+  const result = await runWebhookSpike("config", env, async (url) => String(url).endsWith("/app") ? Response.json(app)
+    : Response.json({ url: "https://attacker.example/hook?token=private", content_type: "form", insecure_ssl: "1" }));
+  expect(result).toEqual({ url: "unexpected", contentType: "unexpected", tlsVerified: false, secretConfigured: false });
+});
+
+it("breaks delivery with a random secret it never returns, leaving the URL", async () => {
+  let sent: Record<string, string> = {};
+  const result = await runWebhookSpike("break", env, async (url, init) => {
+    if (String(url).endsWith("/app")) return Response.json(app);
+    expect(init?.method).toBe("PATCH");
+    sent = JSON.parse(String(init?.body));
+    return Response.json({ secret: "********" });
+  });
+  expect(Object.keys(sent)).toEqual(["secret"]);
+  expect(sent.secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(sent.secret).not.toBe(env.GITHUB_WEBHOOK_SECRET);
+  expect(JSON.stringify(result)).not.toContain(sent.secret!);
+});
+
 it("collects actual receiver byte counts, never serialized payload estimates or signatures", async () => {
   const result = await runWebhookSpike("collect", env, async (url) => {
     const path = new URL(String(url)).pathname;

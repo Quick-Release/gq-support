@@ -40,6 +40,18 @@ export const runWebhookSpike = async (operation: string, env = process.env, requ
     await api("/app/hook/config", "PATCH", { url: STAGING_WEBHOOK, content_type: "json", insecure_ssl: "0", secret: env.GITHUB_WEBHOOK_SECRET });
     return { configured: true, url: STAGING_WEBHOOK, appId: APP_ID };
   }
+  if (operation === "config") {
+    // The missed-webhook runbook's check. GitHub masks the secret; report only whether one is set.
+    const hook = await (await api("/app/hook/config")).json() as { url?: string; content_type?: string; insecure_ssl?: string; secret?: string };
+    return { url: hook.url === STAGING_WEBHOOK ? hook.url : "unexpected", contentType: hook.content_type === "json" ? "json" : "unexpected",
+      tlsVerified: hook.insecure_ssl === "0", secretConfigured: typeof hook.secret === "string" && hook.secret.length > 0 };
+  }
+  if (operation === "break") {
+    // Staging drill (#57): a fresh random secret nobody keeps, so deliveries still reach the
+    // receiver and are rejected with 401. `configure` restores the current secret.
+    await api("/app/hook/config", "PATCH", { secret: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url") });
+    return { broken: "secret", url: STAGING_WEBHOOK, appId: APP_ID };
+  }
   if (operation === "probe" || operation === "retired-probe") {
     if (operation === "retired-probe" && !env.GITHUB_WEBHOOK_PREVIOUS_SECRET) throw new Error("configuration");
     const current = await probe(env.GITHUB_WEBHOOK_SECRET);

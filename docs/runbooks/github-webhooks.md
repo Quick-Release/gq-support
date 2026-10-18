@@ -45,6 +45,9 @@ See the
 [payload and header reference](https://docs.github.com/en/webhooks/webhook-events-and-payloads)
 and [signature validation guide](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
 
+When deliveries fail or status falls behind, follow the
+[missed-webhook runbook](missed-webhooks.md).
+
 ## Deployment and activation
 
 Use the separate staging/prod Apps and the Tipme Cloudflare account described
