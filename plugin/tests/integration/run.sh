@@ -22,6 +22,8 @@ if wp eval 'exit( is_multisite() ? 0 : 1 );' >/dev/null 2>&1; then
   exit 1
 fi
 wp theme install twentytwentyfour --activate
+# Avatars load from gravatar.com, and an admin page's load event waits for them: keep browser tests off the internet.
+wp option update show_avatars 0
 if wp plugin is-active gq-support 2>/dev/null; then wp plugin deactivate gq-support; fi
 if wp plugin is-active gq-design 2>/dev/null; then wp plugin deactivate gq-design; fi
 had_identity=0
