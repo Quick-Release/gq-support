@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { forgetLogIn, logIn } from '../performance/test-site.cjs';
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
 const wp = (args: string[]) => execFileSync('ddev', ['wp', '--path=.test-site', ...args], { encoding: 'utf8' });
@@ -7,15 +8,12 @@ const wp = (args: string[]) => execFileSync('ddev', ['wp', '--path=.test-site', 
 test.beforeAll(() => {
   wp(['eval', "GQ_Support_State::update(array('connection' => 'connected')); get_role('administrator')->add_cap('gq_support_submit_requests');"]);
   wp(['user', 'update', 'admin', '--user_pass=launcher-test-password']);
+  forgetLogIn();
 });
 test.afterAll(() => wp(['eval', "GQ_Support_State::update(array('connection' => 'not_connected'));"]));
 
 async function open(page: Page) {
-  await page.goto(`${site}/wp-login.php`);
-  await page.locator('#user_login').fill('admin');
-  await page.locator('#user_pass').fill('launcher-test-password');
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(/wp-admin/);
+  await logIn(page);
   await page.goto(`${site}/wp-admin/`);
   await page.getByRole('button', { name: /^Support/ }).click();
   await expect(page.getByRole('button', { name: 'Send report' })).toBeEnabled();

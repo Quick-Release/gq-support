@@ -21,11 +21,26 @@ exports.wp = (args) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.te
 /** macOS mounts the site through Mutagen, so files written on the host need a sync. */
 exports.sync = () => { if (process.platform === 'darwin') execFileSync('ddev', ['mutagen', 'sync']); };
 
-/** @param {import('@playwright/test').Page} page */
+/** The admin's cookies from the last form login in this worker; each test gets a fresh context. */
+let adminCookies;
+
+/** Forget the saved admin login, after anything that may end its session (such as a password reset). */
+exports.forgetLogIn = () => { adminCookies = undefined; };
+
+/**
+ * Logs the page's context in as admin. The first call submits the login form; later calls reuse
+ * its cookies, which saves a login round trip per test. It leaves the page where it was.
+ * @param {import('@playwright/test').Page} page
+ */
 exports.logIn = async function logIn(page) {
+  if (adminCookies) {
+    await page.context().addCookies(adminCookies);
+    return;
+  }
   await page.goto(`${exports.site}/wp-login.php`);
   await page.locator('#user_login').fill('admin');
   await page.locator('#user_pass').fill(exports.adminPassword);
   await page.locator('#wp-submit').click();
   await page.waitForURL(/wp-admin/);
+  adminCookies = await page.context().cookies();
 };
