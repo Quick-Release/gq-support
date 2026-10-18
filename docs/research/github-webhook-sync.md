@@ -348,11 +348,12 @@ Deterministic Worker tests with a fake GitHub Layer, a controlled clock and inje
 
 ## Staging verification (#57)
 
-Status on 2026-10-18: steps 1–3 ran on staging (Worker `0cfff3a`, after #79
-and #80), and their results are below. Step 4, the suspension, has **not run
-yet**: it changes the sandbox repository's visibility, and the session that ran
-the other steps could not change that repository. The Operator steps are in
-the [missed-webhook runbook](../runbooks/missed-webhooks.md).
+Status on 2026-10-18: all four steps ran on staging (Worker `0cfff3a`, after
+#79 and #80), and their results are below. Step 4, the suspension, changes the
+sandbox repository's visibility. The session that ran steps 1–3 could not
+change that repository, so step 4 ran later from a session with `GQ_SCOPE=off`.
+The Operator steps are in the
+[missed-webhook runbook](../runbooks/missed-webhooks.md).
 
 Prerequisites:
 
@@ -422,7 +423,7 @@ Procedure (from `worker/`, Operator credentials for staging):
 | Webhooks working, App writes after observation | 0 | **0**. The App's only event on the issue is its creation-time label; it made no comments. Pass |
 | Webhook broken, each close/reopen observed | ≤ 17 min | **7 m 03 s, 53 s, 12 m 38 s**. The 53 s change came 9 s after a sweep had listed the previous one, so the individual refresh that listing queued picked it up. The other two waited for a sweep. Pass |
 | Webhook broken, `401` deliveries and rejection log | present (alerts need #20) | All 3 deliveries while broken got `401` in GitHub's delivery log (the 20 before got `202`). Worker logs show `GitHub webhook rejected`, `reason: signature`, for each. Pass. Alerts are #20's |
-| Sandbox public → `suspended`, create refused `not_configured` | ≤ one sweep | not run |
+| Sandbox public → `suspended`, create refused `not_configured` | ≤ one sweep | **6 m 56 s** from the probe's start to its observation (`afterMs` 415731); the sweep recorded the suspension 6 m 50 s after the visibility change. `createRefused` was `true`. `status-health` showed reason `public`, unacknowledged. Pass |
 
 Run notes (2026-10-18, 21:49–22:24 UTC). The probe ran on an NTP-synchronised
 machine, less than 1 ms from NTP time. All lags come from that run, for one
@@ -433,6 +434,17 @@ holding only the actor, the window, counts and times. With gh 2.46 the
 probe's App-write check failed after recording every transition, because
 `--slurp` needs a newer gh. The App writes above were counted by hand with the
 same rule, and the probe now pages without `--slurp`.
+
+Suspension run notes (2026-10-18, 22:29–22:39 UTC, from a session with
+`GQ_SCOPE=off`, the only scope that may change the sandbox repository).
+`status-health` first showed the sandbox private, healthy and unsuspended. The
+watcher started at 22:29:37 and the sandbox went public at 22:29:38. The sweep
+suspended it at 22:36:28, and the probe reported at 22:36:33. The sandbox was
+private again at 22:36:34, so it was public for about 7 minutes. The next sweep
+set `verifiedSafeAt` at 22:37:28. `unsuspend gq-support-sandbox/staging
+drill-57 verified-private` then cleared the suspension, and `status-health`
+returned `healthy: true` with no suspensions. The probe Slot was revoked at
+22:38:23 and recorded in `worker/revocations.json`.
 
 Remaining spike answers (from [Verify in spike](#verify-in-spike)):
 
