@@ -1,0 +1,33 @@
+name: Sync project status
+
+on:
+  issues:
+    types: [opened, reopened, closed, labeled, unlabeled]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: project-status-${{ github.event.issue.number || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Move issues to their GQ-Support project column
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/sync-project-status.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Sync
+        env:
+          # The default GITHUB_TOKEN cannot write organization Projects.
+          GH_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?PROJECT_SYNC_TOKEN is required}"
+          scripts/sync-project-status.sh ${ISSUE_NUMBER:+"$ISSUE_NUMBER"}
