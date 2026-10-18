@@ -63,12 +63,13 @@ try {
 			'key_id'     => 'access-test-key',
 		)
 	);
-	// Two independent WordPress processes overlap the first authorized REST read.
+	// Two independent WordPress processes overlap the first authorized REST read, in one login session.
+	$gq_support_token     = WP_Session_Tokens::get_instance( $gq_support_user )->create( time() + HOUR_IN_SECONDS );
 	$gq_support_processes = array();
 	for ( $gq_support_i = 0; $gq_support_i < 2; ++$gq_support_i ) {
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Disposable CLI test requires independent WordPress processes.
 		$gq_support_process     = proc_open(
-			array( 'wp', '--path=' . ABSPATH, 'eval-file', __DIR__ . '/subject-worker.php', (string) $gq_support_user ),
+			array( 'wp', '--path=' . ABSPATH, 'eval-file', __DIR__ . '/subject-worker.php', (string) $gq_support_user, $gq_support_token ),
 			array(
 				1 => array( 'pipe', 'w' ),
 				2 => array( 'pipe', 'w' ),

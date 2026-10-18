@@ -83,6 +83,8 @@ jobs:
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     strategy:
+      # A failure in one WordPress version must not cancel, and hide, the other's result.
+      fail-fast: false
       matrix:
         include:
           - wp-version: '6.5.0' # Oldest supported.

@@ -48,6 +48,10 @@ function violationParam(violation?: string) {
   return violation ? `gq_violate=${violation}` : '';
 }
 
+// WooCommerce stamps the Store API nonce with the current second, URL-encoded in the
+// mini-cart's dependency data. Two requests a second apart differ there with or without Support.
+const withoutClock = (html: string) => html.replace(/(wcStoreApiNonceTimestamp(?:%3A%20%27|:\s*'))\d+/g, '$1<time>');
+
 /** B1: what one anonymous public request costs the plugin: HTML that differs from a plugin-off request, and its SQL, HTTP and cron. */
 async function publicCost(page: Page, violation?: string) {
   const fetchPage = async (flags: string) => {
@@ -55,7 +59,7 @@ async function publicCost(page: Page, violation?: string) {
     expect(response.ok()).toBe(true);
     const counters = JSON.parse(response.headers()['x-gq-probe'] ?? 'null');
     expect(counters, 'the probe reported no counters').not.toBeNull();
-    return { html: await response.text(), counters };
+    return { html: withoutClock(await response.text()), counters };
   };
   // Finish third-party first-request setup (WooCommerce's Jetpack cron registration)
   // with Support disabled. The comparison still measures Support's first enabled request.

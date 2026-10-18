@@ -7,7 +7,9 @@
 
 $gq_support_user_id = (int) $args[0];
 wp_set_current_user( $gq_support_user_id );
-$gq_support_token            = WP_Session_Tokens::get_instance( $gq_support_user_id )->create( time() + HOUR_IN_SECONDS );
+// The parent creates the session: two processes creating one each lose a token to
+// WordPress's read-modify-write of the user's session metadata.
+$gq_support_token            = $args[1];
 $_COOKIE[ LOGGED_IN_COOKIE ] = wp_generate_auth_cookie( $gq_support_user_id, time() + HOUR_IN_SECONDS, 'logged_in', $gq_support_token );
 // Make overlapping first-use initialization deterministic, without mocking identity storage.
 add_filter(
