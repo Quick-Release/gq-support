@@ -87,8 +87,9 @@ Rules:
 
 - A retry after a known failed delivery uses a new Submission ID and `supersedes_id` naming that failed request. Acceptance atomically hides the predecessor from lists; it remains readable by its owner. Missing, out-of-scope, already replaced, and non-failed targets all return the same sanitized 404. Same-key reconciliation includes the frozen predecessor reference; changing or removing it returns 409.
 - Success is never inferred from `blocking => false`, from a transport return without a parseable body, or from a 2xx without a valid resource.
-- **Re-POSTing with the same Submission ID is the reconciliation path.** The Worker either finds the existing intent or creates it exactly once. "Checking…" retries the same key automatically, at most 3 times with backoff and only while the panel is open, and then offers a "Check again" button. It never sends the report as a new issue (ADR 0003, ADR 0006).
+- **Re-POSTing with the same Submission ID is the reconciliation path for ambiguous transport completion.** The Worker either finds the existing intent or creates it exactly once. "Checking…" retries the same key and frozen payload automatically, at most 3 times with 1/2/4-second minimum backoff (respecting `Retry-After`) and only while the panel is open, and then offers a "Check again" button. Closing/reopening, focus and visibility changes never reset that budget. It never sends the report as a new issue (ADR 0003, ADR 0006).
 - [The delivery decision](support-delivery-design.md) selects durable intake: new requests return `202` immediately after the atomic D1 acceptance. Delivery happens in background; a same-key replay returns `201` if already delivered and `202` for other recorded outcomes, with the current `delivery` field. A known resource with `delivery: outcome-unknown` is distinct from an ambiguous transport response (`504`).
+- A valid `outcome-unknown` resource ends acceptance reconciliation: show "Delivery needs review" and use manual GET refresh for that resource. Never offer a new creation intent for it. A later rejection of a reconciliation attempt (including 409) does not prove an earlier uncertain attempt failed. Preserve the original key and frozen payload and require safe reconciliation or Operator review before any replacement; the ordinary new-key conflict rule above applies only once prior ambiguity is resolved. See the [outage and draft-recovery decision](research/outage-draft-recovery.md) for navigation loss, authentication boundaries and recovery tests.
 
 ## Error catalogue
 
@@ -105,6 +106,7 @@ Every error is a `WP_Error` whose `data` is `{ status, correlation_id, retryable
 | 426 | `gq_support_plugin_outdated` | Worker no longer supports this plugin version | "Support needs a plugin update" |
 | 429 | `gq_support_rate_limited` + `Retry-After` | Per-subject or per-installation limit | "Too many requests, try again later" |
 | 503 | `gq_support_not_configured` | No connection, or the Worker rejected the installation credential | "Support is unavailable"; operator sees detail on the setup page |
+| 503 | `gq_support_disabled` | Local support fail-safe enabled; no service call | "Support is temporarily disabled" + independent contact; `retryable: false` |
 | 503 | `gq_support_not_accepted` | Create: the Worker could not durably record | "Not sent" + Try again (same key) |
 | 503 | `gq_support_unavailable` | Read: Worker down, timed out, or ambiguous | "Couldn't load. Refresh to try again." |
 | 504 | `gq_support_outcome_unknown` | Create: timeout or ambiguous response | "Checking…" |

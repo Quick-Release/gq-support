@@ -89,14 +89,15 @@ Decided in #13.
 | State | Reporter sees |
 |---|---|
 | Submitting | "Sending…", with the submit button disabled |
-| `accepted-pending` | "Received", with the hint "Our team will see it shortly" |
+| `accepted-pending` | "Received", with the hint "Delivery is pending"; no promised delivery time |
 | `delivered`, issue open or closed | "Open" or "Closed" |
 | `failed` or `locally-unsent` | "Not sent", with **Try again** and the draft restored |
-| `outcome-unknown` | "Checking…", with no resubmit while the service reconciles |
+| `outcome-unknown` | "Delivery needs review", with manual status refresh and no resubmit while the service reconciles |
 | REST 401/403 or expired login | "Your session expired. Reload the page to continue." The draft is kept. |
 | Empty list | "No requests yet", with a link to New report |
 
 - **Drafts** live in memory only. They survive closing and reopening the panel and failed sends, and are lost on reload or navigation. With an unsent draft, the closed launcher shows a small indicator. No browser storage is used.
+- **Outages and recovery.** The [outage and draft-recovery decision](research/outage-draft-recovery.md) defines the delivery promise, failure matrix, independent help route and fail-safe requirements. An ambiguous transport response shows "Checking…" and permits bounded same-key reconciliation; a valid receipt with `delivery: outcome-unknown` is already recorded and needs review, not a new submission. Copy an unsent draft before reloading. A changed account/session clears it; never replay a write after reauthentication. Browser persistence and a local WordPress outbox are deferred.
 - **Refresh.** The list loads the first time My requests is shown in a page session and when the Reporter presses refresh. Closing and reopening the panel does not refetch; a successful submit adds the new item from the create response. There is no polling, and no work runs while the panel is closed.
 - **Accessibility.** The launcher is a `<button>` with `aria-expanded`. The panel is a non-modal dialog so the admin screen stays usable while the Reporter writes. Focus moves to the first field on open and returns to the launcher on close, and Escape closes the panel. Status changes and errors are announced through `wp.a11y.speak`. The panel respects `prefers-reduced-motion`, meets WCAG AA contrast in every admin colour scheme, and becomes a full-width sheet below the 782px admin breakpoint.
 - **Translations.** All strings go through `@wordpress/i18n` in the `gq-support` text domain, with `_n()` plurals and dates in the site timezone. RTL uses the generated `index-rtl.css`. A pt_PT smoke test runs in DDEV.
