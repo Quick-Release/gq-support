@@ -34,13 +34,13 @@ const enrollmentCode = (): string => {
 export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now });
-  if (["erase", "erasure-status", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
+  if (["erase", "erasure-status", "erasure-close", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
     return runCleanupOperator(args, { query, recordRevocation, mappings, now });
   }
   if (args[0]?.startsWith("status-")) return runStatusOperation(args, { query, recordRevocation, mappings, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, cleanup-reconcile, cleanup-exception, offboard and status-<health|reconcile|repair>");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard and status-<health|reconcile|repair>");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

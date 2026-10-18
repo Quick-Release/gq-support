@@ -22,7 +22,7 @@ export const scheduledTick = (options: ScheduledOptions): Effect.Effect<void, ne
     Effect.timeoutOption(25_000),
     Effect.catchCause(() => Effect.logError("Support delivery sweep failed")),
   );
-  yield* sweepCleanup({ db: options.db, botLogin: options.botLogin, digestKey: options.digestKey ?? null,
+  yield* sweepCleanup({ db: options.db, botLogin: options.botLogin, mappings: options.mappings, digestKey: options.digestKey ?? null,
     ...(options.now ? { now: options.now } : {}) }).pipe(
     Effect.timeoutOption(5_000),
     Effect.catchCause(() => Effect.logError("Support cleanup sweep failed")),

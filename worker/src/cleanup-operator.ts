@@ -1,12 +1,13 @@
-import { ERASABLE, erasureStatements, erasureStatus, OFFBOARDING_GRACE_MS, type Statement } from "./cleanup.ts";
+import { ERASABLE, erasureStatements, erasureStatus, OFFBOARDING_GRACE_MS, OPEN_ERASURE, type Statement } from "./cleanup.ts";
 import type { OperatorOptions } from "./operator.ts";
 import { mappingFor } from "./repository-mappings.ts";
-import { sha256 } from "./signature.ts";
+import { reporterReference } from "./support-issues.ts";
 import { ulid } from "./support-requests.ts";
 
 const ACTOR = /^[A-Za-z0-9_-]{1,64}$/;
 const REQUEST = /^req_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USAGE = "Usage: operator erase <slot> <opaque-actor> <reporter-reference>; operator erasure-status <erasure>; " +
+  "operator erasure-close <erasure> <opaque-actor>; " +
   "operator cleanup-reconcile <request> <opaque-actor> positive-evidence; " +
   "operator cleanup-exception <request> <opaque-actor> <client-instructed|operator-verified>; operator offboard <slot> <opaque-actor>";
 
@@ -34,14 +35,25 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
     // The reference on the GitHub issue: a short hash of the Slot and Reporter subject.
     const rows = (await query(ERASABLE, [slot])) as { id: string; title: string; reporter_subject: string; intent_id: string }[];
     const matched = [];
-    for (const row of rows) if (`rs_${(await sha256(JSON.stringify([slot, row.reporter_subject]))).slice(0, 32)}` === reason) matched.push(row);
-    const subject = matched[0]?.reporter_subject;
-    if (!subject) throw new Error("No Support requests match that reporter reference");
-    const id = `era_${ulid(now)}`;
+    for (const row of rows) if (await reporterReference(slot, row.reporter_subject) === reason) matched.push(row);
+    // With no request left, the reference search still finds the Reporter's older issues.
+    const subject = matched[0]?.reporter_subject ?? "";
+    const [open] = await query(OPEN_ERASURE, [slot, reason!]) as { id: string }[];
+    const id = open?.id ?? `era_${ulid(now)}`;
     await audit("erase", id, "operator-request");
     // The CLI holds no digest key: the Worker's next pass purges the text and keeps the digest.
-    await run(erasureStatements(id, slot, subject, matched.map((row) => ({ requestId: row.id, titleDigest: null })), now));
+    await run(erasureStatements(id, slot, subject, reason!, matched.map((row) => ({ requestId: row.id, titleDigest: null })), now, false));
     return id;
+  }
+  if (command === "erasure-close" && args.length === 3) {
+    const status = await erasureStatus(query, reference!);
+    if (!status || status.state === "in_progress" || status.state === "closed") throw new Error("Only a finished, open erasure can be closed");
+    if (!await audit("close", reference!, status.state, "EXISTS (SELECT 1 FROM erasure WHERE id = ? AND closed_at IS NULL)", [reference!])) {
+      throw new Error("Only a finished, open erasure can be closed");
+    }
+    // The reference is needed only while the erasure is open.
+    await query("UPDATE erasure SET closed_at = ?, reporter_reference = NULL WHERE id = ? AND closed_at IS NULL", [now, reference!]);
+    return "Erasure closed";
   }
   if (command === "offboard" && args.length === 3) {
     const slot = reference!;

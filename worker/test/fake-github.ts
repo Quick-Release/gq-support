@@ -37,6 +37,8 @@ export interface FakeIssue {
   assignees: { login: string }[];
   repositoryId: number;
   comments?: number;
+  /** Not yet in the search index. */
+  hidden?: boolean;
   pull_request?: { url: string };
   deleted?: boolean;
   movedTo?: string;
@@ -89,7 +91,7 @@ export const makeFakeGitHub = () => {
     has_issues: repository.hasIssues,
   });
   const issueJson = (issue: FakeIssue) => {
-    const { repositoryId: _r, deleted: _d, movedTo: _m, ...rest } = issue;
+    const { repositoryId: _r, deleted: _d, movedTo: _m, hidden: _h, ...rest } = issue;
     return rest;
   };
 
@@ -142,6 +144,19 @@ export const makeFakeGitHub = () => {
     const header = request.headers.get("authorization") ?? "";
     const token = tokens.get(header.startsWith("Bearer ") ? header.slice(7) : "");
     if (!token || token.expiresAt <= now) return message(401, "Bad credentials");
+    if (path === "/search/issues" && request.method === "GET") {
+      // Supports repo:, is:issue, author:app/<slug>, in:body and one quoted phrase.
+      const q = request.query.get("q") ?? "";
+      const [owner, name] = (/\brepo:([^\s/]+)\/(\S+)/.exec(q) ?? []).slice(1);
+      const searched = owner && name ? repositoryAt(owner, name) : undefined;
+      if (!searched || !token.repositoryIds.includes(searched.id)) return json({ message: "Validation Failed" }, 422);
+      const phrase = /"([^"]+)"/.exec(q)?.[1] ?? "";
+      const author = /\bauthor:app\/(\S+)/.exec(q)?.[1];
+      const found = issues.filter((issue) => issue.repositoryId === searched.id && !issue.deleted && !issue.hidden &&
+        (!author || issue.user.login === `${author}[bot]`) && (issue.body ?? "").includes(phrase));
+      const perPage = Number(request.query.get("per_page") ?? 30);
+      return json({ total_count: found.length, incomplete_results: false, items: found.slice(0, perPage).map(issueJson) });
+    }
     const match = path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
     const repository = match && repositoryAt(match[1]!, match[2]!);
     if (!match || !repository || !token.repositoryIds.includes(repository.id) ||

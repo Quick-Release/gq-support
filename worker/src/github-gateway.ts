@@ -251,6 +251,13 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
    * same PATCH can be repeated, so a missing response is ProviderUnavailable.
    */
   readonly updateIssue: (target: GitHubTarget, number: number, change: IssueChange, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<GitHubIssue, RepairIssueError | OutcomeUnknown>;
+  /**
+   * The first page of issues in the target repository matching `terms`
+   * (GitHub search syntax, without a `repo:` qualifier). Search is eventually
+   * consistent: a missing issue proves nothing. `incomplete` when more exist.
+   */
+  readonly searchIssues: (target: GitHubTarget, terms: string) =>
+    Effect.Effect<{ readonly issues: readonly GitHubIssue[]; readonly incomplete: boolean }, GatewayError | ValidationRejected>;
 }>()("GitHubGateway") {
   /** The gateway over Workers fetch. Redirects are never followed. */
   static readonly live = (config: GitHubAppConfig) => GitHubGateway.layer(config).pipe(
@@ -525,6 +532,20 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       return yield* Effect.fail(failure(status, headers, body, now));
     });
 
+  const searchIssues = (target: GitHubTarget, terms: string) => idempotentCall(target, (repository) =>
+    HttpClientRequest.get(`${API}/search/issues`).pipe(HttpClientRequest.setUrlParams({
+      q: `repo:${repository.slice(`${API}/repos/`.length)} is:issue ${terms}`, per_page: String(PER_PAGE),
+    })),
+  ).pipe(Effect.flatMap(({ status, headers, body, now }): Effect.Effect<{ issues: GitHubIssue[]; incomplete: boolean }, GatewayError | ValidationRejected> => {
+    if (status === 422) return Effect.fail(new ValidationRejected({ status, fields: ["q"] }));
+    if (status !== 200) return Effect.fail(failure(status, headers, body, now));
+    const items = isRecord(body) && Array.isArray(body.items) ? body.items : undefined;
+    const issues = items?.filter((item) => !(isRecord(item) && "pull_request" in item)).map(issueFrom);
+    if (!issues || issues.some((issue) => issue === undefined) || !isRecord(body)) return Effect.fail(new ProviderUnavailable({ status }));
+    return Effect.succeed({ issues: issues as GitHubIssue[],
+      incomplete: body.incomplete_results !== false || typeof body.total_count !== "number" || body.total_count > items!.length });
+  }));
+
   /** Logs the failure's tag and safe fields only: no URL, header, body or credential. */
   const logged = <Args extends unknown[], A, E extends { readonly _tag: string }>(
     operation: string,
@@ -553,6 +574,7 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       repair(target, number, "assignees", assignees, authorize)),
     listIssuesSince: logged("listIssuesSince", listIssuesSince),
     updateIssue: logged("updateIssue", updateIssue),
+    searchIssues: logged("searchIssues", searchIssues),
   };
 });
 
