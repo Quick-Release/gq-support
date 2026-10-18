@@ -142,7 +142,15 @@ export const runProbe = async (command: string, options: { transitions?: number;
     }
     // Observing must never write to GitHub: no App events or comments after the Developer's first change.
     const issue = `repos/${SANDBOX}/issues/${state.issueNumber}`;
-    const pages = <A>(path: string) => (deps.gh(["api", "--paginate", "--slurp", `${path}?per_page=100`]) as A[][]).flat();
+    // Page by page: `gh api --paginate --slurp` needs gh 2.48 or later, and plain `--paginate` prints one array per page.
+    const pages = <A>(path: string) => {
+      const items: A[] = [];
+      for (let page = 1; ; page += 1) {
+        const batch = deps.gh(["api", `${path}?per_page=100&page=${page}`]) as A[];
+        items.push(...batch);
+        if (batch.length < 100) return items;
+      }
+    };
     const events = pages<{ actor: { login: string } | null; created_at: string }>(`${issue}/events`);
     const comments = pages<{ user: { login: string } | null }>(`${issue}/comments`);
     // GitHub reports whole seconds: compare instants, floored to the second the measurement started in.
