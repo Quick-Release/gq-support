@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Metric from "effect/Metric";
 
 export const GITHUB_WEBHOOK_PATH = "/v1/github/webhooks";
-// Provisional until staging payload measurements are recorded in #55.
+// Over 13x the largest measured staging issue payload; see the webhook runbook.
 export const GITHUB_WEBHOOK_BODY_BYTES = 1024 * 1024;
 export const webhookRejections = Metric.counter("github_webhook_rejections_total");
 

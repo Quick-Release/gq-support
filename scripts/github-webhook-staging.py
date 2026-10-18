@@ -96,6 +96,9 @@ def main():
         rows = {row["id"]: row for row in state["deliveries"]}
         rows.update({row["id"]: row for row in evidence["deliveries"]})
         state["deliveries"] = list(rows.values())
+        if not state.get("baseline") and not state.get("rotate"):
+            state["baseline"] = next((row for row in state["deliveries"]
+                                      if row["event"] == "issues" and row["status"] == 204 and row["bytes"]), None)
         save()
         print(f"Collected {len(evidence['deliveries'])} delivery observations", flush=True)
 
@@ -166,12 +169,14 @@ def main():
         require("rotate")
         if not state.get("baseline"):
             raise RuntimeError("baseline delivery missing; collect a verified pre-rotation delivery first")
+        prior_ids = {row["id"] for row in state["deliveries"]}
         workflow("redeliver", state["baseline"]["id"])
         collect()
-        matches = [row for row in state["deliveries"] if row["redelivery"] and row["guid"] == state["baseline"]["guid"] and row["key"]]
+        matches = [row for row in state["deliveries"] if row["id"] not in prior_ids and row["redelivery"]
+                   and row["guid"] == state["baseline"]["guid"] and row["status"] in [204, 401]]
         if not matches:
             raise RuntimeError("redelivery is asynchronous; run redeliver again after inspecting delivery state")
-        state["rotation_redelivery"] = matches[-1]
+        state["post_retirement_redelivery" if state.get("retire") else "rotation_redelivery"] = matches[0]
         save()
     elif args.phase == "retire":
         require("rotation_redelivery")
@@ -184,6 +189,7 @@ def main():
         save()
     elif args.phase == "finish":
         require("retire")
+        require("post_retirement_redelivery")
         collect()
         for event in ["issues", "installation"]:
             if not any(row["event"] == event and row["status"] == 204 and row["bytes"] for row in state["deliveries"]):
@@ -202,6 +208,7 @@ def main():
                 maxima[row["event"]] = max(maxima.get(row["event"], 0), row["bytes"])
         print(json.dumps({"completed": [key for key in ["setup", "exercise", "rotate", "rotation_redelivery", "retire", "finish"] if state.get(key)],
                           "largest_raw_bytes": maxima, "redelivery": state.get("rotation_redelivery"),
+                          "post_retirement_redelivery": state.get("post_retirement_redelivery"),
                           "retired_probe": state.get("retired_probe"), "runs": state["runs"]}, indent=2))
     print(f"Sanitized progress: {path}", flush=True)
 

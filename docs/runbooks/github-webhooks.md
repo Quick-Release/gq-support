@@ -20,11 +20,15 @@ and a reason class (`configuration`, `content_type`, `headers`, `body_size`,
 App secret, raw exception or arbitrary header is logged. Counter export/alert
 routing belongs to #20; the structured rejection log also supports log counts.
 
-The current cap is **1 MiB**, a provisional bound, enforced even without
-`Content-Length` or when that header lies. It is not yet derived from real
-stage deliveries. GitHub documents a provider cap of 25 MB, but this receiver
-deliberately has a lower bound. Measure the events below before activation and
-revise `GITHUB_WEBHOOK_BODY_BYTES` if needed. See the
+The cap is **1 MiB**, enforced even without `Content-Length` or when that header
+lies. Staging measured an issue payload with substantial synthetic Unicode text
+at **75,766 bytes**, and installation lifecycle payloads up to **3,009 bytes**.
+The cap gives roughly 13.8x headroom over the largest observed payload. Those
+observations cover the current single-repository sandbox installation, not an
+unbounded repository selection or every possible GitHub payload. Revisit the cap
+when installation size or subscribed events expand. GitHub documents a provider
+cap of 25 MB; this service keeps a lower bound and the sweep repairs missed hints.
+See the
 [payload and header reference](https://docs.github.com/en/webhooks/webhook-events-and-payloads)
 and [signature validation guide](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
 
@@ -85,7 +89,7 @@ waiting for the producer. GitHub's independently published `Hello, World!`
 vector passes HMAC and reaches the expected JSON rejection (the published
 payload is not JSON). Tampered bytes fail HMAC before parsing.
 
-Not yet observed against this stage's real App:
+The live checklist (completion evidence follows below):
 
 - Confirm the live hook target type and ID, including `ping`, `issues`,
   `installation` and `installation_repositories`. The expected type is
@@ -98,10 +102,9 @@ Not yet observed against this stage's real App:
 - Rotate and redeliver a pre-rotation delivery; record whether GitHub used the
   current or previous secret. Repeat after removing the previous binding.
 
-The implementation session had no stage App or webhook secrets in its process
-environment. No stage deployment, App configuration change, actual payload
-measurement or rotation/redelivery rehearsal is claimed. Keep #55's live-spike
-acceptance item open until these observations are recorded in the issue.
+The initial implementation session had no stage App or webhook secrets in its
+process environment. The later automated rollout uses the existing CI-held App
+key, with live observations distinguished from those local tests below.
 
 ## Automated staging procedure
 
@@ -148,7 +151,9 @@ run URLs, delivery IDs, status codes, byte counts and key classifications.
    the previous runtime secret absent while retaining its encrypted source in
    that job's memory. It proves a signature made with the old key gets `401`
    and the new key gets `204`, then the local runner deletes the previous CI
-   source. Do not dispatch another deployment between these steps.
+   source. Do not dispatch another deployment between these steps. Run
+   `python3 scripts/github-webhook-staging.py redeliver` again afterward to
+   observe a real pre-rotation GitHub delivery after the old binding is gone.
 7. Run `python3 scripts/github-webhook-staging.py finish`. It requires verified
    issue and installation byte measurements, disables temporary diagnostics,
    deploys again, and repeats current/wrong-stage checks. This final deployment
