@@ -5,6 +5,8 @@ import { runCleanupOperator } from "./cleanup-operator.ts";
 import { unsuspendRepository } from "./repository-suspension.ts";
 import { sha256 } from "./signature.ts";
 import { runStatusOperation } from "./status-operations.ts";
+import { ledgerStore } from "./ledger.ts";
+import type { QueryDatabase } from "./storage.ts";
 
 export type CredentialDatabase = Pick<D1Database, "prepare" | "batch">;
 export interface OperatorOptions {
@@ -12,7 +14,23 @@ export interface OperatorOptions {
   readonly recordRevocation: (keyId: string, revokedAt: number) => Promise<void>;
   readonly mappings: readonly RepositoryMapping[];
   readonly now?: number;
+  /** The suppression ledger database (src/ledger.ts), queried like `query`. */
+  readonly ledger?: OperatorOptions["query"];
 }
+
+/** A one-statement-at-a-time D1 view of an Operator query function, for shared store code. */
+export const asQueryDatabase = (query: OperatorOptions["query"]): QueryDatabase => {
+  const prepare = (sql: string) => ({ bind: (...parameters: (string | number)[]) => ({
+    all: async () => ({ results: await query(sql, parameters) }),
+    first: async (column?: string) => { const [row] = await query(sql, parameters); return row ? (column ? row[column] : row) : null; },
+    run: async () => { await query(sql, parameters); return { meta: {} }; },
+  }) });
+  return { prepare, batch: async (statements: { run: () => Promise<unknown> }[]) => {
+    const results = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
+  } } as unknown as QueryDatabase;
+};
 
 /** 128 random bits, RFC 4648 base32, with no padding. */
 const enrollmentCode = (): string => {
@@ -31,11 +49,11 @@ const enrollmentCode = (): string => {
 };
 
 /** The operator command boundary; Cloudflare authentication belongs to the CLI adapter. */
-export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
+export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now(), ledger }: OperatorOptions): Promise<string> => {
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
-  if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now });
-  if (["erase", "erasure-status", "erasure-close", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
-    return runCleanupOperator(args, { query, recordRevocation, mappings, now });
+  if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
+  if (["erase", "erasure-status", "erasure-close", "restore-recorded", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
+    return runCleanupOperator(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   }
   if (args[0]?.startsWith("status-")) return runStatusOperation(args, { query, recordRevocation, mappings, now });
   const [command, slot] = args;

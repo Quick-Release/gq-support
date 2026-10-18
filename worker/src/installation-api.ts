@@ -2,7 +2,7 @@ import revocations from "../revocations.json";
 import type { CredentialDatabase } from "./operator.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256, verifySignature } from "./signature.ts";
-import { createStorageFor } from "./storage.ts";
+import { createStorageFor, type QueryDatabase } from "./storage.ts";
 import { CREATE_BODY_BYTES, handleExport, handleSupportRequests } from "./support-requests.ts";
 import { handleErasures } from "./erasure-api.ts";
 
@@ -85,6 +85,8 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
 export interface InstallationApiOptions {
   /** The title-digest key for erasures (src/cleanup.ts); without it, redacted titles need review. */
   readonly digestKey?: CryptoKey | null;
+  /** The suppression ledger (src/ledger.ts); erasures are recorded there first. */
+  readonly ledger?: QueryDatabase | null;
 }
 
 /** Public HTTP boundary, shared by the Alchemy adapter and local D1 integration tests. */
@@ -149,7 +151,10 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
     const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
     // Privacy rights still apply to a Suspended mapping.
-    if (erasures) return await handleErasures(request, url, body, db, storageFor(key.slot), options.digestKey ?? null, now);
+    if (erasures) {
+      return await handleErasures(request, url, body, db, storageFor(key.slot),
+        { digestKey: options.digestKey ?? null, ledger: options.ledger ?? null }, now);
+    }
     if (exported) return await handleExport(storageFor(key.slot), url, body, now);
     if (requests) {
       return await handleSupportRequests(request, url, body, storageFor(key.slot),

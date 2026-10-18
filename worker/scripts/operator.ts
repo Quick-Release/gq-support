@@ -7,41 +7,45 @@ import { parseArgs } from "node:util";
 import { runOperator } from "../src/operator.ts";
 import { repositoryMappings } from "../src/repository-mappings.ts";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|cleanup-reconcile|cleanup-exception|offboard> <slot> [...] --account-id <id> --database-id <id>";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard> <slot> [...] --account-id <id> --database-id <id> [--ledger-database-id <id>]";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
 try {
   const { positionals, values } = parseArgs({ allowPositionals: true, options: {
-    "account-id": { type: "string" }, "database-id": { type: "string" },
+    "account-id": { type: "string" }, "database-id": { type: "string" }, "ledger-database-id": { type: "string" },
   } });
-  const accountId = values["account-id"], databaseId = values["database-id"];
-  if (!accountId || !/^[a-f0-9]{32}$/i.test(accountId) || !databaseId || !/^[a-f0-9-]{36}$/i.test(databaseId)) throw new Error(usage);
+  const accountId = values["account-id"], databaseId = values["database-id"], ledgerId = values["ledger-database-id"];
+  if (!accountId || !/^[a-f0-9]{32}$/i.test(accountId) || !databaseId || !/^[a-f0-9-]{36}$/i.test(databaseId) ||
+    (ledgerId !== undefined && !/^[a-f0-9-]{36}$/i.test(ledgerId))) throw new Error(usage);
   const config = join(directory, "wrangler.json");
-  writeFileSync(config, JSON.stringify({ account_id: accountId, d1_databases: [{
-    binding: "SupportDB", database_name: "operator-target", database_id: databaseId,
-  }] }), { mode: 0o600 });
+  writeFileSync(config, JSON.stringify({ account_id: accountId, d1_databases: [
+    { binding: "SupportDB", database_name: "operator-target", database_id: databaseId },
+    ...(ledgerId ? [{ binding: "SupportLedger", database_name: "operator-ledger", database_id: ledgerId }] : []),
+  ] }), { mode: 0o600 });
   if (positionals[0] === "revoke") lockFd = openSync(lock, "wx", 0o600);
+  const d1 = (binding: string) => async (sql: string, parameters: readonly (string | number | null)[]) => {
+    // Wrangler's query interface has no parameter binding. Escape SQL literals.
+    // The only code value here is its hash; plaintext codes never enter Wrangler.
+    let index = 0;
+    const statement = sql.replace(/\?/g, () => {
+      const value = parameters[index++];
+      if (value === undefined) throw new Error("Missing SQL parameter");
+      return value === null ? "NULL" : typeof value === "number" ? String(value) : `'${value.replaceAll("'", "''")}'`;
+    });
+    const result = spawnSync(process.execPath, [
+      new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url).pathname,
+      "d1", "execute", binding, "--config", config, "--remote", "--json", "--command", statement,
+    ], { encoding: "utf8", timeout: 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
+    if (result.status !== 0) throw new Error("Cloudflare D1 command failed. Check the target IDs and your Wrangler login/credentials.");
+    const results: { success: boolean; results: Record<string, unknown>[] }[] = JSON.parse(result.stdout);
+    if (results.length !== 1 || results[0].success !== true || !Array.isArray(results[0].results)) throw new Error("Unexpected Cloudflare D1 response");
+    return results[0].results;
+  };
   const output = await runOperator(positionals, {
     mappings: repositoryMappings,
-    query: async (sql, parameters) => {
-      // Wrangler's query interface has no parameter binding. Escape SQL literals.
-      // The only code value here is its hash; plaintext codes never enter Wrangler.
-      let index = 0;
-      const statement = sql.replace(/\?/g, () => {
-        const value = parameters[index++];
-        if (value === undefined) throw new Error("Missing SQL parameter");
-        return typeof value === "number" ? String(value) : `'${value.replaceAll("'", "''")}'`;
-      });
-      const result = spawnSync(process.execPath, [
-        new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url).pathname,
-        "d1", "execute", "SupportDB", "--config", config, "--remote", "--json", "--command", statement,
-      ], { encoding: "utf8", timeout: 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
-      if (result.status !== 0) throw new Error("Cloudflare D1 command failed. Check the target IDs and your Wrangler login/credentials.");
-      const results: { success: boolean; results: Record<string, unknown>[] }[] = JSON.parse(result.stdout);
-      if (results.length !== 1 || results[0].success !== true || !Array.isArray(results[0].results)) throw new Error("Unexpected Cloudflare D1 response");
-      return results[0].results;
-    },
+    query: d1("SupportDB"),
+    ...(ledgerId ? { ledger: d1("SupportLedger") } : {}),
     recordRevocation: async (keyId, revokedAt) => {
       const log = new URL("../revocations.json", import.meta.url);
       const records: { databaseId: string; keyId: string; revokedAt: number }[] = JSON.parse(readFileSync(log, "utf8"));

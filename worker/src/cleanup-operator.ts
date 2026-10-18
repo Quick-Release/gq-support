@@ -1,5 +1,6 @@
-import { ERASABLE, erasureStatements, erasureStatus, OFFBOARDING_GRACE_MS, OPEN_ERASURE, type Statement } from "./cleanup.ts";
-import type { OperatorOptions } from "./operator.ts";
+import { ERASABLE, erasureImages, erasureStatements, erasureStatus, OFFBOARDING_GRACE_MS, OPEN_ERASURE, type Statement } from "./cleanup.ts";
+import { imageOf, ledgerStore } from "./ledger.ts";
+import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
 import { mappingFor } from "./repository-mappings.ts";
 import { reporterReference } from "./support-issues.ts";
 import { ulid } from "./support-requests.ts";
@@ -7,7 +8,7 @@ import { ulid } from "./support-requests.ts";
 const ACTOR = /^[A-Za-z0-9_-]{1,64}$/;
 const REQUEST = /^req_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USAGE = "Usage: operator erase <slot> <opaque-actor> <reporter-reference>; operator erasure-status <erasure>; " +
-  "operator erasure-close <erasure> <opaque-actor>; " +
+  "operator erasure-close <erasure> <opaque-actor>; operator restore-recorded <opaque-actor> <time-travel-restore>; " +
   "operator cleanup-reconcile <request> <opaque-actor> positive-evidence; " +
   "operator cleanup-exception <request> <opaque-actor> <client-instructed|operator-verified>; operator offboard <slot> <opaque-actor>";
 
@@ -16,7 +17,7 @@ const USAGE = "Usage: operator erase <slot> <opaque-actor> <reporter-reference>;
  * authorize this boundary; no HTTP route calls it. Every mutation writes its
  * audit row first, and reasons come from a fixed list, never free text.
  */
-export const runCleanupOperator = async (args: readonly string[], { query, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
+export const runCleanupOperator = async (args: readonly string[], { query, mappings, now = Date.now(), ledger: ledgerQuery }: OperatorOptions): Promise<string> => {
   // Every command reads <target> <opaque-actor> [qualifier].
   const [command, reference, actor, reason] = args;
   const run = async (statements: readonly Statement[]) => { for (const [sql, parameters] of statements) await query(sql, parameters as (string | number)[]); };
@@ -27,6 +28,19 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
     const status = await erasureStatus(query, reference!);
     if (!status) throw new Error("Unknown erasure");
     return JSON.stringify(status);
+  }
+  // Recording paths write the ledger first; without it a restore could revive what they suppress.
+  const ledger = () => {
+    if (!ledgerQuery) throw new Error("The suppression ledger database is required for this command");
+    return ledgerStore(asQueryDatabase(ledgerQuery));
+  };
+  if (command === "restore-recorded" && args.length === 3 && ACTOR.test(reference ?? "") && actor === "time-travel-restore") {
+    ledger();
+    // Every Worker replays the ledger into the restored database before serving traffic or sweeping again.
+    await ledgerQuery!(`INSERT INTO ledger_audit (id, actor, action, reason, occurred_at) VALUES (?, ?, 'restore', ?, ?)`,
+      [crypto.randomUUID(), reference!, actor, now]);
+    await ledgerQuery!("UPDATE ledger_epoch SET epoch = epoch + 1, recorded_at = ? WHERE id = 1", [now]);
+    return "Restore recorded; Workers replay the ledger before serving traffic";
   }
   if (!ACTOR.test(actor ?? "")) throw new Error(USAGE);
   if (command === "erase" && args.length === 4) {
@@ -40,9 +54,11 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
     const subject = matched[0]?.reporter_subject ?? "";
     const [open] = await query(OPEN_ERASURE, [slot, reason!]) as { id: string }[];
     const id = open?.id ?? `era_${ulid(now)}`;
+    const targets = matched.map((row) => ({ requestId: row.id, titleDigest: null }));
+    await ledger().record(erasureImages(id, slot, reason!, targets, now, !open), now);
     await audit("erase", id, "operator-request");
     // The CLI holds no digest key: the Worker's next pass purges the text and keeps the digest.
-    await run(erasureStatements(id, slot, subject, reason!, matched.map((row) => ({ requestId: row.id, titleDigest: null })), now, false));
+    await run(erasureStatements(id, slot, subject, reason!, targets, now, false));
     return id;
   }
   if (command === "erasure-close" && args.length === 3) {
@@ -58,6 +74,8 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
   if (command === "offboard" && args.length === 3) {
     const slot = reference!;
     if (!mappingFor(mappings, slot)) throw new Error("Unknown Slot");
+    await ledger().record([imageOf("suppression", { scope: "slot", reference: slot, reason: "offboarding" }),
+      imageOf("offboarding", { slot, recorded_at: now, purge_after: now + OFFBOARDING_GRACE_MS })], now);
     await audit("offboard", slot, "offboarding");
     // Suppression first: no new create from the moment the Slot is offboarded.
     await query(`INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('slot', ?, 'offboarding') ON CONFLICT DO NOTHING`, [slot]);

@@ -84,9 +84,32 @@ active suspensions. `status-reconcile` makes every mapped or tracked repository'
 next sweep list from the outage start. `status-repair` refuses until the backlog
 is drained and every sweep is current, and acknowledges the suspensions it records.
 
-The full restore gate, including runtime rotation/self-revocation history,
-restore epochs and suppression replay, remains rollout work in #20; this CLI
-ledger alone is not evidence that a restored database is safe to serve traffic.
+### Suppression ledger and restores
+
+`SupportLedger` is a second D1 per stage that a restore of `SupportDB` never
+rewinds (ADR 0016, `src/ledger.ts`). It keeps the current image of every
+suppression, erasure, cleanup record, offboarding and repository suspension,
+without report text. Erasure and offboarding write it first; each minute's
+cleanup pass mirrors the rest. Commands that suppress or record an erasure need
+`--ledger-database-id <ledger-database-id>` (the stack outputs it):
+
+```sh
+pnpm operator erase shop/production <opaque-actor> <rs_reference> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator offboard shop/production <opaque-actor> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+```
+
+After a Time Travel restore of `SupportDB`, record it before anything else:
+
+```sh
+pnpm operator restore-recorded <opaque-actor> time-travel-restore --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+```
+
+Each Worker then answers `503` and skips its sweeps until it has replayed the
+ledger: suppressions, erasures and cleanup records come back, restored rows
+under cleanup lose their text, suspensions are reapplied (never lifted) and
+every request that is not delivered becomes `outcome-unknown`, reconciled by
+its marker. Runtime key rotation/self-revocation history remains rollout work
+in #20.
 
 ## HTTP behavior
 

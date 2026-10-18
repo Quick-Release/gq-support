@@ -5,9 +5,10 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
 export const MIGRATIONS_DIR = join(import.meta.dirname, "..", "migrations");
+export const LEDGER_MIGRATIONS_DIR = join(import.meta.dirname, "..", "ledger-migrations");
 
-export const migrationFiles = (): string[] =>
-  readdirSync(MIGRATIONS_DIR)
+export const migrationFiles = (directory = MIGRATIONS_DIR): string[] =>
+  readdirSync(directory)
     .filter((file) => file.endsWith(".sql"))
     .sort();
 
@@ -21,9 +22,9 @@ export const statementsOf = (sql: string): string[] =>
     .map((statement) => statement.trim())
     .filter((statement) => statement.length > 0);
 
-export const migrate = async (db: D1Database): Promise<void> => {
-  for (const file of migrationFiles()) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
+export const migrate = async (db: D1Database, directory = MIGRATIONS_DIR): Promise<void> => {
+  for (const file of migrationFiles(directory)) {
+    const sql = readFileSync(join(directory, file), "utf8");
     await db.batch(statementsOf(sql).map((statement) => db.prepare(statement)));
   }
 };
@@ -50,7 +51,9 @@ const template = (names: readonly string[]): Promise<string> => {
       const path = mkdtempSync(join(scratch(), "template-"));
       const mf = new Miniflare(workerOptions(names, path));
       try {
-        for (const name of names) await migrate((await mf.getD1Database(name)) as unknown as D1Database);
+        for (const name of names) {
+          await migrate((await mf.getD1Database(name)) as unknown as D1Database, name === "ledger" ? LEDGER_MIGRATIONS_DIR : MIGRATIONS_DIR);
+        }
       } finally {
         await mf.dispose();
       }
@@ -61,7 +64,10 @@ const template = (names: readonly string[]): Promise<string> => {
   return directory;
 };
 
-/** A local stage: workerd-backed D1 databases with every migration applied. */
+/**
+ * A local stage: workerd-backed D1 databases with every migration applied.
+ * A database named `ledger` gets the suppression ledger's migrations instead.
+ */
 export const localStage = async <Name extends string>(
   names: readonly Name[],
 ): Promise<{

@@ -3,11 +3,12 @@ import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubTarget } from "./github-gateway.ts";
 import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress, type ResidualCopy } from "./support-issues.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
+import { imageOf, ledgerStore, mirrorToLedger, removal, type LedgerEntry } from "./ledger.ts";
 import { DAY, MUTATION_INTERVAL_MS } from "./delivery-store.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
 import type { OperatorOptions } from "./operator.ts";
 import type { QueryDatabase } from "./storage.ts";
-import { ulid } from "./support-requests.ts";
+import { PURGED_TEXT as BLANK, ulid } from "./support-requests.ts";
 
 /** Never-confirmed-delivered text, and closed delivered requests after their last observed close. */
 export const RETENTION_MS = 365 * DAY;
@@ -40,8 +41,6 @@ export const titleDigest = async (key: CryptoKey, intentId: string, title: strin
   Array.from(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify([intentId, title])))),
     (byte) => byte.toString(16).padStart(2, "0")).join("");
 
-/** Submitted text, subject, Submission ID and digest. */
-const BLANK = `summary = '', description = '', title = '', reporter_subject = '', submission_id = id, body_digest = ''`;
 const SUPPRESS = `INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('request', ?, 'erasure') ON CONFLICT DO NOTHING`;
 
 /**
@@ -111,9 +110,11 @@ export const OPEN_ERASURE = `SELECT id FROM erasure WHERE slot = ? AND reporter_
  * and covers any request accepted since. Like the fixed SQL in storage.ts,
  * its subqueries cannot pass the storageFor checker, so every statement binds
  * the verified Slot the caller supplies by hand. Without a key, no digest is
- * kept and every redacted title needs review.
+ * kept and every redacted title needs review. The ledger is written first,
+ * so a failed main write leaves at most an extra suppression.
  */
-export const recordErasure = async (db: QueryDatabase, slot: string, subject: string, now: number, key: CryptoKey | null): Promise<string> => {
+export const recordErasure = async (db: QueryDatabase, slot: string, subject: string, now: number, key: CryptoKey | null,
+  ledger: QueryDatabase | null): Promise<string> => {
   const reference = await reporterReference(slot, subject);
   const open = await db.prepare(OPEN_ERASURE).bind(slot, reference).first<{ id: string }>();
   const rows = (await db.prepare(`${ERASABLE} AND r.reporter_subject = ?`).bind(slot, subject)
@@ -121,9 +122,19 @@ export const recordErasure = async (db: QueryDatabase, slot: string, subject: st
   const targets = await Promise.all(rows.map(async (row): Promise<ErasureTarget> =>
     ({ requestId: row.id, titleDigest: key ? await titleDigest(key, row.intent_id, row.title) : null })));
   const id = open?.id ?? `era_${ulid(now)}`;
+  if (ledger) await ledgerStore(ledger).record(erasureImages(id, slot, reference, targets, now, open === null), now);
   await db.batch(erasureStatements(id, slot, subject, reference, targets, now, true).map(([sql, parameters]) => db.prepare(sql).bind(...parameters)));
   return id;
 };
+
+/** What an erasure adds to the ledger before it is written to the main database. */
+export const erasureImages = (erasureId: string, slot: string, reference: string, targets: readonly ErasureTarget[], now: number,
+  created: boolean): LedgerEntry[] => [
+  ...targets.map(({ requestId }) => imageOf("suppression", { scope: "request", reference: requestId, reason: "erasure" })),
+  ...(created ? [imageOf("erasure", { id: erasureId, slot, recorded_at: now, reporter_reference: reference, search_state: "pending", search_next_at: now })] : []),
+  ...targets.map(({ requestId, titleDigest }) => imageOf("cleanup", { request_id: requestId, slot, purpose: "erasure", erasure_id: erasureId,
+    recorded_at: now, title_digest: titleDigest, state: "draining", next_attempt_at: now }, { residual: "", reconciliation_count: 0 })),
+];
 
 export interface ErasureStatus {
   readonly id: string;
@@ -308,16 +319,30 @@ const cleanupStore = (db: QueryDatabase) => {
      * Unresolved cleanup is never compacted. Other purposes have the Slot
      * suppression or no ledger entry at all, so their rows go at once.
      */
-    async compact(now: number) {
+    async compact(now: number, ledger: QueryDatabase | null) {
       const cutoff = now - TOMBSTONE_MS;
-      const expired = `state IN ('resolved', 'excepted') AND (purpose != 'erasure' OR (resolved_at <= ?
-        AND ((state = 'resolved' AND residual = '') OR EXISTS (SELECT 1 FROM erasure e WHERE e.id = erasure_id AND e.closed_at IS NOT NULL))))`;
+      const expiredAs = (c: string) => `${c}.state IN ('resolved', 'excepted') AND (${c}.purpose != 'erasure' OR (${c}.resolved_at <= ?
+        AND ((${c}.state = 'resolved' AND ${c}.residual = '') OR EXISTS (SELECT 1 FROM erasure e WHERE e.id = ${c}.erasure_id AND e.closed_at IS NOT NULL))))`;
+      const expired = expiredAs("support_cleanup");
+      // Its last records may go in this same pass.
+      const finished = `recorded_at <= ? AND (closed_at IS NOT NULL OR search_state = 'done')
+        AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.erasure_id = erasure.id AND NOT (${expiredAs("c")}))`;
+      if (ledger) {
+        // Removals are recorded first: a lost main delete is mirrored back in, a lost ledger write is not.
+        const records = (await db.prepare(`SELECT request_id, purpose FROM support_cleanup WHERE ${expired}`).bind(cutoff)
+          .all<{ request_id: string; purpose: string }>()).results;
+        const erasures = (await db.prepare(`SELECT id FROM erasure WHERE ${finished}`).bind(cutoff, cutoff).all<{ id: string }>()).results;
+        await ledgerStore(ledger).record([
+          ...records.map((record) => removal("cleanup", record.request_id)),
+          ...records.filter((record) => record.purpose === "erasure").map((record) => removal("suppression", `request:${record.request_id}`)),
+          ...erasures.map((erasure) => removal("erasure", erasure.id)),
+        ], now);
+      }
       await run([
         [`DELETE FROM delivery_suppression WHERE scope = 'request' AND reason = 'erasure'
           AND reference IN (SELECT request_id FROM support_cleanup WHERE purpose = 'erasure' AND ${expired})`, [cutoff]],
         [`DELETE FROM support_cleanup WHERE ${expired}`, [cutoff]],
-        [`DELETE FROM erasure WHERE recorded_at <= ? AND (closed_at IS NOT NULL OR search_state = 'done')
-          AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.erasure_id = erasure.id)`, [cutoff]],
+        [`DELETE FROM erasure WHERE ${finished}`, [cutoff, cutoff]],
       ]);
     },
     async searches(now: number) {
@@ -370,6 +395,8 @@ export interface CleanupOptions {
   readonly botLogin: string;
   /** The reference search uses each Slot's current mapping: no request row remains to pin one. */
   readonly mappings: readonly RepositoryMapping[];
+  /** The suppression ledger (src/ledger.ts), mirrored at the end of each pass. */
+  readonly ledger?: QueryDatabase | null;
   /** Without it, no derived title can be verified and every redacted title needs review. */
   readonly digestKey: CryptoKey | null;
   readonly now?: () => number;
@@ -546,5 +573,12 @@ export const sweepCleanup = (options: CleanupOptions): Effect.Effect<void, never
       yield* isolated("search", searchErasure(search, store, options, now));
     }
   }));
-  yield* isolated("compaction", io(() => store.compact(now())));
+  yield* isolated("compaction", io(() => store.compact(now(), options.ledger ?? null)));
+  const ledger = options.ledger;
+  if (ledger) {
+    yield* isolated("ledger", io(async () => {
+      await mirrorToLedger(options.db, ledger, now());
+      await ledgerStore(ledger).compact(now(), TOMBSTONE_MS);
+    }));
+  }
 }).pipe(Effect.withSpan("support.cleanup.sweep"));

@@ -22,7 +22,7 @@ const mapping: RepositoryMapping = { slot: "shop/production", client: "shop", pr
 const subject = "00000000-0000-4000-8000-000000000001";
 const ERASED_BODY = "Support request text erased at the Reporter's request.";
 
-let stage: Awaited<ReturnType<typeof localStage<"shared">>>;
+let stage: Awaited<ReturnType<typeof localStage<"shared" | "ledger">>>;
 let installation: Installation;
 let github: ReturnType<typeof makeFakeGitHub>;
 let logs: string[];
@@ -31,7 +31,7 @@ let key: CryptoKey;
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"], now: START });
   now = START;
-  stage = await localStage(["shared"]);
+  stage = await localStage(["shared", "ledger"]);
   installation = await harness(stage.databases.shared, [mapping]).enroll(mapping.slot, "installation-a");
   github = makeFakeGitHub();
   github.installation(7);
@@ -61,9 +61,10 @@ const sweep = (database: QueryDatabase = db()) => Effect.runPromise(sweepDeliver
   botLogin: `${SLUG}[bot]`, now: () => now, random: () => 0 }).pipe(Effect.provide(gateway()), Effect.provide(logger())));
 const cleanup = (digest: CryptoKey | null = key) => Effect.runPromise(sweepCleanup({ db: db(), botLogin: `${SLUG}[bot]`, mappings: [mapping], digestKey: digest, now: () => now })
   .pipe(Effect.provide(gateway()), Effect.provide(logger())));
-const erase = () => recordErasure(db(), mapping.slot, subject, now, key);
+const erase = () => recordErasure(db(), mapping.slot, subject, now, key, null);
 const operator = (...args: string[]) => runOperator(args, {
   query: async (sql, parameters) => (await db().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
+  ledger: async (sql, parameters) => (await stage.databases.ledger.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
   recordRevocation: async () => {}, mappings: [mapping], now,
 });
 const read = (id: string) => installation.send("GET", `/v1/requests/${id}?reporter_subject=${subject}&scope=mine`);
