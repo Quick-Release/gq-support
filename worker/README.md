@@ -294,10 +294,13 @@ evidence; a check begun before that observation cannot restore it. Migration
 again, so an unsafe repository suspends again at once.
 
 The fake GitHub tests cover both mint shapes: present `archived` needs no extra
-repository read, omitted `archived` needs one per verification. Actual staging
-mint shape is still unmeasured: the staging spike has no recorded run. Its
-`mintIncludesArchived` and `createRepositoryReads` outputs are the live evidence
-when it is run; tests do not claim to establish GitHub's live response shape.
+repository read, omitted `archived` needs one per verification. The
+[staging spike on 2026-10-18](https://github.com/Quick-Release/gq-support/actions/runs/39129327430)
+observed `mintIncludesPrivate: true`, `mintIncludesArchived: true` and
+`createRepositoryReads: 0`. This confirms the zero-extra-read path for that
+live response; the fallback remains necessary if GitHub omits either fact.
+Installation scope and the other spike observations are recorded in the
+[key custody runbook](../docs/runbooks/github-app-key-custody.md#live-evidence--2026-10-18).
 
 Verification: `pnpm --filter gq-support-worker test`, `typecheck` and `load-test`.
 The delivery load test runs 24 Slots, including a busy Slot, across three provider
