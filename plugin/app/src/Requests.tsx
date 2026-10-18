@@ -11,7 +11,7 @@ type Props = {
   requests: ReturnType<typeof useRequests>;
   /** The session can carry the Support manager grant for this installation. */
   site: boolean;
-  /** No reads while the session is unconfirmed or has changed. */
+  /** No reads once the session has changed. */
   disabled: boolean;
   onNewReport: () => void;
 };
@@ -41,8 +41,9 @@ export function Requests({ requests, site, disabled, onNewReport }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const { phase, items, error } = requests;
   useEffect(() => { if (error) speak(error, "assertive"); }, [error]);
-  useEffect(() => { if (requests.refreshed) speak(__("Requests updated.", textDomain)); }, [requests.refreshed]);
-  const status = requests.loading ? __("Loading requests…", textDomain) : requests.refreshed ? __("Requests updated.", textDomain) : "";
+  const updated = __("Requests updated.", textDomain);
+  useEffect(() => { if (requests.refreshed) speak(updated); }, [requests.refreshed]);
+  const status = requests.loading ? __("Loading requests…", textDomain) : requests.refreshed ? updated : "";
   return (
     <div className="gq-support-requests">
       <div className="gq-support-toolbar">

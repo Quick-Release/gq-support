@@ -227,6 +227,26 @@ test('an accepted report joins a loaded list from its receipt, without another r
   expect(reads).toHaveLength(1);
 });
 
+test('a receipt accepted while the first page loads is not lost when that page arrives', async ({ page }) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const reads = await stubReads(page, async () => { await held; return page1([resource({ title: 'Earlier report' })]); });
+  await logIn(page);
+  await openPanel(page);
+  await showRequests(page);
+  await expect(requestsPanel(page).getByRole('status')).toContainText('Loading');
+  await page.getByRole('tab', { name: 'New report' }).click();
+  await page.getByRole('textbox', { name: 'Description' }).fill('Sent during the load');
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(page.getByRole('dialog').getByRole('status').first()).toContainText('Received');
+  release();
+  await showRequests(page);
+  const items = requestsPanel(page).getByRole('listitem');
+  await expect(items).toHaveCount(2);
+  await expect(items.first()).toContainText('Sent during the load');
+  expect(reads).toHaveLength(1);
+});
+
 test('without an explicit grant there is no site scope', async ({ page }) => {
   const reads = await stubReads(page, () => page1([resource()]));
   await logIn(page);

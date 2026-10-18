@@ -25,7 +25,7 @@ export function useSession(visible: boolean) {
         url.searchParams.set('action', 'gq_support_session');
         url.searchParams.set('session', window.gqSupportLauncher.session);
         const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
-        if (!response.ok) return false;
+        if (!response.ok) { setSite(false); return false; }
         const result = await response.json() as { state?: string; nonce?: string; site?: boolean };
         if (result.state === 'changed') {
           changedRef.current = true;
@@ -40,6 +40,8 @@ export function useSession(visible: boolean) {
         setPaused(false);
         return true;
       } catch {
+        // An unconfirmed session carries no Support manager grant.
+        setSite(false);
         return false;
       } finally {
         pending.current = undefined;

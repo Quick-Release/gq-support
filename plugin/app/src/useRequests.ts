@@ -18,7 +18,7 @@ type Phase = 'idle' | 'loading' | 'ready' | 'error';
 const PER_PAGE = 20;
 const DELIVERY = ['accepted-pending', 'delivered', 'failed', 'outcome-unknown'];
 
-/** The public resource fields, or null for anything WordPress would never send. */
+/** Only the public resource fields WordPress sends; anything else is malformed. */
 const valid = (item: unknown): item is SupportRequest => {
   const value = item as Record<string, unknown> | null;
   return !!value && typeof value.id === 'string' && /^req_[0-9A-HJKMNP-TV-Z]{26}$/.test(value.id)
@@ -56,9 +56,12 @@ export function useRequests(session: Session) {
   // Read by add(), which a submission may call from an older render.
   const loaded = useRef(false);
   loaded.current = phase !== 'idle';
+  // Receipts accepted while a first page was in flight; that page may predate them.
+  const receipts = useRef<SupportRequest[]>([]);
 
   const clear = (nextScope: Scope = 'mine') => {
     generation.current++;
+    receipts.current = [];
     setScope(nextScope);
     setPhase('idle');
     setItems([]);
@@ -83,7 +86,8 @@ export function useRequests(session: Session) {
       if (current !== generation.current) return;
       if (!Array.isArray(body?.items) || !body.items.every(valid) || (body.next_cursor !== null && typeof body.next_cursor !== 'string')) throw new Error('malformed');
       const page = body.items;
-      setItems(previous => cursor ? [...previous, ...page.filter(item => !previous.some(known => known.id === item.id))] : page);
+      const fresh = receipts.current.filter(receipt => !page.some(item => item.id === receipt.id));
+      setItems(previous => cursor ? [...previous, ...page.filter(item => !previous.some(known => known.id === item.id))] : [...fresh, ...page]);
       setNext(body.next_cursor as string | null);
       setPhase('ready');
       setRefreshed(manual);
@@ -118,6 +122,7 @@ export function useRequests(session: Session) {
     /** An accepted receipt joins a loaded list; a replacement hides its failed predecessor. */
     add: (item: unknown, supersedes?: string) => {
       if (!loaded.current || !valid(item)) return;
+      receipts.current = [item, ...receipts.current.filter(known => known.id !== item.id)];
       setItems(previous => [item, ...previous.filter(known => known.id !== item.id && known.id !== supersedes)]);
     },
   };
