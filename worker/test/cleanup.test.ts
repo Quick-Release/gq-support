@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { erasureStatus, recordErasure, sweepCleanup } from "../src/cleanup.ts";
+import { digestKey, erasureStatus, recordErasure, sweepCleanup, titleDigest } from "../src/cleanup.ts";
 import { sweepDelivery } from "../src/delivery.ts";
 import { GitHubGateway, GitHubReader } from "../src/github-gateway.ts";
 import { runOperator } from "../src/operator.ts";
@@ -27,6 +27,7 @@ let installation: Installation;
 let github: ReturnType<typeof makeFakeGitHub>;
 let logs: string[];
 let now: number;
+let key: CryptoKey;
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"], now: START });
   now = START;
@@ -37,6 +38,7 @@ beforeEach(async () => {
   github.repository({ id: 42, installationId: 7 });
   await stage.databases.shared.prepare("UPDATE delivery_control SET enabled = 1").run();
   logs = [];
+  key = await digestKey("test App private key");
 });
 afterEach(async () => {
   // No log line from any flow carries Submitted text, subjects or credentials.
@@ -57,9 +59,9 @@ const gateway = () => GitHubGateway.layer({ clientId: CLIENT_ID, slug: SLUG, pri
 const logger = () => Logger.layer([Logger.map(Logger.formatJson, (line) => { logs.push(line); })]);
 const sweep = (database: QueryDatabase = db()) => Effect.runPromise(sweepDelivery({ db: database, mappings: [mapping],
   botLogin: `${SLUG}[bot]`, now: () => now, random: () => 0 }).pipe(Effect.provide(gateway()), Effect.provide(logger())));
-const cleanup = () => Effect.runPromise(sweepCleanup({ db: db(), botLogin: `${SLUG}[bot]`, now: () => now })
+const cleanup = (digest: CryptoKey | null = key) => Effect.runPromise(sweepCleanup({ db: db(), botLogin: `${SLUG}[bot]`, digestKey: digest, now: () => now })
   .pipe(Effect.provide(gateway()), Effect.provide(logger())));
-const erase = () => recordErasure(db(), mapping.slot, subject, now);
+const erase = () => recordErasure(db(), mapping.slot, subject, now, key);
 const operator = (...args: string[]) => runOperator(args, {
   query: async (sql, parameters) => (await db().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
   recordRevocation: async () => {}, mappings: [mapping], now,
@@ -82,11 +84,12 @@ const expectRedacted = (issue: FakeIssue, title: string) => {
   expect(issue.body).toContain(ERASED_BODY);
   expect(issue.body).not.toContain("Private report text");
 };
-/** Only restricted metadata remains: no text, subject, Submission ID or digest. */
+/** Only the restricted cleanup record remains: no request row, text, subject, Submission ID or digest. */
 const expectMinimal = async (id: string) => {
-  expect(await requestRow(id)).toMatchObject({ summary: "", description: "", title: "", reporter_subject: "",
-    submission_id: id, body_digest: "", erased_at: expect.any(Number) });
-  expect(await intentRow(id)).toMatchObject({ github_installation_id: 7, context_json: null });
+  expect(await requestRow(id)).toBeNull();
+  expect(await intentRow(id)).toBeNull();
+  expect(await cleanupRow(id)).toMatchObject({ intent_id: expect.stringMatching(/^int_/), github_installation_id: 7,
+    repository_id: 42, attempt_started_at: expect.any(Number), attempt_ended_at: expect.any(Number) });
 };
 
 it("erasure before dispatch suppresses the create and completes after purging", async () => {
@@ -317,7 +320,7 @@ it("never-delivered text expires 12 months from acceptance; delivered text 12 mo
   expect(await requestRow(closed.id)).toBeNull();
   expect(await requestRow(reopened.id)).not.toBeNull();
   expect(await requestRow(open.id)).toMatchObject({ description: "Private report text" });
-  expect(await requestRow(uncertain.id)).not.toBeNull(); // review metadata outlives the text
+  expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "unresolved" }); // review metadata outlives the text
 });
 
 it("unresolved records cross 45-day compaction; the tombstone window starts after resolution", async () => {
@@ -376,9 +379,9 @@ it("offboarding suppresses creates, purges content after 30 days and leaves the 
   expect(await requestRow(delivered.id)).toBeNull();
   await expectMinimal(uncertain.id);
   expect(await cleanupRow(uncertain.id)).toMatchObject({ purpose: "offboarding", state: "unresolved" });
-  // An Operator check of an uncertain offboarded attempt stays read-only.
-  await db().prepare("UPDATE support_request SET issue_id = ?, issue_number = 2, issue_node_id = 'I_other' WHERE id = ?")
-    .bind(github.issues[0]!.id + 1, uncertain.id).run();
+  // An Operator check of an uncertain offboarded attempt stays read-only, even with a known issue.
+  await db().prepare("UPDATE support_cleanup SET issues_json = ? WHERE request_id = ?")
+    .bind(JSON.stringify([{ id: github.issues[0]!.id, nodeId: github.issues[0]!.node_id, number: 1 }]), uncertain.id).run();
   expect(await operator("cleanup-reconcile", uncertain.id, "operator-1", "positive-evidence")).toBe("Cleanup reconciliation scheduled");
   expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "reconciling" });
   await cleanup();
@@ -393,11 +396,59 @@ it("an Operator erases by the issue's reporter reference, and the scheduled tick
   const erasure = await operator("erase", mapping.slot, "operator-1", reference);
   expect(erasure).toMatch(/^era_/);
   const config = { clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem };
-  await Effect.runPromise(scheduledTick({ db: db(), mappings: [mapping], botLogin: `${SLUG}[bot]`, now: () => now })
+  await Effect.runPromise(scheduledTick({ db: db(), mappings: [mapping], botLogin: `${SLUG}[bot]`, now: () => now, digestKey: key })
     .pipe(Effect.provide(Layer.mergeAll(GitHubGateway.layer(config), GitHubReader.layer(config)).pipe(Layer.provide(github.layer))),
       Effect.provide(logger())));
   expect(posts()).toHaveLength(0); // the status sweep still reads, but nothing is created
   expect(await requestRow(request.id)).toBeNull();
   expect(JSON.parse(await operator("erasure-status", erasure))).toMatchObject({ state: "completed" });
   expect((await db().prepare("SELECT action, reference FROM cleanup_audit").first())).toEqual({ action: "erase", reference: erasure });
+});
+
+it("every plausible duplicate of an uncertain create is redacted", async () => {
+  const request = await accept();
+  unknownCreate();
+  await sweep();
+  const issue = github.issues[0]!;
+  github.issues.push({ ...issue, id: issue.id + 1, number: issue.number + 1, node_id: "I_duplicate" });
+  const erasure = await erase();
+  await cleanup();
+  advance(60_000);
+  await cleanup();
+  advance(10_000);
+  await cleanup();
+  for (const copy of github.issues) expectRedacted(copy, "Support request (erased)");
+  expect(patches()).toHaveLength(2);
+  expect(await cleanupRow(request.id)).toMatchObject({ state: "resolved", outcome: "redacted", issues_json: "[]" });
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "needs_review", residual: ["edit_history", "multiple_matches"] });
+});
+
+it("an Operator erase leaves the keyed digest and text purge to the Worker", async () => {
+  const request = await accept();
+  await sweep();
+  const intent = (await intentRow(request.id))!.id as string;
+  const reference = `rs_${(await sha256(JSON.stringify([mapping.slot, subject]))).slice(0, 32)}`;
+  await operator("erase", mapping.slot, "operator-1", reference);
+  expect(await cleanupRow(request.id)).toMatchObject({ title_digest: null });
+  await cleanup();
+  expect(await requestRow(request.id)).toBeNull();
+  // A keyed digest: the stored value cannot be recomputed from D1 alone.
+  const digest = (await cleanupRow(request.id))!.title_digest;
+  expect(digest).toBe(await titleDigest(key, intent, "Checkout fails"));
+  expect(digest).not.toBe(await sha256(JSON.stringify([intent, "Checkout fails"])));
+  expect(digest).not.toBe(await titleDigest(await digestKey("another key"), intent, "Checkout fails"));
+  advance(10_000);
+  await cleanup();
+  expectRedacted(github.issues[0]!, "Support request (erased)");
+});
+
+it("without the digest key, a redacted title is left for review", async () => {
+  await accept();
+  await sweep();
+  const erasure = await erase();
+  await cleanup(null);
+  advance(10_000);
+  await cleanup(null);
+  expectRedacted(github.issues[0]!, "Checkout fails");
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ residual: ["edit_history", "title_review"] });
 });

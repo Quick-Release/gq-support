@@ -6,6 +6,8 @@ import { sweepStatus, type SweepConfig } from "./status-sweep.ts";
 import { refreshStatus, type RefreshConfig } from "./status-refresh.ts";
 
 export interface ScheduledOptions extends DeliveryOptions {
+  /** The title-digest key for erasure redaction (src/cleanup.ts). */
+  readonly digestKey?: CryptoKey | null;
   readonly sweep?: Partial<SweepConfig>;
   readonly refresh?: Partial<RefreshConfig>;
 }
@@ -20,7 +22,8 @@ export const scheduledTick = (options: ScheduledOptions): Effect.Effect<void, ne
     Effect.timeoutOption(25_000),
     Effect.catchCause(() => Effect.logError("Support delivery sweep failed")),
   );
-  yield* sweepCleanup({ db: options.db, botLogin: options.botLogin, ...(options.now ? { now: options.now } : {}) }).pipe(
+  yield* sweepCleanup({ db: options.db, botLogin: options.botLogin, digestKey: options.digestKey ?? null,
+    ...(options.now ? { now: options.now } : {}) }).pipe(
     Effect.timeoutOption(5_000),
     Effect.catchCause(() => Effect.logError("Support cleanup sweep failed")),
   );
