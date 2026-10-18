@@ -358,7 +358,6 @@ The registration, custody and staging rotation acceptance for #36 is complete.
 Repository installation and scoped-token behavior belong to #37; receiver
 activation belongs to #12; production rollout remains gated by #20.
 
-
 ## Live evidence — 2026-10-18
 
 PR #64 merged the scheduled Repository mapping suspension checks as
