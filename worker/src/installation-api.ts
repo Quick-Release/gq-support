@@ -136,13 +136,11 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     if (results[0].meta.changes !== 1 || results[1].results.length !== 1) return rejected();
     if (request.method === "DELETE") return json({ revoked: true });
     const suspended = Boolean(results[1].results[0].suspended_reason);
-    // A Suspended mapping takes no new Support requests; reads keep the last-known status.
-    if (create && suspended) return rejected();
     if (requests) {
       // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
       const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
       return await handleSupportRequests(request, url, body, storageFor(key.slot),
-        { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId,
+        { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId, suspended,
           ...(mapping.githubInstallationId && mapping.clientOriginLabel ? { delivery: { githubInstallationId: mapping.githubInstallationId,
             environment: mapping.environment, clientOriginLabel: mapping.clientOriginLabel, defaultDeveloper: mapping.defaultDeveloper } } : {}),
         }, now);

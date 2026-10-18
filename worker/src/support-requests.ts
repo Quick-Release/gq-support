@@ -10,6 +10,8 @@ export interface Caller {
   readonly installationId: string;
   readonly repositoryId: number;
   readonly delivery?: { readonly githubInstallationId: number; readonly environment: string; readonly clientOriginLabel: string; readonly defaultDeveloper: string };
+  /** A Suspended mapping takes no new Support requests; earlier ones still replay. */
+  readonly suspended?: boolean;
 }
 
 /**
@@ -182,6 +184,7 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
   try {
     const existing = await findBySubmission(storage, input);
     if (existing) return replay(existing);
+    if (caller.suspended) return error("gq_support_not_configured", 403);
     if (input.supersedes_id !== null && !await canSupersede()) return notFound();
     await storage.batch([
       storage.debitIntake(input.reporter_subject, now, REPORTER_QUOTAS),

@@ -44,8 +44,8 @@ beforeEach(async () => {
 afterEach(async () => { await stage.dispose(); vi.useRealTimers(); });
 
 const advance = (milliseconds: number) => { now += milliseconds; vi.setSystemTime(now); };
-const submit = (installation: Installation) => installation.send("POST", "/v1/requests", JSON.stringify({
-  submission_id: crypto.randomUUID(), reporter_subject: subject, scope: "mine", summary: "Checkout fails", description: "Private report text" }));
+const submit = (installation: Installation, submissionId = crypto.randomUUID()) => installation.send("POST", "/v1/requests", JSON.stringify({
+  submission_id: submissionId, reporter_subject: subject, scope: "mine", summary: "Checkout fails", description: "Private report text" }));
 const accept = async (installation: Installation) => {
   const response = await submit(installation);
   expect(response.status).toBe(202);
@@ -197,4 +197,15 @@ it("suspends from a metadata repair that finds the repository archived, keeping 
   expect(suspensionAlerts().map((log) => log.annotations.reason)).toEqual(["archived"]);
   expect(await read(production, request.id)).toMatchObject({ delivery: "delivered", status: "open" });
   expect(await mappingState(staging)).toBe("suspended");
+});
+
+it("still replays a submission accepted before the suspension, and refuses only new ones", async () => {
+  const submissionId = crypto.randomUUID();
+  const accepted = await (await submit(production, submissionId)).json() as { id: string };
+  github.update(42, { private: false });
+  await deliver();
+  const retried = await submit(production, submissionId);
+  expect(retried.status).toBe(202);
+  expect(await retried.json()).toMatchObject({ id: accepted.id, delivery: "failed" });
+  expect((await submit(production)).status).toBe(403);
 });
