@@ -20,6 +20,8 @@ import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
+// Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
+let titleDigestKey: Promise<CryptoKey | null> | undefined;
 
 export default Cloudflare.Worker(
   "Worker",
@@ -64,8 +66,7 @@ export default Cloudflare.Worker(
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
-      // Derived from the App key, which never enters D1 (src/cleanup.ts).
-      const key = yield* Effect.promise(() => digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
+      const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
       yield* scheduledTick({ db, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
       );
@@ -87,6 +88,8 @@ export default Cloudflare.Worker(
           previousSecret: typeof env.GITHUB_WEBHOOK_PREVIOUS_SECRET === "string" ? env.GITHUB_WEBHOOK_PREVIOUS_SECRET : undefined,
         });
         const services = yield* Effect.context<RuntimeContext>();
+        const key = yield* Effect.promise(() => titleDigestKey ??= typeof env.GITHUB_APP_PRIVATE_KEY === "string"
+          ? digestKey(env.GITHUB_APP_PRIVATE_KEY) : Promise.resolve(null));
         const response = yield* handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
           (task) => context.raw.waitUntil(task), {
             mappings: repositoryMappings, botLogin: `${slug}[bot]`,
@@ -98,7 +101,7 @@ export default Cloudflare.Worker(
               })));
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
-          });
+          }, { digestKey: key });
         if (request.method === "POST" && new URL(request.url, "https://support.invalid").pathname === "/v1/requests" && response.status === 202) {
           yield* context.waitUntil(deliver);
         }

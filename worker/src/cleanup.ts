@@ -1,7 +1,8 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubTarget } from "./github-gateway.ts";
-import { supportIssues, type IssueIdentity, type ReconciliationProgress, type ResidualCopy } from "./support-issues.ts";
+import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress, type ResidualCopy } from "./support-issues.ts";
+import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { DAY, MUTATION_INTERVAL_MS } from "./delivery-store.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
 import type { OperatorOptions } from "./operator.ts";
@@ -17,6 +18,7 @@ const EXECUTION_MS = 4_000;
 const LEASE_MS = 60_000;
 const RETRY_MS = 60_000;
 const ALERT_AFTER_MS = 900_000;
+const SEARCH_RETRY_MS = 300_000;
 const reconcileAt = (since: number, count: number) => since + ([60_000, 300_000, 900_000, 3_600_000][count] ?? (count - 2) * 3_600_000);
 
 export type Statement = readonly [sql: string, parameters: readonly (string | number | null)[]];
@@ -74,15 +76,19 @@ export interface ErasureTarget {
  * Records an erasure of one Reporter's requests in one Slot. Ordered so that
  * any applied prefix is safe: suppression comes before every other step, and
  * each statement is idempotent, so an interrupted sequence can be rerun.
+ * Without `immediate`, the Worker's next pass purges the text instead.
  */
-export const erasureStatements = (erasureId: string, slot: string, subject: string, targets: readonly ErasureTarget[], now: number): Statement[] => [
+export const erasureStatements = (erasureId: string, slot: string, subject: string, reference: string,
+  targets: readonly ErasureTarget[], now: number, immediate: boolean): Statement[] => [
   ...targets.map(({ requestId }): Statement => [SUPPRESS, [requestId]]),
-  [`INSERT INTO erasure (id, slot, recorded_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`, [erasureId, slot, now]],
+  // The reference search also finds issues whose request rows are already gone.
+  [`INSERT INTO erasure (id, slot, recorded_at, reporter_reference, search_state, search_next_at)
+    VALUES (?, ?, ?, ?, 'pending', ?) ON CONFLICT DO NOTHING`, [erasureId, slot, now, reference, now]],
   ...targets.map(({ requestId, titleDigest }): Statement => [`INSERT INTO support_cleanup
     (request_id, slot, purpose, erasure_id, recorded_at, title_digest, state, next_attempt_at)
     VALUES (?, ?, 'erasure', ?, ?, ?, 'draining', ?) ON CONFLICT DO NOTHING`, [requestId, slot, erasureId, now, titleDigest, now]]),
   // An active attempt already holds its own copy, so the text goes at once.
-  ...(targets.every((target) => target.titleDigest !== null) ? [[`UPDATE support_request SET ${BLANK}, erased_at = ?
+  ...(immediate ? [[`UPDATE support_request SET ${BLANK}, erased_at = ?
     WHERE slot = ? AND reporter_subject = ? AND erased_at IS NULL
     AND EXISTS (SELECT 1 FROM support_cleanup c WHERE c.request_id = support_request.id AND c.purpose = 'erasure')`, [now, slot, subject]] as Statement] : []),
   // Any erasure's rows, so a rerun after an interrupted sequence still clears them.
@@ -96,44 +102,57 @@ export const ERASABLE = `SELECT r.id, r.title, r.reporter_subject, i.id AS inten
   JOIN delivery_intent i ON i.request_id = r.id AND i.slot = r.slot AND i.seq = 0
   WHERE r.slot = ? AND r.erased_at IS NULL`;
 
+/** The Slot's open erasure for this reporter reference, if any. */
+export const OPEN_ERASURE = `SELECT id FROM erasure WHERE slot = ? AND reporter_reference = ? AND closed_at IS NULL`;
+
 /**
  * Records a Reporter erasure in one batch: new creates are suppressed and the
- * text purged when it commits. Like the fixed SQL in storage.ts, its
- * subqueries cannot pass the storageFor checker, so every statement binds the
- * verified Slot the caller supplies by hand.
+ * text purged when it commits. While an erasure is open, a repeat reuses it
+ * and covers any request accepted since. Like the fixed SQL in storage.ts,
+ * its subqueries cannot pass the storageFor checker, so every statement binds
+ * the verified Slot the caller supplies by hand. Without a key, no digest is
+ * kept and every redacted title needs review.
  */
-export const recordErasure = async (db: QueryDatabase, slot: string, subject: string, now: number, key: CryptoKey): Promise<string> => {
+export const recordErasure = async (db: QueryDatabase, slot: string, subject: string, now: number, key: CryptoKey | null): Promise<string> => {
+  const reference = await reporterReference(slot, subject);
+  const open = await db.prepare(OPEN_ERASURE).bind(slot, reference).first<{ id: string }>();
   const rows = (await db.prepare(`${ERASABLE} AND r.reporter_subject = ?`).bind(slot, subject)
     .all<{ id: string; title: string; intent_id: string }>()).results;
   const targets = await Promise.all(rows.map(async (row): Promise<ErasureTarget> =>
-    ({ requestId: row.id, titleDigest: await titleDigest(key, row.intent_id, row.title) })));
-  const id = `era_${ulid(now)}`;
-  await db.batch(erasureStatements(id, slot, subject, targets, now).map(([sql, parameters]) => db.prepare(sql).bind(...parameters)));
+    ({ requestId: row.id, titleDigest: key ? await titleDigest(key, row.intent_id, row.title) : null })));
+  const id = open?.id ?? `era_${ulid(now)}`;
+  await db.batch(erasureStatements(id, slot, subject, reference, targets, now, true).map(([sql, parameters]) => db.prepare(sql).bind(...parameters)));
   return id;
 };
 
 export interface ErasureStatus {
   readonly id: string;
-  readonly state: "in_progress" | "needs_review" | "completed";
+  readonly state: "in_progress" | "needs_review" | "completed" | "closed";
   readonly counts: { readonly purged: number; readonly redacted: number; readonly pending: number };
-  /** Residual-copy kinds; `remote_outcome` is a possible issue nobody could find or redact. */
+  /**
+   * Residual-copy kinds. `remote_outcome` is a possible issue nobody could
+   * find or redact; `reference_search` means older issues may not all be found.
+   */
   readonly residual: readonly string[];
 }
 
 /** Never includes text. An unresolved remote outcome keeps the erasure from completing. */
 export const erasureStatus = async (db: QueryDatabase | OperatorOptions["query"], id: string): Promise<ErasureStatus | null> => {
-  const sql = `SELECT c.state, c.outcome, c.residual FROM erasure e LEFT JOIN support_cleanup c ON c.erasure_id = e.id WHERE e.id = ?`;
+  const sql = `SELECT e.closed_at, e.search_state, c.state, c.outcome, c.residual FROM erasure e
+    LEFT JOIN support_cleanup c ON c.erasure_id = e.id WHERE e.id = ?`;
   const rows = (typeof db === "function" ? await db(sql, [id]) : (await db.prepare(sql).bind(id).all()).results) as
-    { state: CleanupState | null; outcome: Outcome | null; residual: string | null }[];
+    { closed_at: number | null; search_state: string; state: CleanupState | null; outcome: Outcome | null; residual: string | null }[];
   if (rows.length === 0) return null;
+  const { closed_at: closedAt, search_state: search } = rows[0]!;
   const targets = rows.filter((row) => row.state !== null);
   const resolved = targets.filter((row) => row.state === "resolved");
   const residual = new Set(targets.flatMap((row) => row.residual ? row.residual.split(",") : []));
   if (targets.some((row) => row.state === "unresolved" || row.state === "excepted")) residual.add("remote_outcome");
+  if (search === "incomplete" || search === "failed") residual.add("reference_search");
   const pending = targets.filter((row) => ["draining", "reconciling", "redacting"].includes(row.state!)).length;
   return {
     id,
-    state: pending > 0 ? "in_progress" : residual.size > 0 ? "needs_review" : "completed",
+    state: closedAt !== null ? "closed" : pending > 0 || search === "pending" ? "in_progress" : residual.size > 0 ? "needs_review" : "completed",
     counts: { purged: resolved.filter((row) => row.outcome !== "redacted").length,
       redacted: resolved.filter((row) => row.outcome === "redacted").length, pending },
     residual: [...residual].sort(),
@@ -284,25 +303,73 @@ const cleanupStore = (db: QueryDatabase) => {
       ]);
     },
     /**
-     * Resolved erasure tombstones go after 45 days, counted from resolution.
+     * Resolved erasure tombstones go 45 days after resolution, but one that an
+     * Operator still has to review stays until its erasure is closed.
      * Unresolved cleanup is never compacted. Other purposes have the Slot
      * suppression or no ledger entry at all, so their rows go at once.
      */
     async compact(now: number) {
       const cutoff = now - TOMBSTONE_MS;
+      const expired = `state IN ('resolved', 'excepted') AND (purpose != 'erasure' OR (resolved_at <= ?
+        AND ((state = 'resolved' AND residual = '') OR EXISTS (SELECT 1 FROM erasure e WHERE e.id = erasure_id AND e.closed_at IS NOT NULL))))`;
       await run([
-        [`DELETE FROM delivery_suppression WHERE scope = 'request' AND reason = 'erasure' AND reference IN (SELECT request_id
-          FROM support_cleanup WHERE purpose = 'erasure' AND state IN ('resolved', 'excepted') AND resolved_at <= ?)`, [cutoff]],
-        [`DELETE FROM support_cleanup WHERE state IN ('resolved', 'excepted') AND (purpose != 'erasure' OR resolved_at <= ?)`, [cutoff]],
-        [`DELETE FROM erasure WHERE recorded_at <= ? AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.erasure_id = erasure.id)`, [cutoff]],
+        [`DELETE FROM delivery_suppression WHERE scope = 'request' AND reason = 'erasure'
+          AND reference IN (SELECT request_id FROM support_cleanup WHERE purpose = 'erasure' AND ${expired})`, [cutoff]],
+        [`DELETE FROM support_cleanup WHERE ${expired}`, [cutoff]],
+        [`DELETE FROM erasure WHERE recorded_at <= ? AND (closed_at IS NOT NULL OR search_state = 'done')
+          AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.erasure_id = erasure.id)`, [cutoff]],
       ]);
+    },
+    async searches(now: number) {
+      return (await db.prepare(`SELECT id, slot, recorded_at, reporter_reference FROM erasure
+        WHERE search_state = 'pending' AND search_next_at <= ? ORDER BY search_next_at LIMIT 4`)
+        .bind(now).all<PendingSearch>()).results;
+    },
+    /** Retries, or records the search's end. A changed schedule means another pass took it. */
+    async searched(search: PendingSearch, state: "pending" | "done" | "incomplete" | "failed", next: number | null) {
+      await run([[`UPDATE erasure SET search_state = ?, search_next_at = ? WHERE id = ? AND search_state = 'pending'`, [state, next, search.id]]]);
+    },
+    /**
+     * Adds found issues to the erasure. A new one is keyed by its intent, the
+     * only stable identity once the request rows are gone; an unresolved
+     * record for it takes the found issue. In an offboarded Slot the issues
+     * belong to the Client: they are only reported.
+     */
+    async adopt(search: PendingSearch, mapping: { githubInstallationId: number; repositoryId: number }, found: readonly FoundIssue[],
+      offboarded: boolean, incomplete: boolean, now: number) {
+      await run([
+        ...found.flatMap(({ intentId, issue, createdAt }): Statement[] => [
+          ...(offboarded ? [] : [[`UPDATE support_cleanup SET purpose = 'erasure', erasure_id = COALESCE(erasure_id, ?), state = 'redacting',
+            next_attempt_at = ?, window_started_at = ?, window_until = NULL, issues_json = ?, resolved_at = NULL
+            WHERE intent_id = ? AND slot = ? AND state = 'unresolved'`,
+            [search.id, now, now, JSON.stringify([issue]), intentId, search.slot]] as Statement]),
+          [`INSERT INTO support_cleanup (request_id, slot, purpose, erasure_id, recorded_at, state, next_attempt_at, window_started_at,
+              intent_id, github_installation_id, repository_id, attempt_started_at, attempt_ended_at, issues_json, outcome, residual, resolved_at)
+            SELECT ?, ?, 'erasure', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM support_cleanup WHERE intent_id = ?) AND NOT EXISTS (SELECT 1 FROM delivery_intent WHERE id = ?)
+            ON CONFLICT DO NOTHING`,
+            [intentId, search.slot, search.id, now, offboarded ? "resolved" : "redacting", offboarded ? null : now, now, intentId,
+              mapping.githubInstallationId, mapping.repositoryId, createdAt, createdAt, JSON.stringify(offboarded ? [] : [issue]),
+              offboarded ? "found" : null, offboarded ? "client_issue" : "", offboarded ? now : null, intentId, intentId]],
+        ]),
+        [`UPDATE erasure SET search_state = ?, search_next_at = NULL WHERE id = ? AND search_state = 'pending'`,
+          [incomplete ? "incomplete" : "done", search.id]],
+      ]);
+    },
+    async offboarded(slot: string) {
+      return (await db.prepare(`SELECT 1 FROM offboarding WHERE slot = ?`).bind(slot).first()) !== null;
     },
   };
 };
 
+interface PendingSearch { id: string; slot: string; recorded_at: number; reporter_reference: string | null }
+interface FoundIssue { intentId: string; issue: IssueIdentity; createdAt: number }
+
 export interface CleanupOptions {
   readonly db: QueryDatabase;
   readonly botLogin: string;
+  /** The reference search uses each Slot's current mapping: no request row remains to pin one. */
+  readonly mappings: readonly RepositoryMapping[];
   /** Without it, no derived title can be verified and every redacted title needs review. */
   readonly digestKey: CryptoKey | null;
   readonly now?: () => number;
@@ -416,6 +483,34 @@ const processRecord = (record: CleanupRecord, store: Store, options: CleanupOpti
 }).pipe(Effect.withSpan("support.cleanup", { attributes: { request: record.request_id } }));
 
 /**
+ * Finds App issues attributed to the erased Reporter, including those whose
+ * request rows retention or offboarding already purged. Search lags and
+ * proves nothing by absence; a failure retries for a day, then is reported.
+ */
+const searchErasure = (search: PendingSearch, store: Store, options: CleanupOptions, now: () => number) => Effect.gen(function* () {
+  const mapping = mappingFor(options.mappings, search.slot);
+  const reference = search.reporter_reference;
+  if (!mapping?.githubInstallationId || !reference) return yield* io(() => store.searched(search, "failed", null));
+  const target = { installationId: mapping.githubInstallationId, repositoryId: mapping.repositoryId };
+  const gateway = yield* GitHubGateway;
+  const result = yield* Effect.result(gateway.searchIssues(target, `in:body "${reference}" author:app/${options.botLogin.replace(/\[bot\]$/, "")}`));
+  if (Result.isFailure(result)) {
+    const error = result.failure;
+    if (now() >= search.recorded_at + DAY) return yield* io(() => store.searched(search, "failed", null));
+    return yield* io(() => store.searched(search, "pending", Math.max(now() + SEARCH_RETRY_MS, error._tag === "RateLimited" ? error.until : 0)));
+  }
+  const found = result.success.issues.flatMap((issue): FoundIssue[] => {
+    const intentId = attributedIntent(issue, reference, options.botLogin);
+    return intentId ? [{ intentId, issue: { id: issue.id, nodeId: issue.nodeId, number: issue.number }, createdAt: Date.parse(issue.createdAt) }] : [];
+  });
+  const offboarded = yield* io(() => store.offboarded(search.slot));
+  yield* io(() => store.adopt(search, { githubInstallationId: mapping.githubInstallationId!, repositoryId: mapping.repositoryId },
+    found, offboarded, result.success.incomplete, now()));
+  yield* Effect.logInfo("Support erasure search outcome").pipe(Effect.annotateLogs({ erasure: search.id, found: found.length,
+    incomplete: result.success.incomplete }));
+});
+
+/**
  * One bounded pass of erasure, offboarding and retention cleanup. It never
  * creates an issue. An empty, failed or incomplete scan never resolves a
  * possible create: after 24 hours it hands off to an Operator, keeping only
@@ -444,5 +539,12 @@ export const sweepCleanup = (options: CleanupOptions): Effect.Effect<void, never
       yield* isolated("remote", processRecord(record, store, options, now, deadline));
     }
   }
+  // After capture, so a found issue is matched to the records this pass already holds.
+  yield* isolated("search", Effect.gen(function* () {
+    for (const search of yield* io(() => store.searches(now()))) {
+      if (now() >= deadline) break;
+      yield* isolated("search", searchErasure(search, store, options, now));
+    }
+  }));
   yield* isolated("compaction", io(() => store.compact(now())));
 }).pipe(Effect.withSpan("support.cleanup.sweep"));

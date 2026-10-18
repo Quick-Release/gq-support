@@ -38,20 +38,20 @@ const SLOT_BUDGET = "";
 export const REPORTER_REQUESTS = 120;
 export const SLOT_REQUESTS = 600;
 
-const UUID4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+export const UUID4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 // The Support request's resource ID, not the single-use authentication Request ID.
 const SUPPORT_REQUEST_ID = "req_[0-9A-HJKMNP-TV-Z]{26}";
-const DELIVERY: Record<string, string> = {
+export const DELIVERY: Record<string, string> = {
   pending: "accepted-pending", in_flight: "accepted-pending", delivered: "delivered",
   failed: "failed", outcome_unknown: "outcome-unknown",
 };
 
-const json = (body: unknown, status: number, headers: Record<string, string> = {}) =>
+export const json = (body: unknown, status: number, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
-const error = (code: string, status: number, headers: Record<string, string> = {}) => json({ code }, status, headers);
-const invalid = () => error("gq_support_invalid_request", 400);
-const notFound = () => error("gq_support_not_found", 404);
+export const error = (code: string, status: number, headers: Record<string, string> = {}) => json({ code }, status, headers);
+export const invalid = () => error("gq_support_invalid_request", 400);
+export const notFound = () => error("gq_support_not_found", 404);
 
 // PHP's trim(), which WordPress applies before forwarding, not JavaScript's wider one.
 const trim = (text: string) => text.replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, "");
@@ -227,7 +227,7 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
  * either is used up. A counter outage lets the call through: reads are safe,
  * and creates still fail closed on their own intake quota.
  */
-const throttle = async (storage: SlotStorage, subject: string, now: number): Promise<Response | null> => {
+export const throttle = async (storage: SlotStorage, subject: string, now: number): Promise<Response | null> => {
   const windowStart = Math.floor(now / TEN_MINUTES) * TEN_MINUTES;
   const spend = (key: string) => storage.statement(`INSERT INTO request_rate (slot, subject, window_start, requests)
     VALUES (?1, ?2, ?3, 1) ON CONFLICT (slot, subject) DO UPDATE SET
@@ -249,7 +249,7 @@ const throttle = async (storage: SlotStorage, subject: string, now: number): Pro
 };
 
 /** Exactly the allowed query keys, each at most once, including every required one. */
-const queryOf = (url: URL, allowed: readonly string[], required: readonly string[]): Map<string, string> | null => {
+export const queryOf = (url: URL, allowed: readonly string[], required: readonly string[]): Map<string, string> | null => {
   const params = new Map<string, string>();
   for (const [key, value] of url.searchParams) {
     if (!allowed.includes(key) || params.has(key)) return null;
@@ -311,6 +311,32 @@ const read = async (storage: SlotStorage, caller: Caller, url: URL, id: string, 
   // Unknown and out-of-scope requests look the same.
   if (!row || (!scope.site && row.reporter_subject !== scope.subject)) return notFound();
   return json(resource(row, caller), 200);
+};
+
+const EXPORT_PAGE = 50;
+
+/**
+ * `GET /v1/export`: the attested Reporter's own requests in this Slot, oldest
+ * first, including superseded ones. Only what the Reporter submitted and its
+ * outcome: no repository, issue, digest, Submission ID or installation.
+ */
+export const handleExport = async (storage: SlotStorage, url: URL, body: string, now: number): Promise<Response> => {
+  const params = queryOf(url, ["reporter_subject", "cursor"], ["reporter_subject"]);
+  const subject = params?.get("reporter_subject");
+  if (body !== "" || !params || !subject || !UUID4.test(subject)) return invalid();
+  const cursor = params.get("cursor");
+  const after = cursor === undefined ? [0, ""] as const : cursor.length <= CURSOR_CHARACTERS ? decodeCursor(cursor) : null;
+  if (!after) return invalid();
+  const limited = await throttle(storage, subject, now);
+  if (limited) return limited;
+  const rows = await storage.all<Row>(`${COLUMNS} AND r.reporter_subject = ?2 AND (r.created_at, r.id) > (?3, ?4)
+    ORDER BY r.created_at, r.id LIMIT ?5`, subject, ...after, EXPORT_PAGE + 1);
+  const items = rows.slice(0, EXPORT_PAGE);
+  return json({
+    items: items.map((row) => ({ id: row.id, summary: row.summary === "" ? null : row.summary, description: row.description,
+      created_at: new Date(row.created_at).toISOString(), delivery: DELIVERY[row.state], status: row.state === "delivered" ? row.status : null })),
+    next_cursor: rows.length > items.length ? encodeCursor(items[items.length - 1]!) : null,
+  }, 200);
 };
 
 /** `POST /v1/requests`, `GET /v1/requests` and `GET /v1/requests/{id}`, after authentication. */

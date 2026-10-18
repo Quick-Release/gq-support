@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import { sha256 } from "./signature.ts";
 import { GitHubGateway, OutcomeUnknown, ValidationRejected, type GitHubIssue, type GitHubTarget, type ReadIssueError } from "./github-gateway.ts";
 
 /** Trusted, pinned delivery inputs. Never construct these from Reporter request fields. */
@@ -97,6 +98,20 @@ const prepareIssue = (intent: SupportIssueIntent) => Effect.gen(function* () {
   if (!validIntent(intent)) return yield* Effect.fail(new ValidationRejected({ status: 400, fields: ["intent"] }));
   return { title: intent.title, body: bodyFor(intent), labels: [intent.clientOriginLabel], assignees: [intent.defaultDeveloper] };
 });
+
+/** The issue's pseudonymous reporter attribution: a short hash of the Slot and Reporter subject. */
+export const reporterReference = async (slot: string, subject: string) => `rs_${(await sha256(JSON.stringify([slot, subject]))).slice(0, 32)}`;
+
+/**
+ * The intent of an App-authored issue whose attribution names this reporter
+ * reference, or null. Search results are only hints until this holds.
+ */
+export const attributedIntent = (issue: GitHubIssue, reporterReference: string, botLogin: string): string | null => {
+  const [first, attribution] = issue.body?.split("\n", 2) ?? [];
+  const intent = /^<!-- gq-support:v1 intent=(int_[A-Z0-9]+) -->$/.exec(first ?? "")?.[1];
+  return intent && issue.creator === botLogin && attribution?.startsWith(ATTRIBUTION) &&
+    attribution.includes(` · reporter \`${reporterReference}\` · `) ? intent : null;
+};
 
 export const supportIssues = {
   /** Deterministically reconstruct the expected template for reconciliation, without I/O. */

@@ -3,7 +3,8 @@ import type { CredentialDatabase } from "./operator.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256, verifySignature } from "./signature.ts";
 import { createStorageFor } from "./storage.ts";
-import { CREATE_BODY_BYTES, handleSupportRequests } from "./support-requests.ts";
+import { CREATE_BODY_BYTES, handleExport, handleSupportRequests } from "./support-requests.ts";
+import { handleErasures } from "./erasure-api.ts";
 
 interface InstallationKey {
   key_id: string;
@@ -81,8 +82,14 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
   return key && !recordedRevocation(key.key_id) ? json(binding(key, mapping)) : invalidCode();
 };
 
+export interface InstallationApiOptions {
+  /** The title-digest key for erasures (src/cleanup.ts); without it, redacted titles need review. */
+  readonly digestKey?: CryptoKey | null;
+}
+
 /** Public HTTP boundary, shared by the Alchemy adapter and local D1 integration tests. */
-export const handleRequest = async (request: Request, db: CredentialDatabase, mappings: readonly RepositoryMapping[]): Promise<Response> => {
+export const handleRequest = async (request: Request, db: CredentialDatabase, mappings: readonly RepositoryMapping[],
+  options: InstallationApiOptions = {}): Promise<Response> => {
   try {
     const url = new URL(request.url);
     if (url.protocol !== "https:") return rejected();
@@ -90,7 +97,10 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     const installation = ["GET", "DELETE"].includes(request.method) && url.pathname === "/v1/installation" && !url.search;
     const create = request.method === "POST" && url.pathname === "/v1/requests";
     const requests = create || (request.method === "GET" && /^\/v1\/requests(?:\/[^/]+)?$/.test(url.pathname));
-    if (!enrollment && !installation && !requests) return json({ code: "not_found" }, 404);
+    const erasures = (request.method === "POST" && url.pathname === "/v1/erasures") ||
+      (request.method === "GET" && /^\/v1\/erasures\/[^/]+$/.test(url.pathname));
+    const exported = request.method === "GET" && url.pathname === "/v1/export";
+    if (!enrollment && !installation && !requests && !erasures && !exported) return json({ code: "not_found" }, 404);
     const now = Date.now();
     if (enrollment) {
       // Cloudflare overwrites this header at the edge; never use X-Forwarded-For.
@@ -136,9 +146,12 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     if (results[0].meta.changes !== 1 || results[1].results.length !== 1) return rejected();
     if (request.method === "DELETE") return json({ revoked: true });
     const suspended = Boolean(results[1].results[0].suspended_reason);
+    // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
+    const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
+    // Privacy rights still apply to a Suspended mapping.
+    if (erasures) return await handleErasures(request, url, body, db, storageFor(key.slot), options.digestKey ?? null, now);
+    if (exported) return await handleExport(storageFor(key.slot), url, body, now);
     if (requests) {
-      // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
-      const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
       return await handleSupportRequests(request, url, body, storageFor(key.slot),
         { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId, suspended,
           ...(mapping.githubInstallationId && mapping.clientOriginLabel ? { delivery: { githubInstallationId: mapping.githubInstallationId,

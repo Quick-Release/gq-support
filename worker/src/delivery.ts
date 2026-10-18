@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubIssue } from "./github-gateway.ts";
-import { supportIssues, type ReconciliationProgress, type SupportIssueIntent } from "./support-issues.ts";
+import { reporterReference, supportIssues, type ReconciliationProgress, type SupportIssueIntent } from "./support-issues.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256 } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
@@ -23,7 +23,7 @@ const intentFor = (row: DeliveryRow) => io(async (): Promise<SupportIssueIntent>
   clientOriginLabel: row.client_origin_label!, defaultDeveloper: row.default_developer!,
   attribution: { environment: row.environment!,
     installationReference: `inst_${(await sha256(JSON.stringify([row.slot, row.installation_id]))).slice(0, 32)}`,
-    reporterReference: `rs_${(await sha256(JSON.stringify([row.slot, row.reporter_subject]))).slice(0, 32)}` },
+    reporterReference: await reporterReference(row.slot, row.reporter_subject) },
 }));
 const approved = (row: DeliveryRow, mappings: readonly RepositoryMapping[]) => {
   const mapping = mappingFor(mappings, row.slot);
