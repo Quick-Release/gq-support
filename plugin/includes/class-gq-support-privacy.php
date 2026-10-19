@@ -20,7 +20,7 @@ final class GQ_Support_Privacy {
 	/** One retry of a deleted user's erasure, scheduled when the first call fails. Hooked by GQ_Support_Plugin. */
 	public const RETRY_HOOK = 'gq_support_retry_erasure';
 
-	/** Erasures this site recorded, listed until an Operator closes them. */
+	/** Erasures this site recorded, with their last known state, listed until an Operator closes them. */
 	public const ERASURES_OPTION = 'gq_support_erasures';
 
 	private const GROUP = 'gq-support-requests';
@@ -271,13 +271,61 @@ final class GQ_Support_Privacy {
 		if ( is_wp_error( $result ) || 202 !== $result['status'] || ! isset( $result['body']['id'] ) || ! is_string( $result['body']['id'] ) ) {
 			return null;
 		}
-		$erasures = get_option( self::ERASURES_OPTION, array() );
-		$erasures = is_array( $erasures ) ? $erasures : array();
-		if ( ! in_array( $result['body']['id'], $erasures, true ) ) {
-			$erasures[] = $result['body']['id'];
-			update_option( self::ERASURES_OPTION, $erasures, false );
-		}
+		$erasures                          = self::erasures();
+		$erasures[ $result['body']['id'] ] = array(
+			'state'      => is_string( $result['body']['state'] ?? null ) ? $result['body']['state'] : 'in_progress',
+			'checked_at' => time(),
+		);
+		update_option( self::ERASURES_OPTION, $erasures, false );
 		return $result['body'];
+	}
+
+	/**
+	 * This site's open erasures and their last known state, by erasure ID.
+	 *
+	 * @return array<string, array{state: string, checked_at: int}>
+	 */
+	public static function erasures(): array {
+		$stored   = get_option( self::ERASURES_OPTION, array() );
+		$erasures = array();
+		foreach ( is_array( $stored ) ? $stored : array() as $id => $erasure ) {
+			if ( is_string( $id ) && preg_match( '/^era_[0-9A-HJKMNP-TV-Z]{26}$/', $id ) && is_array( $erasure ) ) {
+				$erasures[ $id ] = array(
+					'state'      => (string) ( $erasure['state'] ?? '' ),
+					'checked_at' => (int) ( $erasure['checked_at'] ?? 0 ),
+				);
+			}
+		}
+		return $erasures;
+	}
+
+	/**
+	 * Ask the service for each open erasure's state, on a site admin's request.
+	 * A closed or no longer known erasure leaves the list.
+	 *
+	 * @return bool Whether the service answered for every erasure.
+	 */
+	public static function refresh_erasures(): bool {
+		$erasures = self::erasures();
+		$complete = true;
+		foreach ( array_keys( $erasures ) as $id ) {
+			$result = self::send( 'GET', '/v1/erasures/' . $id, null );
+			if ( is_wp_error( $result ) || ! in_array( $result['status'], array( 200, 404 ), true ) ) {
+				$complete = false;
+				continue;
+			}
+			$state = $result['body']['state'] ?? null;
+			if ( 404 === $result['status'] || 'closed' === $state || ! is_string( $state ) ) {
+				unset( $erasures[ $id ] );
+				continue;
+			}
+			$erasures[ $id ] = array(
+				'state'      => $state,
+				'checked_at' => time(),
+			);
+		}
+		update_option( self::ERASURES_OPTION, $erasures, false );
+		return $complete;
 	}
 
 	/**

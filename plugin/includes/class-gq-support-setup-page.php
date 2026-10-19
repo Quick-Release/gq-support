@@ -20,7 +20,7 @@ final class GQ_Support_Setup_Page {
 	/** GETQUICK Config's top-level menu. */
 	private const GETQUICK_MENU = 'getquick-options';
 
-	private const ACTIONS = array( 'enroll', 'test', 'disconnect' );
+	private const ACTIONS = array( 'enroll', 'test', 'disconnect', 'refresh_erasures' );
 
 	/**
 	 * Register the page and its handlers.
@@ -144,8 +144,79 @@ final class GQ_Support_Setup_Page {
 					</form>
 				<?php endif; ?>
 			<?php endif; ?>
+
+			<?php self::render_erasures(); ?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Personal data erasures this site requested, until GETQUICK closes them.
+	 * Shows the last known state; only the refresh button asks the service.
+	 */
+	private static function render_erasures(): void {
+		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
+		$erasures = GQ_Support_Privacy::erasures();
+		if ( array() === $erasures ) {
+			return;
+		}
+		?>
+		<h2><?php esc_html_e( 'Personal data erasures', 'gq-support' ); ?></h2>
+		<p class="description"><?php esc_html_e( 'Erasures requested through Tools → Erase Personal Data. Each stays listed until GETQUICK has reviewed any remaining copies and closed it.', 'gq-support' ); ?></p>
+		<table class="widefat striped">
+			<thead>
+				<tr>
+					<th scope="col"><?php esc_html_e( 'Erasure', 'gq-support' ); ?></th>
+					<th scope="col"><?php esc_html_e( 'State', 'gq-support' ); ?></th>
+					<th scope="col"><?php esc_html_e( 'Checked', 'gq-support' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $erasures as $id => $erasure ) : ?>
+					<tr>
+						<td><code><?php echo esc_html( $id ); ?></code></td>
+						<td><?php echo esc_html( self::erasure_label( $erasure['state'] ) ); ?></td>
+						<td>
+							<?php
+							/* translators: %s: how long ago the state was checked, e.g. "5 mins". */
+							echo esc_html( sprintf( __( '%s ago', 'gq-support' ), human_time_diff( $erasure['checked_at'] ) ) );
+							?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<input type="hidden" name="action" value="gq_support_refresh_erasures" />
+			<?php wp_nonce_field( 'gq_support_refresh_erasures' ); ?>
+			<?php submit_button( __( 'Refresh erasure status', 'gq-support' ), 'secondary' ); ?>
+		</form>
+		<?php
+	}
+
+	/**
+	 * Ask the service for the listed erasures' state.
+	 */
+	public static function handle_refresh_erasures(): void {
+		self::authorize( 'refresh_erasures' );
+		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
+		self::redirect( GQ_Support_Privacy::refresh_erasures() ? 'erasures_refreshed' : 'unreachable' );
+	}
+
+	/**
+	 * An erasure state for people.
+	 *
+	 * @param string $state The service's state.
+	 */
+	private static function erasure_label( string $state ): string {
+		switch ( $state ) {
+			case 'completed':
+				return __( 'Completed', 'gq-support' );
+			case 'needs_review':
+				return __( 'Text erased; remaining copies under review by GETQUICK', 'gq-support' );
+			default:
+				return __( 'In progress', 'gq-support' );
+		}
 	}
 
 	/**
@@ -228,6 +299,7 @@ final class GQ_Support_Setup_Page {
 			'disconnected'           => array( 'success', __( 'Disconnected. Reconnecting needs a new Enrollment code.', 'gq-support' ) ),
 			'disconnected_unrevoked' => array( 'warning', __( 'Disconnected locally, but the service could not be told. Ask GETQUICK to revoke this site\'s key.', 'gq-support' ) ),
 			'managed'                => array( 'error', __( 'This connection is managed by server configuration.', 'gq-support' ) ),
+			'erasures_refreshed'     => array( 'info', __( 'Erasure status refreshed.', 'gq-support' ) ),
 		);
 		if ( ! isset( $messages[ $notice ] ) ) {
 			return;
