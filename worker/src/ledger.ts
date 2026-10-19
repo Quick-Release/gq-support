@@ -16,7 +16,7 @@ import { PURGED_TEXT } from "./support-requests.ts";
  *   cannot drop a suppression. Removals come only from compaction and an
  *   Operator's lift, each recorded explicitly.
  */
-export type LedgerKind = "suppression" | "erasure" | "cleanup" | "offboarding" | "suspension";
+export type LedgerKind = "suppression" | "erasure" | "cleanup" | "offboarding" | "suspension" | "revocation";
 type Value = string | number | null;
 export type LedgerImage = Readonly<Record<string, Value>>;
 export interface LedgerEntry {
@@ -36,9 +36,11 @@ const TABLES: Record<LedgerKind, { readonly table: string; readonly key: readonl
     "last_error_class", "resolved_at", "intent_id", "github_installation_id", "repository_id", "attempt_started_at", "attempt_ended_at", "issues_json"] },
   suspension: { table: "repository_state", key: ["repository_id"], columns: ["repository_id", "suspended_reason", "suspended_at"],
     present: "suspended_reason IS NOT NULL" },
+  // Key revocations made at runtime: never undone, so a restore cannot revive a revoked key.
+  revocation: { table: "installation_key", key: ["key_id"], columns: ["key_id", "revoked_at"], present: "revoked_at IS NOT NULL" },
 };
 /** Replay order: an erasure before its cleanup records. */
-const ORDER: readonly LedgerKind[] = ["suppression", "erasure", "offboarding", "cleanup", "suspension"];
+const ORDER: readonly LedgerKind[] = ["suppression", "erasure", "offboarding", "cleanup", "suspension", "revocation"];
 const CHUNK = 50;
 /** How long a passed restore check is reused before the epochs are compared again. */
 const VERDICT_MS = 60_000;
@@ -107,7 +109,7 @@ export const replayLedger = async (main: QueryDatabase, ledger: QueryDatabase, e
   const work: (readonly [string, readonly Value[]])[] = [];
   // Compacted removals first, children before parents.
   for (const kind of [...ORDER].reverse()) {
-    if (kind === "suspension" || kind === "offboarding") continue;
+    if (kind === "suspension" || kind === "offboarding" || kind === "revocation") continue;
     const { table, key } = TABLES[kind];
     for (const entry of entries.filter((candidate) => candidate.kind === kind && candidate.payload === null)) {
       work.push([`DELETE FROM ${table} WHERE ${key.map((column) => `${column} = ?`).join(" AND ")}`, entry.reference.split(":", key.length)]);
@@ -123,6 +125,11 @@ export const replayLedger = async (main: QueryDatabase, ledger: QueryDatabase, e
         work.push([`INSERT INTO repository_state (repository_id, suspended_reason, suspended_at, observed_at) VALUES (?, ?, ?, ?)
           ON CONFLICT (repository_id) DO UPDATE SET suspended_reason = excluded.suspended_reason, suspended_at = excluded.suspended_at
           WHERE repository_state.suspended_reason IS NULL`, [...values, image.suspended_at ?? now]]);
+        continue;
+      }
+      if (kind === "revocation") {
+        // A key enrolled after the restore point is absent, and stays unusable until it enrolls again.
+        work.push(["UPDATE installation_key SET revoked_at = ? WHERE key_id = ? AND revoked_at IS NULL", [image.revoked_at ?? now, image.key_id ?? ""]]);
         continue;
       }
       const updates = columns.filter((column) => !key.includes(column)).map((column) => `${column} = excluded.${column}`);

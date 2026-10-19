@@ -5,6 +5,7 @@ import { sha256, verifySignature } from "./signature.ts";
 import { createStorageFor, type QueryDatabase } from "./storage.ts";
 import { CREATE_BODY_BYTES, handleExport, handleSupportRequests } from "./support-requests.ts";
 import { handleErasures } from "./erasure-api.ts";
+import { imageOf, ledgerStore } from "./ledger.ts";
 
 interface InstallationKey {
   key_id: string;
@@ -44,7 +45,8 @@ const readBody = async (request: Request, limit: number): Promise<string | null>
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 };
 
-const enroll = async (request: Request, body: string, db: CredentialDatabase, mappings: readonly RepositoryMapping[], now: number): Promise<Response> => {
+const enroll = async (request: Request, body: string, db: CredentialDatabase, mappings: readonly RepositoryMapping[], now: number,
+  ledger: QueryDatabase | null): Promise<Response> => {
   let data: Record<string, unknown>;
   try { data = JSON.parse(body); } catch { return invalidCode(); }
   if (!data || typeof data !== "object" || Array.isArray(data)) return invalidCode();
@@ -76,6 +78,12 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
       SELECT ?, slot, ?, ?, ?, ? FROM enrollment_code WHERE code_hash = ? AND consumed_key_id = ?`)
       .bind(keyId, installationId, origin, publicKey, now, hash, keyId),
   ]);
+  if (ledger) {
+    // The keys this enrollment replaced. A lost write here is caught by the next cleanup pass's mirror.
+    const replaced = (await db.prepare("SELECT key_id, revoked_at FROM installation_key WHERE slot = ? AND revoked_at = ?")
+      .bind(mapping.slot, now).all<{ key_id: string; revoked_at: number }>()).results;
+    await ledgerStore(ledger).record(replaced.map((row) => imageOf("revocation", row)), now).catch(() => undefined);
+  }
   const key = await db.prepare(`SELECT k.* FROM enrollment_code c JOIN installation_key k ON k.key_id = c.consumed_key_id
     WHERE c.code_hash = ? AND c.consumed_public_key = ? AND k.installation_id = ? AND k.origin = ? AND k.revoked_at IS NULL`)
     .bind(hash, publicKey, installationId, origin).first<InstallationKey>();
@@ -124,7 +132,7 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     ]);
     const body = await readBody(request, create ? CREATE_BODY_BYTES : BODY_BYTES);
     if (body === null) return json({ code: "request_too_large" }, 413);
-    if (enrollment) return await enroll(request, body, db, mappings, now);
+    if (enrollment) return await enroll(request, body, db, mappings, now, options.ledger ?? null);
     const keyId = request.headers.get("GQ-Support-Key-Id");
     const key = await db.prepare("SELECT * FROM installation_key WHERE key_id = ? AND revoked_at IS NULL")
       .bind(keyId ?? "").first<InstallationKey>();
@@ -134,6 +142,10 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     // Check authority again in the same primary-D1 batch that consumes the nonce.
     // A request paused in signature verification cannot authorize an already-revoked key.
     const requestId = request.headers.get("GQ-Support-Request-Id")!;
+    // A self-revocation goes to the ledger first, so a restore cannot revive the key.
+    if (request.method === "DELETE" && options.ledger) {
+      await ledgerStore(options.ledger).record([imageOf("revocation", { key_id: key.key_id, revoked_at: now })], now);
+    }
     const results = await db.batch<{ key_id: string; suspended_reason?: string }>([
       db.prepare(`INSERT INTO replay (key_id, request_id, expires_at)
         SELECT key_id, ?, ? FROM installation_key WHERE key_id = ? AND revoked_at IS NULL

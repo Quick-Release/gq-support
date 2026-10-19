@@ -169,3 +169,19 @@ it("an Operator's lift is recorded, so a later replay does not suspend the repos
   await cleanup();
   expect(await entry("suspension", "42")).toEqual({ payload: null });
 });
+
+it("runtime key revocations survive a restore", async () => {
+  const clients = harness(main(), [mapping], { digestKey: key, ledger: ledger() });
+  const image = await snapshot(main());
+  // Re-enrollment replaces the first key; the site then revokes its new one.
+  const replacement = await clients.enroll(mapping.slot, "installation-b");
+  expect((await replacement.send("DELETE", "/v1/installation")).status).toBe(200);
+  for (const revoked of [installation.keyId, replacement.keyId]) {
+    expect(JSON.parse((await entry("revocation", revoked))!.payload!)).toMatchObject({ key_id: revoked, revoked_at: now });
+  }
+  await restore(main(), image);
+  expect((await installation.send("GET", "/v1/installation")).status).toBe(200); // the restore revived the old key
+  await operator("restore-recorded", "operator-1", "time-travel-restore");
+  expect(await restoreGate()(main(), ledger(), now)).toBe(true);
+  expect((await installation.send("GET", "/v1/installation")).status).toBe(403);
+});

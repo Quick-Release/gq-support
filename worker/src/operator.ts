@@ -5,7 +5,7 @@ import { runCleanupOperator } from "./cleanup-operator.ts";
 import { unsuspendRepository } from "./repository-suspension.ts";
 import { sha256 } from "./signature.ts";
 import { runStatusOperation } from "./status-operations.ts";
-import { ledgerStore } from "./ledger.ts";
+import { imageOf, ledgerStore } from "./ledger.ts";
 import type { QueryDatabase } from "./storage.ts";
 
 export type CredentialDatabase = Pick<D1Database, "prepare" | "batch">;
@@ -76,6 +76,7 @@ export const runOperator = async (args: readonly string[], { query, recordRevoca
       await recordRevocation(key.key_id, now);
       await query("UPDATE installation_key SET revoked_at = ? WHERE slot = ? AND key_id = ? AND revoked_at IS NULL",
         [now, slot, key.key_id]);
+      if (ledger) await ledgerStore(asQueryDatabase(ledger)).record([imageOf("revocation", { key_id: key.key_id, revoked_at: now })], now);
     }
     return `Revoked ${slot}`;
   }
