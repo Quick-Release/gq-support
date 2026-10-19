@@ -26,6 +26,23 @@ only fresh GitHub reads determine status, never the payload's state or text.
 No webhook creates Support requests or mutates GitHub. Transfers/deletions close
 the original request through the refresher's lost-tracking path.
 
+Lifecycle events ([#40](https://github.com/Quick-Release/gq-support/issues/40))
+follow the [event matrix](../research/github-webhook-sync.md#permissions-and-event-matrix).
+A repository counts only when a mapping pins it to the delivering installation.
+Unsafe signals suspend the repository in the request, before the `2xx`:
+`public` and `repository.publicized` as `public`, `repository.archived` as
+`archived`, and `repository.deleted`/`transferred`, `installation.deleted`/`suspend`
+and `installation_repositories.removed` as `no_access` (every mapped repository
+on that installation for `installation`). Every Slot on the repository then
+reads `mapping_state: suspended` and new creates get `403 gq_support_not_configured`,
+with no sweep in between. Safe signals (`privatized`, `unarchived`,
+`installation.unsuspend`/`new_permissions_accepted`, `installation_repositories.added`)
+only make the repository's next sweep due now; that sweep's verification is
+the passing check the Operator's `unsuspend` requires. No webhook lifts a
+suspension, so duplicate and out-of-order deliveries keep the first cause. A
+write returns `202`, nothing mapped returns `204`, and a D1 failure returns
+`503`. Renames, `installation.created` and `installation_target` return `204`.
+
 Invalid deliveries return an empty `401`, increment the
 Effect `github_webhook_rejections_total` counter, and log only a fixed message
 and a reason class (`configuration`, `content_type`, `headers`, `body_size`,
@@ -72,9 +89,8 @@ configured key once per isolate, lazily on the first structurally valid delivery
 Deploy the verified receiver before enabling delivery. Replace the reserved
 placeholder URL in App settings with the stage Worker's HTTPS URL plus
 `/v1/github/webhooks`, keep TLS verification enabled, and select JSON delivery.
-Complete the staging evidence below before enabling production. This core
-acknowledges events without changing Support status; the sweep remains the
-source of recovery until later handlers land.
+Complete the staging evidence below before enabling production. The sweep
+remains the source of recovery for every missed delivery.
 
 ## Rotation
 
