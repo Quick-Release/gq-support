@@ -144,7 +144,7 @@ it("an uncertain result is reconciled read-only, then the found issue is redacte
   await cleanup();
   await expectMinimal(request.id);
   // Only the keyed title digest outlives the text, and only while automatic retitling remains possible.
-  expect(await cleanupRow(request.id)).toMatchObject({ state: "reconciling", title_digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  expect(await cleanupRow(request.id)).toMatchObject({ state: "reconciling", title_digest: expect.stringMatching(/^[a-f0-9]{16}\.[a-f0-9]{64}$/) });
   advance(60_000);
   await cleanup();
   expectRedacted(github.issues[0]!, "Support request (erased)");
@@ -488,3 +488,14 @@ it("a search that keeps failing is reported, not taken as proof", async () => {
   for (let hour = 0; hour < 25; hour++) { advance(3_600_000); await cleanup(); }
   expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "needs_review", residual: ["reference_search"] });
 }, 30_000);
+
+it("a digest made before the key rotated leaves the title for review, not as retitled", async () => {
+  await accept();
+  await sweep();
+  const erasure = await erase();
+  await cleanup(await digestKey("the rotated App private key"));
+  advance(10_000);
+  await cleanup(await digestKey("the rotated App private key"));
+  expectRedacted(github.issues[0]!, "Checkout fails");
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ residual: ["edit_history", "title_review"] });
+});

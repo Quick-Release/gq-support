@@ -36,10 +36,23 @@ export const digestKey = async (secret: string): Promise<CryptoKey> => crypto.su
   { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: encoder.encode("gq-support title digest v1") },
   await crypto.subtle.importKey("raw", encoder.encode(secret), "HKDF", false, ["deriveKey"]),
   { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"]);
-/** Keyed by the intent too, so equal titles of different requests never compare equal. */
+const hmac = async (key: CryptoKey, text: string) =>
+  Array.from(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(text))), (byte) => byte.toString(16).padStart(2, "0")).join("");
+/** Names the key without revealing it, so a digest made before a rotation is recognised as unverifiable. */
+const keyIdOf = async (key: CryptoKey) => (await hmac(key, "gq-support title digest key id")).slice(0, 16);
+/**
+ * `<key id>.<HMAC>`, keyed by the intent too, so equal titles of different
+ * requests never compare equal.
+ */
 export const titleDigest = async (key: CryptoKey, intentId: string, title: string) =>
-  Array.from(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify([intentId, title])))),
-    (byte) => byte.toString(16).padStart(2, "0")).join("");
+  `${await keyIdOf(key)}.${await hmac(key, JSON.stringify([intentId, title]))}`;
+/**
+ * Whether a title is the one the digest was made from, or null when that can
+ * no longer be checked: no digest, no key, or a digest from a rotated key.
+ */
+export const derivedTitleCheck = async (key: CryptoKey | null, intentId: string, digest: string | null) =>
+  key && digest?.startsWith(`${await keyIdOf(key)}.`)
+    ? async (title: string) => await titleDigest(key, intentId, title) === digest : null;
 
 const SUPPRESS = `INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('request', ?, 'erasure') ON CONFLICT DO NOTHING`;
 
@@ -459,8 +472,7 @@ const redactRecord = (record: CleanupRecord, target: GitHubTarget, options: Clea
   now: () => number, retry: (at: number) => number) => Effect.gen(function* () {
   const [issue, ...rest] = issuesOf(record);
   if (!issue) return { state: "unresolved", next: null, error: "MissingIdentity" } satisfies Transition;
-  const key = options.digestKey, digest = record.title_digest;
-  const isDerivedTitle = key && digest ? async (title: string) => await titleDigest(key, record.intent_id!, title) === digest : null;
+  const isDerivedTitle = yield* Effect.promise(() => derivedTitleCheck(options.digestKey, record.intent_id!, record.title_digest));
   const result = yield* Effect.result(supportIssues.redact(target, record.intent_id!, issue, isDerivedTitle, authorize));
   if (Result.isSuccess(result)) {
     const done = result.success;
