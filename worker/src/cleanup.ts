@@ -54,7 +54,8 @@ export const derivedTitleCheck = async (key: CryptoKey | null, intentId: string,
   key && digest?.startsWith(`${await keyIdOf(key)}.`)
     ? async (title: string) => await titleDigest(key, intentId, title) === digest : null;
 
-const SUPPRESS = `INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('request', ?, 'erasure') ON CONFLICT DO NOTHING`;
+// Every write to a mirrored table sets `changed_at`, so the ledger mirror can read only what changed (src/ledger.ts).
+const SUPPRESS = `INSERT INTO delivery_suppression (scope, reference, reason, changed_at) VALUES ('request', ?, 'erasure', ?) ON CONFLICT DO NOTHING`;
 
 /**
  * Deletes a request's rows once its cleanup row holds everything the cleanup
@@ -92,13 +93,13 @@ export interface ErasureTarget {
  */
 export const erasureStatements = (erasureId: string, slot: string, subject: string, reference: string,
   targets: readonly ErasureTarget[], now: number, immediate: boolean): Statement[] => [
-  ...targets.map(({ requestId }): Statement => [SUPPRESS, [requestId]]),
+  ...targets.map(({ requestId }): Statement => [SUPPRESS, [requestId, now]]),
   // The reference search also finds issues whose request rows are already gone.
-  [`INSERT INTO erasure (id, slot, recorded_at, reporter_reference, search_state, search_next_at)
-    VALUES (?, ?, ?, ?, 'pending', ?) ON CONFLICT DO NOTHING`, [erasureId, slot, now, reference, now]],
+  [`INSERT INTO erasure (id, slot, recorded_at, reporter_reference, search_state, search_next_at, changed_at)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING`, [erasureId, slot, now, reference, now, now]],
   ...targets.map(({ requestId, titleDigest }): Statement => [`INSERT INTO support_cleanup
-    (request_id, slot, purpose, erasure_id, recorded_at, title_digest, state, next_attempt_at)
-    VALUES (?, ?, 'erasure', ?, ?, ?, 'draining', ?) ON CONFLICT DO NOTHING`, [requestId, slot, erasureId, now, titleDigest, now]]),
+    (request_id, slot, purpose, erasure_id, recorded_at, title_digest, state, next_attempt_at, changed_at)
+    VALUES (?, ?, 'erasure', ?, ?, ?, 'draining', ?, ?) ON CONFLICT DO NOTHING`, [requestId, slot, erasureId, now, titleDigest, now, now]]),
   // An active attempt already holds its own copy, so the text goes at once.
   ...(immediate ? [[`UPDATE support_request SET ${BLANK}, erased_at = ?
     WHERE slot = ? AND reporter_subject = ? AND erased_at IS NULL
@@ -209,8 +210,8 @@ const cleanupStore = (db: QueryDatabase) => {
   const run = (statements: readonly Statement[]) => db.batch(statements.map(([sql, parameters]) => db.prepare(sql).bind(...parameters)));
   const queue = (purpose: string, rows: readonly { id: string; slot: string }[], now: number) => rows.length === 0 ? Promise.resolve() :
     run(rows.flatMap(({ id, slot }): Statement[] => [
-      [`INSERT INTO support_cleanup (request_id, slot, purpose, recorded_at, state, next_attempt_at)
-        VALUES (?, ?, ?, ?, 'draining', ?) ON CONFLICT DO NOTHING`, [id, slot, purpose, now, now]],
+      [`INSERT INTO support_cleanup (request_id, slot, purpose, recorded_at, state, next_attempt_at, changed_at)
+        VALUES (?, ?, ?, ?, 'draining', ?, ?) ON CONFLICT DO NOTHING`, [id, slot, purpose, now, now, now]],
       ...blankStatements(id, now),
     ])).then(() => undefined);
   return {
@@ -226,10 +227,10 @@ const cleanupStore = (db: QueryDatabase) => {
           title_digest: string | null; title: string; erased_at: number | null; intent_id: string | null }>()).results;
       const statements: Statement[] = [];
       for (const row of rows) {
-        if (row.purpose === "erasure") statements.push([SUPPRESS, [row.request_id]]);
+        if (row.purpose === "erasure") statements.push([SUPPRESS, [row.request_id, now]]);
         if (row.state === "draining" && row.purpose === "erasure" && row.title_digest === null && row.erased_at === null && key && row.intent_id) {
-          statements.push([`UPDATE support_cleanup SET title_digest = ? WHERE request_id = ? AND state = 'draining' AND title_digest IS NULL`,
-            [await titleDigest(key, row.intent_id, row.title), row.request_id]]);
+          statements.push([`UPDATE support_cleanup SET title_digest = ?, changed_at = ? WHERE request_id = ? AND state = 'draining' AND title_digest IS NULL`,
+            [await titleDigest(key, row.intent_id, row.title), now, row.request_id]]);
         }
         statements.push(...blankStatements(row.request_id, now), ...purgeStatements(row.request_id));
       }
@@ -268,12 +269,12 @@ const cleanupStore = (db: QueryDatabase) => {
       await run([
         [`UPDATE support_cleanup SET state = ?, outcome = ?, next_attempt_at = ?, window_started_at = ?, resolved_at = ?,
           title_digest = CASE WHEN ? THEN NULL ELSE title_digest END, intent_id = ?, github_installation_id = ?,
-          repository_id = ?, attempt_started_at = ?, attempt_ended_at = ?, issues_json = ?
+          repository_id = ?, attempt_started_at = ?, attempt_ended_at = ?, issues_json = ?, changed_at = ?
           WHERE request_id = ? AND state = 'draining' AND NOT EXISTS (SELECT 1 FROM delivery_intent WHERE request_id = ?
             AND (generation IS NOT ? OR state IS NOT ? OR (owner IS NOT NULL AND lease_expires_at > ?)))`,
           [change.state, change.outcome ?? null, change.next, now, change.state === "resolved" ? now : null, ended(change.state) ? 1 : 0,
             row.intent_id, row.github_installation_id, row.repository_id, row.attempt_started_at, row.drain_until ?? row.attempt_started_at,
-            change.issues ? JSON.stringify(change.issues) : null,
+            change.issues ? JSON.stringify(change.issues) : null, now,
             row.request_id, row.request_id, row.generation, row.state, now]],
         ...purgeStatements(row.request_id),
       ]);
@@ -318,12 +319,12 @@ const cleanupStore = (db: QueryDatabase) => {
             provider_cooldown_until = MAX(provider_cooldown_until, excluded.provider_cooldown_until)`,
           [record.github_installation_id, change.providerUntil, change.providerUntil]] as Statement] : []),
         [`UPDATE support_cleanup SET state = ?, next_attempt_at = ?, outcome = ?, residual = ?, last_error_class = ?,
-          reconciliation_json = ?, reconciliation_count = ?, issues_json = ?, resolved_at = ?, owner = NULL,
+          reconciliation_json = ?, reconciliation_count = ?, issues_json = ?, resolved_at = ?, owner = NULL, changed_at = ?,
           title_digest = CASE WHEN ? THEN NULL ELSE title_digest END WHERE request_id = ? AND owner = ?`,
           [change.state, change.next, change.outcome === undefined ? record.outcome : change.outcome,
             merged(record.residual, change.residual ?? []).join(","), change.error ?? null, change.progress ?? null,
             change.count ?? record.reconciliation_count, change.issues ? JSON.stringify(change.issues) : record.issues_json,
-            change.state === "resolved" ? now : null, ended(change.state) ? 1 : 0, record.request_id, owner]],
+            change.state === "resolved" ? now : null, now, ended(change.state) ? 1 : 0, record.request_id, owner]],
       ]);
     },
     /**
@@ -364,8 +365,9 @@ const cleanupStore = (db: QueryDatabase) => {
         .bind(now).all<PendingSearch>()).results;
     },
     /** Retries, or records the search's end. A changed schedule means another pass took it. */
-    async searched(search: PendingSearch, state: "pending" | "done" | "incomplete" | "failed", next: number | null) {
-      await run([[`UPDATE erasure SET search_state = ?, search_next_at = ? WHERE id = ? AND search_state = 'pending'`, [state, next, search.id]]]);
+    async searched(search: PendingSearch, state: "pending" | "done" | "incomplete" | "failed", next: number | null, now: number) {
+      await run([[`UPDATE erasure SET search_state = ?, search_next_at = ?, changed_at = ? WHERE id = ? AND search_state = 'pending'`,
+        [state, next, now, search.id]]]);
     },
     /**
      * Adds found issues to the erasure. A new one is keyed by its intent, the
@@ -378,20 +380,20 @@ const cleanupStore = (db: QueryDatabase) => {
       await run([
         ...found.flatMap(({ intentId, issue, createdAt }): Statement[] => [
           ...(offboarded ? [] : [[`UPDATE support_cleanup SET purpose = 'erasure', erasure_id = COALESCE(erasure_id, ?), state = 'redacting',
-            next_attempt_at = ?, window_started_at = ?, window_until = NULL, issues_json = ?, resolved_at = NULL
+            next_attempt_at = ?, window_started_at = ?, window_until = NULL, issues_json = ?, resolved_at = NULL, changed_at = ?
             WHERE intent_id = ? AND slot = ? AND state = 'unresolved'`,
-            [search.id, now, now, JSON.stringify([issue]), intentId, search.slot]] as Statement]),
+            [search.id, now, now, JSON.stringify([issue]), now, intentId, search.slot]] as Statement]),
           [`INSERT INTO support_cleanup (request_id, slot, purpose, erasure_id, recorded_at, state, next_attempt_at, window_started_at,
-              intent_id, github_installation_id, repository_id, attempt_started_at, attempt_ended_at, issues_json, outcome, residual, resolved_at)
-            SELECT ?, ?, 'erasure', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+              intent_id, github_installation_id, repository_id, attempt_started_at, attempt_ended_at, issues_json, outcome, residual, resolved_at, changed_at)
+            SELECT ?, ?, 'erasure', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM support_cleanup WHERE intent_id = ?) AND NOT EXISTS (SELECT 1 FROM delivery_intent WHERE id = ?)
             ON CONFLICT DO NOTHING`,
             [intentId, search.slot, search.id, now, offboarded ? "resolved" : "redacting", offboarded ? null : now, now, intentId,
               mapping.githubInstallationId, mapping.repositoryId, createdAt, createdAt, JSON.stringify(offboarded ? [] : [issue]),
-              offboarded ? "found" : null, offboarded ? "client_issue" : "", offboarded ? now : null, intentId, intentId]],
+              offboarded ? "found" : null, offboarded ? "client_issue" : "", offboarded ? now : null, now, intentId, intentId]],
         ]),
-        [`UPDATE erasure SET search_state = ?, search_next_at = NULL WHERE id = ? AND search_state = 'pending'`,
-          [incomplete ? "incomplete" : "done", search.id]],
+        [`UPDATE erasure SET search_state = ?, search_next_at = NULL, changed_at = ? WHERE id = ? AND search_state = 'pending'`,
+          [incomplete ? "incomplete" : "done", now, search.id]],
       ]);
     },
     async offboarded(slot: string) {
@@ -529,14 +531,14 @@ const processRecord = (record: CleanupRecord, store: Store, options: CleanupOpti
 const searchErasure = (search: PendingSearch, store: Store, options: CleanupOptions, now: () => number) => Effect.gen(function* () {
   const mapping = mappingFor(options.mappings, search.slot);
   const reference = search.reporter_reference;
-  if (!mapping?.githubInstallationId || !reference) return yield* io(() => store.searched(search, "failed", null));
+  if (!mapping?.githubInstallationId || !reference) return yield* io(() => store.searched(search, "failed", null, now()));
   const target = { installationId: mapping.githubInstallationId, repositoryId: mapping.repositoryId };
   const gateway = yield* GitHubGateway;
   const result = yield* Effect.result(gateway.searchIssues(target, `in:body "${reference}" author:app/${options.botLogin.replace(/\[bot\]$/, "")}`));
   if (Result.isFailure(result)) {
     const error = result.failure;
-    if (now() >= search.recorded_at + DAY) return yield* io(() => store.searched(search, "failed", null));
-    return yield* io(() => store.searched(search, "pending", Math.max(now() + SEARCH_RETRY_MS, error._tag === "RateLimited" ? error.until : 0)));
+    if (now() >= search.recorded_at + DAY) return yield* io(() => store.searched(search, "failed", null, now()));
+    return yield* io(() => store.searched(search, "pending", Math.max(now() + SEARCH_RETRY_MS, error._tag === "RateLimited" ? error.until : 0), now()));
   }
   const found = result.success.issues.flatMap((issue): FoundIssue[] => {
     const intentId = attributedIntent(issue, reference, options.botLogin);

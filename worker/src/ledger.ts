@@ -26,22 +26,31 @@ export interface LedgerEntry {
   readonly payload: LedgerImage | null;
 }
 
-/** The mirrored columns: no text, subject or owner. */
-const TABLES: Record<LedgerKind, { readonly table: string; readonly key: readonly string[]; readonly columns: readonly string[]; readonly present?: string }> = {
-  suppression: { table: "delivery_suppression", key: ["scope", "reference"], columns: ["scope", "reference", "reason"] },
-  erasure: { table: "erasure", key: ["id"], columns: ["id", "slot", "recorded_at", "reporter_reference", "closed_at", "search_state", "search_next_at"] },
-  offboarding: { table: "offboarding", key: ["slot"], columns: ["slot", "recorded_at", "purge_after"] },
-  cleanup: { table: "support_cleanup", key: ["request_id"], columns: ["request_id", "slot", "purpose", "erasure_id", "recorded_at", "title_digest",
+/**
+ * The mirrored columns: no text, subject or owner. `changed` is the column
+ * every writer sets to the write time, so a pass reads only recent changes.
+ */
+const TABLES: Record<LedgerKind, { readonly table: string; readonly key: readonly string[]; readonly columns: readonly string[];
+  readonly changed: string; readonly present?: string }> = {
+  suppression: { table: "delivery_suppression", key: ["scope", "reference"], columns: ["scope", "reference", "reason"], changed: "changed_at" },
+  erasure: { table: "erasure", key: ["id"], columns: ["id", "slot", "recorded_at", "reporter_reference", "closed_at", "search_state", "search_next_at"],
+    changed: "changed_at" },
+  offboarding: { table: "offboarding", key: ["slot"], columns: ["slot", "recorded_at", "purge_after"], changed: "changed_at" },
+  cleanup: { table: "support_cleanup", key: ["request_id"], changed: "changed_at", columns: ["request_id", "slot", "purpose", "erasure_id", "recorded_at", "title_digest",
     "state", "outcome", "residual", "next_attempt_at", "window_started_at", "window_until", "reconciliation_count", "reconciliation_json",
     "last_error_class", "resolved_at", "intent_id", "github_installation_id", "repository_id", "attempt_started_at", "attempt_ended_at", "issues_json"] },
   suspension: { table: "repository_state", key: ["repository_id"], columns: ["repository_id", "suspended_reason", "suspended_at"],
-    present: "suspended_reason IS NOT NULL" },
+    present: "suspended_reason IS NOT NULL", changed: "suspended_at" },
   // Key revocations made at runtime: never undone, so a restore cannot revive a revoked key.
-  revocation: { table: "installation_key", key: ["key_id"], columns: ["key_id", "revoked_at"], present: "revoked_at IS NOT NULL" },
+  revocation: { table: "installation_key", key: ["key_id"], columns: ["key_id", "revoked_at"], present: "revoked_at IS NOT NULL", changed: "revoked_at" },
 };
 /** Replay order: an erasure before its cleanup records. */
 const ORDER: readonly LedgerKind[] = ["suppression", "erasure", "offboarding", "cleanup", "suspension", "revocation"];
 const CHUNK = 50;
+/** Covers clock skew between isolates and writes that land while a pass runs. */
+const MIRROR_SKEW_MS = 300_000;
+/** A full pass also covers any write that left `changed_at` at its default. */
+const FULL_MIRROR_MS = 86_400_000;
 /** How long a passed restore check is reused before the epochs are compared again. */
 const VERDICT_MS = 60_000;
 /** A failed recheck still trusts a verdict this recent. */
@@ -79,20 +88,39 @@ export const ledgerStore = (ledger: QueryDatabase) => ({
   },
 });
 
-/** Adds or updates the ledger image of every changed main row. Never records a removal. */
+/**
+ * Adds or updates the ledger image of every main row changed since the last
+ * pass, and of every row once a day. Never records a removal.
+ */
 export const mirrorToLedger = async (main: QueryDatabase, ledger: QueryDatabase, now: number) => {
+  const marks = await main.prepare("SELECT mirrored_at, full_mirrored_at FROM restore_state WHERE id = 1")
+    .first<{ mirrored_at: number; full_mirrored_at: number }>();
+  const full = !marks || now - marks.full_mirrored_at >= FULL_MIRROR_MS;
   const changed: LedgerEntry[] = [];
   for (const kind of ORDER) {
-    const { table, columns, present } = TABLES[kind];
-    const rows = (await main.prepare(`SELECT ${columns.join(", ")} FROM ${table}${present ? ` WHERE ${present}` : ""}`).all()).results;
-    const recorded = new Map((await ledger.prepare("SELECT reference, payload FROM ledger_entry WHERE kind = ?").bind(kind)
-      .all<{ reference: string; payload: string | null }>()).results.map((entry) => [entry.reference, entry.payload]));
-    for (const row of rows) {
-      const entry = imageOf(kind, row);
-      if (recorded.get(entry.reference) !== JSON.stringify(entry.payload)) changed.push(entry);
+    const { table, columns, present, changed: column } = TABLES[kind];
+    const filters = [...(present ? [present] : []), ...(full ? [] : [`${column} >= ?`])];
+    const rows = (await main.prepare(`SELECT ${columns.join(", ")} FROM ${table}${filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : ""}`)
+      .bind(...(full ? [] : [marks.mirrored_at - MIRROR_SKEW_MS])).all()).results;
+    const entries = rows.map((row) => imageOf(kind, row));
+    const recorded = new Map<string, string | null>();
+    if (full) {
+      for (const entry of (await ledger.prepare("SELECT reference, payload FROM ledger_entry WHERE kind = ?").bind(kind)
+        .all<{ reference: string; payload: string | null }>()).results) recorded.set(entry.reference, entry.payload);
+    } else {
+      for (let index = 0; index < entries.length; index += CHUNK) {
+        const references = entries.slice(index, index + CHUNK).map((entry) => entry.reference);
+        for (const entry of (await ledger.prepare(`SELECT reference, payload FROM ledger_entry WHERE kind = ?
+          AND reference IN (${references.map(() => "?").join(", ")})`).bind(kind, ...references)
+          .all<{ reference: string; payload: string | null }>()).results) recorded.set(entry.reference, entry.payload);
+      }
     }
+    changed.push(...entries.filter((entry) => recorded.get(entry.reference) !== JSON.stringify(entry.payload)));
   }
   await ledgerStore(ledger).record(changed, now);
+  // Marked at this pass's start: writes landing during it are read again next time.
+  await main.prepare(`UPDATE restore_state SET mirrored_at = ?, full_mirrored_at = CASE WHEN ? THEN ? ELSE full_mirrored_at END
+    WHERE id = 1`).bind(now, full ? 1 : 0, now).run();
   return changed.length;
 };
 

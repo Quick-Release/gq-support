@@ -185,3 +185,19 @@ it("runtime key revocations survive a restore", async () => {
   expect(await restoreGate()(main(), ledger(), now)).toBe(true);
   expect((await installation.send("GET", "/v1/installation")).status).toBe(403);
 });
+
+it("mirrors changes incrementally, and every row in the daily full pass", async () => {
+  await cleanup(); // the first pass is a full one
+  const request = await accept();
+  await recordErasure(main(), mapping.slot, subject, now, key, null); // no ledger write: only the mirror can carry it
+  // A writer that leaves changed_at at its default is invisible to the incremental pass.
+  await main().prepare("INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('slot', 'other/production', 'offboarding')").run();
+  advance(60_000);
+  await cleanup();
+  expect(JSON.parse((await entry("cleanup", request))!.payload!)).toMatchObject({ state: "resolved" });
+  expect(await entry("suppression", `request:${request}`)).toBeDefined();
+  expect(await entry("suppression", "slot:other/production")).toBeUndefined();
+  advance(DAY);
+  await cleanup();
+  expect(await entry("suppression", "slot:other/production")).toBeDefined();
+});

@@ -68,7 +68,7 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
       throw new Error("Only a finished, open erasure can be closed");
     }
     // The reference is needed only while the erasure is open.
-    await query("UPDATE erasure SET closed_at = ?, reporter_reference = NULL WHERE id = ? AND closed_at IS NULL", [now, reference!]);
+    await query("UPDATE erasure SET closed_at = ?, reporter_reference = NULL, changed_at = ? WHERE id = ? AND closed_at IS NULL", [now, now, reference!]);
     return "Erasure closed";
   }
   if (command === "offboard" && args.length === 3) {
@@ -78,8 +78,9 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
       imageOf("offboarding", { slot, recorded_at: now, purge_after: now + OFFBOARDING_GRACE_MS })], now);
     await audit("offboard", slot, "offboarding");
     // Suppression first: no new create from the moment the Slot is offboarded.
-    await query(`INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('slot', ?, 'offboarding') ON CONFLICT DO NOTHING`, [slot]);
-    await query(`INSERT INTO offboarding (slot, recorded_at, purge_after) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`, [slot, now, now + OFFBOARDING_GRACE_MS]);
+    await query(`INSERT INTO delivery_suppression (scope, reference, reason, changed_at) VALUES ('slot', ?, 'offboarding', ?) ON CONFLICT DO NOTHING`, [slot, now]);
+    await query(`INSERT INTO offboarding (slot, recorded_at, purge_after, changed_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+      [slot, now, now + OFFBOARDING_GRACE_MS, now]);
     const [{ purge_after: purgeAfter }] = await query("SELECT purge_after FROM offboarding WHERE slot = ?", [slot]) as [{ purge_after: number }];
     return `Offboarded ${slot}; content is purged from ${new Date(purgeAfter).toISOString()}. Revoke its key with: operator revoke ${slot}`;
   }
@@ -93,8 +94,8 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
     // redaction; offboarding and retention never edit the Client's issues.
     await query(`UPDATE support_cleanup SET state = CASE WHEN purpose = 'erasure' AND COALESCE(issues_json, '[]') != '[]'
         THEN 'redacting' ELSE 'reconciling' END,
-      window_until = ?, next_attempt_at = ?, reconciliation_json = NULL, last_error_class = NULL
-      WHERE request_id = ? AND state = 'unresolved'`, [now + 3_600_000, now, reference!]);
+      window_until = ?, next_attempt_at = ?, reconciliation_json = NULL, last_error_class = NULL, changed_at = ?
+      WHERE request_id = ? AND state = 'unresolved'`, [now + 3_600_000, now, now, reference!]);
     return "Cleanup reconciliation scheduled";
   }
   if (command === "cleanup-exception" && ["client-instructed", "operator-verified"].includes(reason ?? "")) {
@@ -102,7 +103,7 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
     // Releases the restricted metadata. The erasure stays incomplete, and the tombstone window starts now.
     await query(`UPDATE support_cleanup SET state = 'excepted', resolved_at = ?, title_digest = NULL, next_attempt_at = NULL, owner = NULL,
       intent_id = NULL, github_installation_id = NULL, repository_id = NULL, attempt_started_at = NULL, attempt_ended_at = NULL,
-      issues_json = NULL, reconciliation_json = NULL WHERE request_id = ? AND state = 'unresolved'`, [now, reference!]);
+      issues_json = NULL, reconciliation_json = NULL, changed_at = ? WHERE request_id = ? AND state = 'unresolved'`, [now, now, reference!]);
     return "Cleanup exception recorded";
   }
   throw new Error(USAGE);

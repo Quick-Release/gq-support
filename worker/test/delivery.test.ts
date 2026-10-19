@@ -144,7 +144,7 @@ it("pins approved routing and refuses a changed mapping", async () => {
 
 it.each(['slot', 'request'])("suppresses %s work without treating key revocation as cancellation", async (scope) => {
   const request = await accept();
-  await stage.databases.shared.prepare("INSERT INTO delivery_suppression VALUES (?, ?, 'erasure')")
+  await stage.databases.shared.prepare("INSERT INTO delivery_suppression (scope, reference, reason) VALUES (?, ?, 'erasure')")
     .bind(scope, scope === 'slot' ? mapping.slot : request.id).run();
   await sweep();
   expect(github.requests).toHaveLength(0);
@@ -266,7 +266,7 @@ it("refuses unknown and suppressed resume", async () => {
   await expect(resume(request.id)).rejects.toThrow('cannot be resumed');
   const db = stage.databases.shared;
   await db.prepare("UPDATE delivery_intent SET state = 'failed', last_error_class = 'PermissionMissing'").run();
-  await db.prepare("INSERT INTO delivery_suppression VALUES ('slot', ?, 'offboarding')").bind(mapping.slot).run();
+  await db.prepare("INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('slot', ?, 'offboarding')").bind(mapping.slot).run();
   await expect(resume(request.id)).rejects.toThrow('cannot be resumed');
 });
 
