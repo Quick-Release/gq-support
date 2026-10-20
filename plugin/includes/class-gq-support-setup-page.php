@@ -151,7 +151,8 @@ final class GQ_Support_Setup_Page {
 	}
 
 	/**
-	 * Personal data erasures this site requested, until GETQUICK closes them.
+	 * Personal data erasures this site requested, until GETQUICK closes them
+	 * with nothing left unresolved.
 	 * Shows the last known state; only the refresh button asks the service.
 	 */
 	private static function render_erasures(): void {
@@ -162,7 +163,7 @@ final class GQ_Support_Setup_Page {
 		}
 		?>
 		<h2><?php esc_html_e( 'Personal data erasures', 'gq-support' ); ?></h2>
-		<p class="description"><?php esc_html_e( 'Erasures requested through Tools → Erase Personal Data. Each stays listed until GETQUICK has reviewed any remaining copies and closed it.', 'gq-support' ); ?></p>
+		<p class="description"><?php esc_html_e( 'Erasures requested through Tools → Erase Personal Data. Each stays listed until GETQUICK has reviewed any remaining copies and closed it. One closed while a possible copy in GitHub is unresolved stays listed as incomplete.', 'gq-support' ); ?></p>
 		<table class="widefat striped">
 			<thead>
 				<tr>
@@ -175,7 +176,7 @@ final class GQ_Support_Setup_Page {
 				<?php foreach ( $erasures as $id => $erasure ) : ?>
 					<tr>
 						<td><code><?php echo esc_html( $id ); ?></code></td>
-						<td><?php echo esc_html( self::erasure_label( $erasure['state'] ) ); ?></td>
+						<td><?php echo esc_html( self::erasure_label( $erasure['state'], $erasure['unresolved'] ) ); ?></td>
 						<td>
 							<?php
 							/* translators: %s: how long ago the state was checked, e.g. "5 mins". */
@@ -206,10 +207,15 @@ final class GQ_Support_Setup_Page {
 	/**
 	 * An erasure state for people.
 	 *
-	 * @param string $state The service's state.
+	 * @param string $state      The service's state.
+	 * @param bool   $unresolved Whether a possible GitHub copy is unresolved.
 	 */
-	private static function erasure_label( string $state ): string {
+	private static function erasure_label( string $state, bool $unresolved ): string {
 		switch ( $state ) {
+			case 'closed':
+				return $unresolved
+					? __( 'Closed by GETQUICK as incomplete: whether a copy reached GitHub could not be confirmed', 'gq-support' )
+					: __( 'Closed', 'gq-support' );
 			case 'completed':
 				return __( 'Completed', 'gq-support' );
 			case 'needs_review':

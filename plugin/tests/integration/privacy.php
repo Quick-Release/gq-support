@@ -39,6 +39,10 @@ $gq_support_stub              = static function ( $preempt, array $args, string 
 	if ( null === $reply ) {
 		return new WP_Error( 'http_request_failed', 'Service unreachable' );
 	}
+	// A third element runs while the request is in flight.
+	if ( isset( $reply[2] ) ) {
+		( $reply[2] )();
+	}
 	return array(
 		'response' => array( 'code' => $reply[0] ),
 		'headers'  => array(),
@@ -179,15 +183,61 @@ try {
 	$gq_support_assert( 1 === count( $gq_support_seen ), 'Rendering the page calls nothing.' );
 	$gq_support_assert( false === GQ_Support_Privacy::refresh_erasures(), 'An unreachable service is reported.' );
 	$gq_support_assert( array() !== GQ_Support_Privacy::erasures(), 'An unanswered refresh keeps the erasure listed.' );
+	$gq_support_replies = array( array( 200, array( 'id' => 'era_01M54MVN80H1GQ296DCQ8S14F0' ) ) );
+	$gq_support_assert( false === GQ_Support_Privacy::refresh_erasures(), 'A reply without a state is reported as incomplete.' );
+	$gq_support_assert( 'needs_review' === ( GQ_Support_Privacy::erasures()['era_01M54MVN80H1GQ296DCQ8S14F0']['state'] ?? '' ), 'A reply without a state keeps the erasure and its last known state.' );
+
+	// An erasure recorded while a refresh is running is kept.
 	$gq_support_replies = array(
 		array(
 			200,
 			array(
 				'id'    => 'era_01M54MVN80H1GQ296DCQ8S14F0',
-				'state' => 'closed',
+				'state' => 'needs_review',
 			),
+			static function (): void {
+				$gq_support_stored                                  = get_option( 'gq_support_erasures' );
+				$gq_support_stored['era_01M54MVN80H1GQ296DCQ8S14F1'] = array(
+					'state'      => 'in_progress',
+					'checked_at' => time(),
+				);
+				update_option( 'gq_support_erasures', $gq_support_stored, false );
+			},
 		),
 	);
+	GQ_Support_Privacy::refresh_erasures();
+	$gq_support_assert( array( 'era_01M54MVN80H1GQ296DCQ8S14F0', 'era_01M54MVN80H1GQ296DCQ8S14F1' ) === array_keys( GQ_Support_Privacy::erasures() ), 'A refresh keeps an erasure recorded meanwhile.' );
+	$gq_support_stored = get_option( 'gq_support_erasures' );
+	unset( $gq_support_stored['era_01M54MVN80H1GQ296DCQ8S14F1'] );
+	update_option( 'gq_support_erasures', $gq_support_stored, false );
+
+	// An Operator's close with an unresolved remote outcome keeps the erasure incomplete and listed.
+	$gq_support_closed  = array(
+		'id'       => 'era_01M54MVN80H1GQ296DCQ8S14F0',
+		'state'    => 'closed',
+		'counts'   => array(
+			'purged'   => 0,
+			'redacted' => 0,
+			'pending'  => 0,
+		),
+		'residual' => array( 'remote_outcome' ),
+	);
+	$gq_support_replies = array( array( 200, $gq_support_closed ) );
+	GQ_Support_Privacy::refresh_erasures();
+	$gq_support_assert( true === ( GQ_Support_Privacy::erasures()['era_01M54MVN80H1GQ296DCQ8S14F0']['unresolved'] ?? null ), 'A closed erasure with an unresolved remote outcome stays listed.' );
+	wp_set_current_user( $gq_support_user );
+	ob_start();
+	GQ_Support_Setup_Page::render();
+	$gq_support_page = (string) ob_get_clean();
+	wp_set_current_user( 0 );
+	$gq_support_assert( str_contains( $gq_support_page, 'Closed by GETQUICK as incomplete' ), 'The setup page shows the closed erasure as incomplete.' );
+	$gq_support_replies = array( array( 202, $gq_support_closed ) );
+	$gq_support_result  = $gq_support_erase( $gq_support_email, 1 );
+	$gq_support_assert( true === $gq_support_result['items_retained'] && array() !== $gq_support_result['messages'], 'A closed erasure with an unresolved remote outcome is reported as retained.' );
+	$gq_support_closed['residual'] = array( 'edit_history' );
+	$gq_support_replies            = array( array( 202, $gq_support_closed ) );
+	$gq_support_assert( true === $gq_support_erase( $gq_support_email, 1 )['items_retained'], 'A closed erasure with a known residual copy is reported as retained.' );
+	$gq_support_replies = array( array( 200, $gq_support_closed ) );
 	GQ_Support_Privacy::refresh_erasures();
 	$gq_support_assert( array() === GQ_Support_Privacy::erasures(), 'A closed erasure leaves the list.' );
 	$gq_support_assert( is_wp_error( $gq_support_erase( $gq_support_email, 1 ) ), 'An unreachable service is an error, never a completed erasure.' );
