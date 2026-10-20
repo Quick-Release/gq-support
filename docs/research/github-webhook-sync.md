@@ -360,7 +360,7 @@ Prerequisites:
 1. #56's issue handlers deployed to staging. They are on `main` (#79), but
    staging deploys only when an Operator runs **Deploy Worker** for staging,
    and the #55 evidence was taken with an empty allowlist. That deploy also
-   applies migrations 0012–0016 to staging D1.
+   applies the pending migrations, 0012 onward, to staging D1.
 2. A staging Slot mapped to the sandbox repository `1424354303`, pinned to the
    staging installation `172696674`. Decided 2026-10-18: mappings are keyed by
    stage (`stageMappings` in `worker/src/repository-mappings.ts`), so the Slot
