@@ -355,12 +355,37 @@ it("unresolved records cross 45-day compaction; the tombstone window starts afte
   expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "excepted" });
   expect(await operator("erasure-close", erasure, "operator-1")).toBe("Erasure closed");
   await expect(operator("erasure-close", erasure, "operator-1")).rejects.toThrow("Only a finished, open erasure");
+  // Closing never completes it, and the excepted record's tombstone window starts at the close.
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "closed", residual: ["remote_outcome"] });
+  await cleanup();
+  expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "excepted" });
+  expect(await suppressed(uncertain.id)).toBe(true);
+  advance(45 * DAY);
   await cleanup();
   expect(await cleanupRow(uncertain.id)).toBeNull();
   expect(await suppressed(uncertain.id)).toBe(false);
   expect(await erasureStatus(db(), erasure)).toBeNull();
   expect(posts()).toHaveLength(1);
 }, 30_000);
+
+it("a completed erasure's tombstone window starts when its reference search ends", async () => {
+  const request = await accept();
+  const erasure = await erase();
+  github.next(() => undefined); // installation token
+  github.next(() => Response.json({ message: "rate limit" }, { status: 429, headers: { "retry-after": String(12 * 3_600) } }));
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "in_progress", counts: { pending: 0 } });
+  advance(12 * 3_600_000);
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "completed" });
+  advance(45 * DAY - 12 * 3_600_000);
+  await cleanup();
+  expect(await cleanupRow(request.id)).toBeNull(); // resolved at recording, so compacted first
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "completed" });
+  advance(12 * 3_600_000);
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toBeNull();
+});
 
 it("offboarding suppresses creates, purges content after 30 days and leaves the Client's issues", async () => {
   const delivered = await accept();

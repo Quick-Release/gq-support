@@ -124,8 +124,9 @@ export const OPEN_ERASURE = `SELECT id FROM erasure WHERE slot = ? AND reporter_
  * and covers any request accepted since. Like the fixed SQL in storage.ts,
  * its subqueries cannot pass the storageFor checker, so every statement binds
  * the verified Slot the caller supplies by hand. Without a key, no digest is
- * kept and every redacted title needs review. The ledger is written first,
- * so a failed main write leaves at most an extra suppression.
+ * kept and every redacted title needs review. The ledger is written first:
+ * after a failed main write it already suppresses the requests, and a later
+ * restore carries the erasure out.
  */
 export const recordErasure = async (db: QueryDatabase, slot: string, subject: string, now: number, key: CryptoKey | null,
   ledger: QueryDatabase | null): Promise<string> => {
@@ -329,24 +330,25 @@ const cleanupStore = (db: QueryDatabase) => {
       ]);
     },
     /**
-     * Resolved erasure tombstones go 45 days after resolution, but one that an
-     * Operator still has to review stays until its erasure is closed.
+     * Resolved erasure tombstones go 45 days after resolution. One that an
+     * Operator still has to review is resolved by its erasure's close, and an
+     * erasure by its close or, if completed, by the end of its search.
      * Unresolved cleanup is never compacted. Other purposes have the Slot
      * suppression or no ledger entry at all, so their rows go at once.
      */
     async compact(now: number, ledger: QueryDatabase | null) {
       const cutoff = now - TOMBSTONE_MS;
-      const expiredAs = (c: string) => `${c}.state IN ('resolved', 'excepted') AND (${c}.purpose != 'erasure' OR (${c}.resolved_at <= ?
-        AND ((${c}.state = 'resolved' AND ${c}.residual = '') OR EXISTS (SELECT 1 FROM erasure e WHERE e.id = ${c}.erasure_id AND e.closed_at IS NOT NULL))))`;
+      const expiredAs = (c: string) => `${c}.state IN ('resolved', 'excepted') AND (${c}.purpose != 'erasure' OR (${c}.resolved_at <= ?1
+        AND ((${c}.state = 'resolved' AND ${c}.residual = '') OR EXISTS (SELECT 1 FROM erasure e WHERE e.id = ${c}.erasure_id AND e.closed_at <= ?1))))`;
       const expired = expiredAs("support_cleanup");
       // Its last records may go in this same pass.
-      const finished = `recorded_at <= ? AND (closed_at IS NOT NULL OR search_state = 'done')
+      const finished = `(closed_at <= ?1 OR (closed_at IS NULL AND search_state = 'done' AND search_ended_at <= ?1))
         AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.erasure_id = erasure.id AND NOT (${expiredAs("c")}))`;
       if (ledger) {
         // Removals are recorded first: a lost main delete is mirrored back in, a lost ledger write is not.
         const records = (await db.prepare(`SELECT request_id, purpose FROM support_cleanup WHERE ${expired}`).bind(cutoff)
           .all<{ request_id: string; purpose: string }>()).results;
-        const erasures = (await db.prepare(`SELECT id FROM erasure WHERE ${finished}`).bind(cutoff, cutoff).all<{ id: string }>()).results;
+        const erasures = (await db.prepare(`SELECT id FROM erasure WHERE ${finished}`).bind(cutoff).all<{ id: string }>()).results;
         await ledgerStore(ledger).record([
           ...records.map((record) => removal("cleanup", record.request_id)),
           ...records.filter((record) => record.purpose === "erasure").map((record) => removal("suppression", `request:${record.request_id}`)),
@@ -357,7 +359,7 @@ const cleanupStore = (db: QueryDatabase) => {
         [`DELETE FROM delivery_suppression WHERE scope = 'request' AND reason = 'erasure'
           AND reference IN (SELECT request_id FROM support_cleanup WHERE purpose = 'erasure' AND ${expired})`, [cutoff]],
         [`DELETE FROM support_cleanup WHERE ${expired}`, [cutoff]],
-        [`DELETE FROM erasure WHERE ${finished}`, [cutoff, cutoff]],
+        [`DELETE FROM erasure WHERE ${finished}`, [cutoff]],
       ]);
     },
     async searches(now: number) {
@@ -367,8 +369,8 @@ const cleanupStore = (db: QueryDatabase) => {
     },
     /** Retries, or records the search's end. A changed schedule means another pass took it. */
     async searched(search: PendingSearch, state: "pending" | "done" | "incomplete" | "failed", next: number | null, now: number) {
-      await run([[`UPDATE erasure SET search_state = ?, search_next_at = ?, changed_at = ? WHERE id = ? AND search_state = 'pending'`,
-        [state, next, now, search.id]]]);
+      await run([[`UPDATE erasure SET search_state = ?, search_next_at = ?, search_ended_at = ?, changed_at = ?
+        WHERE id = ? AND search_state = 'pending'`, [state, next, state === "pending" ? null : now, now, search.id]]]);
     },
     /**
      * Adds found issues to the erasure. A new one is keyed by its intent, the
@@ -393,8 +395,8 @@ const cleanupStore = (db: QueryDatabase) => {
               mapping.githubInstallationId, mapping.repositoryId, createdAt, createdAt, JSON.stringify(offboarded ? [] : [issue]),
               offboarded ? "found" : null, offboarded ? "client_issue" : "", offboarded ? now : null, now, intentId, intentId]],
         ]),
-        [`UPDATE erasure SET search_state = ?, search_next_at = NULL, changed_at = ? WHERE id = ? AND search_state = 'pending'`,
-          [incomplete ? "incomplete" : "done", now, search.id]],
+        [`UPDATE erasure SET search_state = ?, search_next_at = NULL, search_ended_at = ?, changed_at = ? WHERE id = ? AND search_state = 'pending'`,
+          [incomplete ? "incomplete" : "done", now, now, search.id]],
       ]);
     },
     async offboarded(slot: string) {

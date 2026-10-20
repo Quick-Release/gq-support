@@ -4,12 +4,14 @@ import { PURGED_TEXT } from "./support-requests.ts";
 /**
  * The suppression ledger (ADR 0016): a separate D1 that a restore of the main
  * database never rewinds. It keeps the current image of each suppression,
- * erasure, cleanup record, offboarding and repository suspension, so they can
- * be replayed into a restored main database before it serves traffic.
+ * erasure, cleanup record, offboarding, repository suspension and runtime key
+ * revocation, so they can be replayed into a restored main database before it
+ * serves traffic.
  *
  * Writes go in one of two directions, both safe:
- * - recording paths (erasure, offboarding) write the ledger first, so a
- *   failed main write leaves at most an extra suppression;
+ * - recording paths (erasure, offboarding, a site's self-revocation) write
+ *   the ledger first, so a failed main write leaves only what was asked for
+ *   in the ledger, which a later restore carries out;
  * - every cleanup pass mirrors the main tables into the ledger. The mirror
  *   only adds or updates images, never removes one: after an unrecorded
  *   restore it can regress an image to an older, more conservative state but
@@ -33,7 +35,8 @@ export interface LedgerEntry {
 const TABLES: Record<LedgerKind, { readonly table: string; readonly key: readonly string[]; readonly columns: readonly string[];
   readonly changed: string; readonly present?: string }> = {
   suppression: { table: "delivery_suppression", key: ["scope", "reference"], columns: ["scope", "reference", "reason"], changed: "changed_at" },
-  erasure: { table: "erasure", key: ["id"], columns: ["id", "slot", "recorded_at", "reporter_reference", "closed_at", "search_state", "search_next_at"],
+  erasure: { table: "erasure", key: ["id"], columns: ["id", "slot", "recorded_at", "reporter_reference", "closed_at", "search_state", "search_next_at",
+    "search_ended_at"],
     changed: "changed_at" },
   offboarding: { table: "offboarding", key: ["slot"], columns: ["slot", "recorded_at", "purge_after"], changed: "changed_at" },
   cleanup: { table: "support_cleanup", key: ["request_id"], changed: "changed_at", columns: ["request_id", "slot", "purpose", "erasure_id", "recorded_at", "title_digest",
