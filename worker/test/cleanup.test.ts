@@ -41,8 +41,8 @@ beforeEach(async () => {
   key = await digestKey("test App private key");
 });
 afterEach(async () => {
-  // No log line from any flow carries Submitted text, subjects or credentials.
-  expect(logs.join("\n")).not.toMatch(/Private report text|Checkout fails|00000000-0000-4000|ghs_|Bearer/);
+  // No log line from any flow carries Submitted text, subjects, the subject's `rs_` hash or credentials.
+  expect(logs.join("\n")).not.toMatch(/Private report text|Checkout fails|00000000-0000-4000|rs_[a-f0-9]{32}|ghs_|Bearer/);
   await stage.dispose();
   vi.useRealTimers();
 });

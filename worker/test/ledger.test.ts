@@ -52,7 +52,7 @@ const accept = async () => {
 const gateway = () => GitHubGateway.layer({ clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem }).pipe(Layer.provide(github.layer));
 const sweep = (db: QueryDatabase = main()) => Effect.runPromise(sweepDelivery({ db, ledger: ledger(), mappings: [mapping],
   botLogin: `${SLUG}[bot]`, now: () => now, random: () => 0 }).pipe(Effect.provide(gateway()), Effect.provide(Logger.layer([]))));
-const cleanup = () => Effect.runPromise(sweepCleanup({ db: main(), ledger: ledger(), botLogin: `${SLUG}[bot]`, mappings: [mapping],
+const cleanup = (db: QueryDatabase = main()) => Effect.runPromise(sweepCleanup({ db, ledger: ledger(), botLogin: `${SLUG}[bot]`, mappings: [mapping],
   digestKey: key, now: () => now }).pipe(Effect.provide(gateway()), Effect.provide(Logger.layer([]))));
 const posts = () => github.requests.filter((request) => request.method === "POST" && request.path.endsWith("/issues"));
 const entry = async (kind: string, reference: string) => (await ledger().prepare("SELECT payload FROM ledger_entry WHERE kind = ? AND reference = ?")
@@ -200,4 +200,23 @@ it("mirrors changes incrementally, and every row in the daily full pass", async 
   advance(DAY);
   await cleanup();
   expect(await entry("suppression", "slot:other/production")).toBeDefined();
+});
+
+it("a claimed cleanup record's lease reaches the ledger, even when its pass dies before finishing", async () => {
+  const request = await accept();
+  github.onCreate((issue) => { issue.deleted = true; return new Response(null, { status: 502 }); });
+  await sweep();
+  await recordErasure(main(), mapping.slot, subject, now, key, ledger());
+  await cleanup(); // captured: reconciling, scheduled a minute later
+  // A provider cooldown holds the record while a later pass moves the mirror past its last change.
+  await main().prepare(`INSERT INTO delivery_permit (installation_id, owner, drain_until, next_mutation_at, provider_cooldown_until)
+    VALUES (7, '', 0, 0, ?1) ON CONFLICT (installation_id) DO UPDATE SET provider_cooldown_until = ?1`).bind(now + 3_600_000).run();
+  advance(1_800_000);
+  await cleanup();
+  advance(1_800_000);
+  // The pass claims the record, then every batch fails, so its own finish is lost.
+  await cleanup({ prepare: main().prepare.bind(main()), batch: async () => { throw new Error("D1 unavailable"); } });
+  const claimed = await main().prepare("SELECT next_attempt_at FROM support_cleanup WHERE request_id = ?").bind(request).first<number>("next_attempt_at");
+  expect(claimed).toBe(now + 60_000);
+  expect(JSON.parse((await entry("cleanup", request))!.payload!)).toMatchObject({ state: "reconciling", next_attempt_at: claimed });
 });

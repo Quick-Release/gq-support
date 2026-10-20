@@ -291,8 +291,9 @@ const cleanupStore = (db: QueryDatabase) => {
     },
     /** The next due time doubles as a lease; the owner fences every later write. */
     async claim(record: CleanupRecord, owner: string, now: number) {
-      const result = await db.prepare(`UPDATE support_cleanup SET owner = ?, next_attempt_at = ?
-        WHERE request_id = ? AND state = ? AND next_attempt_at = ?`).bind(owner, now + LEASE_MS, record.request_id, record.state, record.next_attempt_at).run();
+      const result = await db.prepare(`UPDATE support_cleanup SET owner = ?, next_attempt_at = ?, changed_at = ?
+        WHERE request_id = ? AND state = ? AND next_attempt_at = ?`)
+        .bind(owner, now + LEASE_MS, now, record.request_id, record.state, record.next_attempt_at).run();
       return result.meta.changes === 1;
     },
     /** Paces a redaction PATCH like any other mutation of the shared installation. */
