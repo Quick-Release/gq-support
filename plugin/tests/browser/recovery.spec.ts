@@ -214,7 +214,9 @@ test('a send lost offline, or acknowledged and lost, reconciles under one key', 
   expect(creates).toHaveLength(3);
   expect(creates[1]).toEqual(creates[0]);
   expect(creates[2]).toEqual(creates[0]);
-  expect(creates[0]).toEqual({ summary: 'Summary 4821', description: 'Report text 4821', submission_id: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  // The frozen intent: the text, and the Report context reviewed for its Submission ID.
+  expect(creates[0]).toEqual({ summary: 'Summary 4821', description: 'Report text 4821', submission_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    context: { schema: 1, default: expect.objectContaining({ originating_screen: 'dashboard' }) }, context_review: expect.stringMatching(/^v1\./) });
   // Report text travels only in request bodies, and nothing is kept in browser storage.
   expect(urls.filter((url) => decodeURIComponent(url).includes('4821'))).toEqual([]);
   expect(await page.evaluate(() => [Object.values(localStorage), Object.values(sessionStorage), document.cookie].flat().join(' '))).not.toContain('4821');
