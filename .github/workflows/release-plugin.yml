@@ -49,15 +49,19 @@ jobs:
       - name: Size gate on the package
         run: node plugin/tests/performance/size-gate.mjs package-dist
 
+      # The pinned current endpoint of .github/runtime-matrix.json, not a moving latest.
       - name: Install the package on a disposable site
         env:
           GQ_SUPPORT_PLUGIN_DIR: package-dist
-        run: bash plugin/tests/integration/run.sh
+        run: |
+          eval "$(node scripts/ci/runtime-matrix.mjs env stable-counters)"
+          WP_VERSION=$CELL_WORDPRESS GQ_SUPPORT_PHP_VERSION=$CELL_PHP bash plugin/tests/integration/run.sh
 
       - name: Counter gate on the package
         run: |
+          eval "$(node scripts/ci/runtime-matrix.mjs env stable-counters)"
           pnpm exec playwright install --with-deps chromium
-          ddev wp --path=.test-site plugin install woocommerce
+          ddev wp --path=.test-site plugin install woocommerce --version="$CELL_WOOCOMMERCE"
           pnpm exec playwright test --config plugin/tests/browser/playwright.config.ts performance.spec.ts
 
       - name: Keep failed browser test diagnostics
@@ -75,9 +79,18 @@ jobs:
           path: package-dist/
           if-no-files-found: error
 
+  # Every pull-request and scheduled runtime cell must pass on the release commit; canaries never block.
+  compatibility:
+    name: Pre-release compatibility
+    permissions:
+      contents: read
+    uses: ./.github/workflows/compatibility.yml
+    with:
+      tiers: pr scheduled
+
   publish:
     name: Publish Composer package
-    needs: performance-gates
+    needs: [performance-gates, compatibility]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       tag: v${{ steps.version.outputs.version }}

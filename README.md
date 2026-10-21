@@ -135,9 +135,28 @@ pnpm dev:worker
 pnpm deploy:worker
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and `main` push. Its `Required validation` job is the one check `main` should require. It always runs, and fails when a required job failed, was cancelled, or was skipped although the change affects its suite. The plan job decides which suites (`php`, `size`, `wordpress`, `worker`) a change affects with `scripts/ci/affected-suites.mjs`:
+
+- Documentation-only changes skip every suite and still report success.
+- `contract/**` and both signing implementations run the WordPress and Worker suites.
+- The root toolchain, `scripts/ci/`, the runtime matrix and the CI workflows run every suite.
+- A path no rule classifies runs every suite.
+
+Supported runtimes live in `.github/runtime-matrix.json`: WordPress 6.5 and PHP 8.0 minimums, PHP up to 8.4, `Tested up to` 7.1. Each cell pins exact WordPress, PHP, WooCommerce and Plugin Check versions and, at the oldest and current endpoints, the React that WordPress registers. Pull requests run WordPress 6.5.0 on PHP 8.0 and 7.1.3 on PHP 8.4, each single site then multisite, plus the counter gate at both endpoints, 6.5.13 on PHP 8.2 and integration on PHP 8.1–8.3. Every cell records its actual runtime in a `runtime-<cell>` artifact and fails if that differs from the cell; `Required validation` joins them into `resolved-runtime-matrix`.
+
+`.github/workflows/compatibility.yml` runs nightly cells: the previous WordPress minor, MySQL 8.0 and MariaDB 10.11, a persistent object cache, subdomain multisite, Firefox and WebKit. It also runs nonblocking canaries (WordPress nightly, PHP 8.5, floating latest releases) and a discovery job that fails when upstream releases overtake a pin. A release runs every pull-request and nightly cell before publishing; canaries never block.
+
+- To update a pin or widen support, change `.github/runtime-matrix.json` and the plugin headers in one reviewed PR. `node scripts/ci/runtime-matrix.mjs policy` fails when the headers, Composer, PHPCS or PHPStan ranges differ from the cells that execute them. Widening the PHPStan range is not enough on its own: a pull-request cell must run that PHP version.
+- To run one cell locally, use `scripts/ci/run-cell.sh <cell-id>` on a fresh site, because WordPress and database versions are fixed when the site is created. Set `GQ_SUPPORT_TEST_URL` when the DDEV project has another name. Run the CI script tests with `pnpm test:ci`.
+- To check that `Required validation` fails on each case, run CI manually with `simulate` set to `failure`, `cancelled` or `unexpected-skip`.
+
+While the `Protect main` ruleset still requires `Asset size gate`, `PHP result` and `Worker result`, `ci.yml` keeps the size job's name and emits the other two from `Required validation`. Once the ruleset requires `Required validation` instead, delete the `php-result` and `worker-result` jobs.
+
 ### Browser tests before a push
 
-`main` only accepts pull requests that pass CI (`Asset size gate`, `PHP result`, `Worker result`). For quicker feedback, lefthook's `pre-push` hook runs the Playwright specs affected by the pushed files against the shared DDEV test site (`gq-support-lifecycle-testsite`, created by `plugin/tests/integration/run.sh`). It usually takes under a minute, and it skips when the site is not running.
+For quicker feedback than CI, lefthook's `pre-push` hook runs the Playwright specs affected by the pushed files against the shared DDEV test site (`gq-support-lifecycle-testsite`, created by `plugin/tests/integration/run.sh`). It usually takes under a minute, and it skips when the site is not running.
 
 - The site is shared by every checkout and agent on this machine, and the specs change its state, so runs take turns behind a lock.
 - From a worktree, the site serves a copy of that worktree's `plugin/` for the run, then points back at the main checkout's `plugin/`. Run tests on the shared site through this script, not by hand at the same time.

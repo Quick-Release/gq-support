@@ -1,0 +1,79 @@
+name: WordPress runtime cell
+
+# One cell of .github/runtime-matrix.json on a fresh DDEV site: scripts/ci/run-cell.sh runs the
+# lifecycle integration, records and verifies the actual runtime, then the cell's browser suite,
+# multisite and Plugin Check. ci.yml calls it for pull-request cells; compatibility.yml for
+# nightly, pre-release and canary cells.
+on:
+  workflow_call:
+    inputs:
+      cell:
+        description: One entry of `node scripts/ci/runtime-matrix.mjs cells`, as JSON
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cell:
+    name: DDEV
+    runs-on: ubuntu-latest
+    # A hung site or browser fails the cell instead of holding the required check open.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ddev/github-action-setup-ddev@v1
+        with:
+          version: 1.25.4
+          autostart: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Build the Reporter app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:app
+
+      - name: Install the Playwright engine
+        if: fromJSON(inputs.cell).browser
+        env:
+          BROWSER: ${{ fromJSON(inputs.cell).browser }}
+        run: pnpm exec playwright install --with-deps "$BROWSER"
+
+      - name: Add Redis for the persistent object cache
+        if: fromJSON(inputs.cell).objectCache
+        env:
+          DDEV_REDIS: ${{ fromJSON(inputs.cell).tools['ddev-redis'] }}
+        run: ddev add-on get ddev/ddev-redis --version "$DDEV_REDIS"
+
+      - name: Run the cell
+        env:
+          CELL_ID: ${{ fromJSON(inputs.cell).id }}
+        run: scripts/ci/run-cell.sh "$CELL_ID"
+
+      - name: Keep the runtime report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ fromJSON(inputs.cell).id }}
+          path: runtime-results/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Keep failed browser test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results-${{ fromJSON(inputs.cell).id }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 30
