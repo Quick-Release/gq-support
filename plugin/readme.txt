@@ -22,6 +22,7 @@ This plugin is under active development. Authorized Reporters on a connected ins
 * Add privacy export and erasure for Support requests, including erasures whose delivery outcome is unknown.
 * Load plugin classes on first use to keep public requests within the memory budget.
 * Translate the plugin's admin, privacy and export text into European Portuguese.
+* Darken the admin colour scheme accent where it falls short of AA contrast in the panel, as Sunrise does before WordPress 7.1.
 
 = 0.1.8 =
 * Update the support service to Alchemy beta.83 and Effect 4.0.5, including HTTP API compatibility fixes.

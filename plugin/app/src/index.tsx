@@ -2,6 +2,7 @@
 /** @jsx createElement */
 import { createElement, createRoot } from "@wordpress/element";
 import { App } from "./App";
+import { readableOnWhite } from "./accent";
 import "./app.css";
 
 type VisibilityListener = (visible: boolean, hasDraft: boolean) => void;
@@ -23,6 +24,10 @@ window.gqSupportMount = (container, onVisibilityChange) => {
     const host = document.createElement("div");
     host.className = "gq-support-app-host";
     container.appendChild(host);
+    // Core's scheme accent as resolved here, made readable on the panel.
+    host.style.color = "var(--wp-admin-theme-color, #135e96)";
+    host.style.setProperty("--gq-support-accent", readableOnWhite(getComputedStyle(host).color));
+    host.style.color = "";
     const root = createRoot(host);
     app = { root, host };
     root.render(<App registerToggle={(callback) => { toggle = callback; }} onVisibilityChange={onVisibilityChange} />);
