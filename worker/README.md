@@ -30,7 +30,10 @@ on January 14, 2027. Its token ID is `48f5559e9daad1e3e324771d3708468f`.
 The credential is stored at `https://secrets.getquick.io` in the **GQ Support**
 project (`01M52TXAYNKP6QGHR8PZYYDEY6`), environment `dev`, as
 `CLOUDFLARE_API_TOKEN`; `CLOUDFLARE_ACCOUNT_ID` is stored alongside it.
-The `preview` and `prod` Sigillo environments are empty.
+The `preview` Sigillo environment is empty. The `prod` environment holds only
+`SUPPORT_GITHUB_WEBHOOK_SECRET`, the prod App's webhook secret, as the recoverable
+copy of the value in the `prod` GitHub Environment and the App's webhook settings
+(see [GitHub webhooks](../docs/runbooks/github-webhooks.md)). App private keys never go in Sigillo.
 
 The current workstation has an Alchemy profile named `gq-support` configured
 with this token. Select it with `--profile gq-support`; choose the deployment
