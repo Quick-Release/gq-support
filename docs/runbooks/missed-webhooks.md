@@ -100,8 +100,13 @@ suspends any repository that became public, archived or unreachable. A
 sweep already in progress from an earlier point keeps that point. The command
 never calls GitHub itself. The minute Cron does the work within the sweep's
 normal per-tick budget, so a large fleet can take several ticks. Deleted or
-transferred issues do not appear in listings; the daily open-request pass
-closes them within 24 hours.
+transferred issues do not appear in listings, so the command also restarts the
+open-request pass at once instead of at its daily time. That pass queues every
+open, tracked request for a conditional re-read, which closes a deleted or
+transferred one and alerts. The re-reads use the refresh's per-tick budget.
+A request already shown as closed is not re-read: if its issue was reopened
+and then deleted during the outage, it correctly stays closed, but raises no
+tracking-lost alert.
 
 ## 5. Confirm
 
@@ -117,6 +122,8 @@ It prints counts and times only. Recovery is confirmed when:
   (15 minutes, plus two for the Cron minute and fetch) and none is still in
   progress. A suspended repository's status is frozen, and while it stays
   unsafe its sweep cannot complete. The suspension list accounts for it.
+- `openRequestPass.inProgress` is `false`: every open request has been
+  queued for a re-read, and with `dueRefreshes` at `0`, re-read.
 - Every entry in `suspensions` is one you have handled.
 
 `healthy` is `true` only when, in addition, every suspension is
@@ -135,7 +142,8 @@ pnpm operator status-repair 2026-10-18T09:40:00Z 2026-10-18T10:25:00Z operator-7
 ```
 
 The window is the outage start and the fix time. The command refuses until the
-backlog is drained and every unsuspended repository is within one interval. It then stores
+backlog is drained, the open-request pass is complete and every unsuspended
+repository is within one interval. It then stores
 an audit row in `status_audit` with the actor, the time, the window, the
 repository count, the due count and the IDs of the repositories suspended at
 that time. Recording those IDs is the Operator's acknowledgement of those

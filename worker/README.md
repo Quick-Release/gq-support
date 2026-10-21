@@ -83,10 +83,13 @@ pnpm operator status-reconcile <ISO-outage-start> <opaque-actor> --stage <stage>
 pnpm operator status-repair <ISO-window-start> <ISO-window-end> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
-`status-health` reports the due refresh backlog, each repository's last sweep and
-active suspensions. `status-reconcile` makes every mapped or tracked repository's
-next sweep list from the outage start. `status-repair` refuses until the backlog
-is drained and every sweep is current, and acknowledges the suspensions it records.
+`status-health` reports the due refresh backlog, each repository's last sweep,
+active suspensions and whether the open-request pass is running.
+`status-reconcile` makes every mapped or tracked repository's next sweep list
+from the outage start, and restarts the open-request pass so deleted and
+transferred issues are re-read too. `status-repair` refuses until the backlog is
+drained, the pass is complete and every sweep is current, and acknowledges the
+suspensions it records.
 
 ### Suppression ledger and restores
 

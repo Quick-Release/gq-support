@@ -202,7 +202,8 @@ export const makeFakeGitHub = () => {
       const perPage = Number(request.query.get("per_page") ?? 30);
       const page = Number(request.query.get("page") ?? 1);
       const all = issues
-        .filter((issue) => issue.repositoryId === repository.id && !issue.deleted && (!creator || issue.user.login === creator) &&
+        // A transferred issue no longer belongs to this repository's listing.
+        .filter((issue) => issue.repositoryId === repository.id && !issue.deleted && !issue.movedTo && (!creator || issue.user.login === creator) &&
           (!since || Date.parse(issue.updated_at) >= Date.parse(since)))
         .sort((a, b) => direction * (a[field].localeCompare(b[field]) || a.number - b.number));
       const slice = all.slice((page - 1) * perPage, page * perPage);
