@@ -13,12 +13,14 @@ test('passes when every dependency succeeded', () => {
   assert.equal(verdict(passing).ok, true);
 });
 
-for (const result of ['failure', 'cancelled']) {
-  test(`fails when a dependency is ${result}`, () => {
-    const outcome = verdict({ ...passing, wordpress: result });
-    assert.equal(outcome.ok, false);
-    assert.deepEqual(failedJobs(outcome), ['wordpress']);
-  });
+for (const job of Object.keys(jobs)) {
+  for (const result of ['failure', 'cancelled']) {
+    test(`fails when ${job} is ${result}`, () => {
+      const outcome = verdict({ ...passing, [job]: result });
+      assert.equal(outcome.ok, false);
+      assert.deepEqual(failedJobs(outcome), [job]);
+    });
+  }
 }
 
 test('a suite the change does not affect may be skipped', () => {

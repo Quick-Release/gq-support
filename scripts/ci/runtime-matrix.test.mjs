@@ -16,9 +16,9 @@ test('pull requests run PHP 8.0 on WordPress 6.5.0 and the current endpoint, sin
   assert.deepEqual([...new Set(pr.map((c) => c.php))].sort(), ['8.0', '8.1', '8.2', '8.3', '8.4']);
 });
 
-test('only canary cells are nonblocking, and pull requests run no scheduled or canary cell', () => {
-  assert.ok(cellsFor(manifest, ['pr']).every((c) => c.tier === 'pr' && c.blocking));
-  assert.ok(cellsFor(manifest, ['scheduled', 'canary']).every((c) => c.blocking === (c.tier === 'scheduled')));
+test('pull requests run no scheduled or canary cell, and canaries are only PHP 8.5 or floating releases', () => {
+  assert.ok(cellsFor(manifest, ['pr']).every((c) => c.tier === 'pr'));
+  assert.ok(cellsFor(manifest, ['canary']).every((c) => c.php === '8.5' || ['latest', 'nightly'].includes(c.wordpress)));
 });
 
 test('every cell has a distinct name naming its runtime', () => {

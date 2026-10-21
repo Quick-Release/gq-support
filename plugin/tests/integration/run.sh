@@ -18,8 +18,9 @@ mkdir -p .test-site/wp-content/plugins/gq-design .test-site/wp-content/plugins
 ln -sfn "../../../${GQ_SUPPORT_PLUGIN_DIR:-plugin}" .test-site/wp-content/plugins/gq-support
 printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > .test-site/wp-content/plugins/gq-design/gq-design.php
 ddev start
-php_version() { ddev exec php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;'; }
-if [[ -n "${GQ_SUPPORT_PHP_VERSION:-}" && "$(php_version)" != "$GQ_SUPPORT_PHP_VERSION" ]]; then ddev restart; fi
+# A running site keeps its PHP until restarted, including after an earlier cell's override.
+php_version=${GQ_SUPPORT_PHP_VERSION:-$(sed -n 's/^php_version: *"\(.*\)"/\1/p' .ddev/config.yaml)}
+if [[ "$(ddev exec php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')" != "$php_version" ]]; then ddev restart; fi
 wp() { ddev wp --path=.test-site "$@"; }
 if ! ddev exec test -f .test-site/wp-includes/version.php 2>/dev/null; then
   core_args=(--skip-content)

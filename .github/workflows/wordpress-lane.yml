@@ -69,8 +69,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Keep failed browser test results
-        if: failure()
+      # JUnit always; screenshots and error context only exist for failures. No traces: they
+      # would carry the disposable site's cookies and nonces.
+      - name: Keep browser test results
+        if: always() && fromJSON(inputs.cell).suite
         uses: actions/upload-artifact@v4
         with:
           name: playwright-results-${{ fromJSON(inputs.cell).id }}

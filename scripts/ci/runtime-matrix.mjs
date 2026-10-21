@@ -19,7 +19,6 @@ const SUITES = ['acceptance', 'performance'];
 const TOPOLOGIES = ['subdirectory', 'subdomain'];
 const EXACT = /^\d+\.\d+\.\d+$/;
 const FLOATING = ['latest', 'nightly'];
-const FORBIDDEN_DEPENDENCIES = ['react-jsx-runtime'];
 
 export function loadManifest(path = join(ROOT, '.github', 'runtime-matrix.json')) {
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -28,7 +27,13 @@ export function loadManifest(path = join(ROOT, '.github', 'runtime-matrix.json')
 /** The files whose support declarations must agree with the matrix. */
 export function readSources(root = ROOT) {
   const read = (file) => readFileSync(join(root, 'plugin', file), 'utf8');
-  return { plugin: read('gq-support.php'), readme: read('readme.txt'), composer: read('composer.json'), phpstan: read('phpstan.neon.dist'), phpcs: read('.phpcs.xml.dist') };
+  return {
+    plugin: read('gq-support.php'),
+    readme: read('readme.txt'),
+    composer: read('composer.json'),
+    phpstan: read('phpstan.neon.dist'),
+    phpcs: read('.phpcs.xml.dist'),
+  };
 }
 
 const minor = (version) => version.split('.').slice(0, 2).join('.');
@@ -57,11 +62,11 @@ export function cellName(cell) {
   return `${cell.id}: ${parts.join(', ')}`;
 }
 
-/** The cells of the given tiers, as GitHub matrix entries. Canary cells never block. */
+/** The cells of the given tiers, as GitHub matrix entries carrying the shared tool pins. */
 export function cellsFor(manifest, tiers) {
   return manifest.cells
     .filter((cell) => tiers.includes(cell.tier))
-    .map((cell) => ({ ...cell, name: cellName(cell), blocking: cell.tier !== 'canary', tools: manifest.tools }));
+    .map((cell) => ({ ...cell, name: cellName(cell), tools: manifest.tools }));
 }
 
 /**
@@ -230,7 +235,19 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     // Shell assignments for scripts/ci/run-cell.sh: CELL_WORDPRESS=…, unset fields empty.
     const cell = manifest.cells.find((candidate) => candidate.id === args[0]);
     if (!cell) fail('Runtime matrix', [`unknown cell ${args[0] ?? ''}`]);
-    const fields = { id: cell.id, name: cellName(cell), wordpress: cell.wordpress, php: cell.php, database: cell.database, woocommerce: cell.woocommerce, browser: cell.browser, suite: cell.suite, multisite: cell.multisite, plugin_check: cell.pluginCheck, redis_cache: cell.objectCache ? manifest.tools['redis-cache'] : '', ddev_redis: cell.objectCache ? manifest.tools['ddev-redis'] : '' };
+    const fields = {
+      id: cell.id,
+      name: cellName(cell),
+      wordpress: cell.wordpress,
+      php: cell.php,
+      database: cell.database,
+      woocommerce: cell.woocommerce,
+      browser: cell.browser,
+      suite: cell.suite,
+      multisite: cell.multisite,
+      plugin_check: cell.pluginCheck,
+      redis_cache: cell.objectCache ? manifest.tools['redis-cache'] : '',
+    };
     const quote = (value) => `'${String(value ?? '').replaceAll("'", `'\\''`)}'`;
     process.stdout.write(Object.entries(fields).map(([key, value]) => `CELL_${key.toUpperCase()}=${quote(value)}\n`).join(''));
   } else if (command === 'policy') {
@@ -265,6 +282,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.log(JSON.stringify({ ...upstream, wordpress: Object.fromEntries(supported) }));
     fail('Pin drift', drift.map((row) => `${row.component} ${row.pinned} → ${row.available}: update .github/runtime-matrix.json in a reviewed PR (${row.note})`));
   } else {
-    fail('Runtime matrix', [`unknown command ${command ?? ''}; use cells, policy, verify or discover`]);
+    fail('Runtime matrix', [`unknown command ${command ?? ''}; use cells, env, policy, verify, resolved or discover`]);
   }
 }

@@ -27,6 +27,7 @@ jobs:
   plan:
     name: Plan validation
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       suites: ${{ steps.affected.outputs.suites }}
       cells: ${{ steps.cells.outputs.cells }}
@@ -77,6 +78,7 @@ jobs:
     # The tool's PHP does not change results: PHPStan checks the phpVersion range in
     # phpstan.neon.dist, and Composer resolves for the platform pinned in composer.json.
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: plugin
@@ -104,6 +106,15 @@ jobs:
         if: ${{ always() }}
         run: composer analyse -- --error-format=github
 
+      - name: Keep the PHPCS report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phpcs-report
+          path: plugin/phpcs-report.xml
+          if-no-files-found: ignore
+          retention-days: 30
+
   worker:
     name: Worker typecheck + tests
     needs: plan
@@ -111,6 +122,7 @@ jobs:
     # The suite is CPU-bound across test files: 4 vCPUs take about half as long as 2,
     # so the per-vCPU-minute cost stays about the same.
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: worker
@@ -137,6 +149,7 @@ jobs:
     needs: plan
     if: contains(needs.plan.outputs.suites, '"size"')
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -178,6 +191,7 @@ jobs:
     needs: plan
     if: contains(needs.plan.outputs.suites, '"simulation"') && inputs.simulate != 'unexpected-skip'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       actions: write
     steps:
@@ -197,6 +211,7 @@ jobs:
     if: always()
     needs: [plan, php, worker, size, wordpress, simulation]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

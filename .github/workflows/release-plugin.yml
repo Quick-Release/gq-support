@@ -54,12 +54,14 @@ jobs:
         env:
           GQ_SUPPORT_PLUGIN_DIR: package-dist
         run: |
-          eval "$(node scripts/ci/runtime-matrix.mjs env stable-counters)"
+          cell_env=$(node scripts/ci/runtime-matrix.mjs env stable-counters)
+          eval "$cell_env"
           WP_VERSION=$CELL_WORDPRESS GQ_SUPPORT_PHP_VERSION=$CELL_PHP bash plugin/tests/integration/run.sh
 
       - name: Counter gate on the package
         run: |
-          eval "$(node scripts/ci/runtime-matrix.mjs env stable-counters)"
+          cell_env=$(node scripts/ci/runtime-matrix.mjs env stable-counters)
+          eval "$cell_env"
           pnpm exec playwright install --with-deps chromium
           ddev wp --path=.test-site plugin install woocommerce --version="$CELL_WOOCOMMERCE"
           pnpm exec playwright test --config plugin/tests/browser/playwright.config.ts performance.spec.ts

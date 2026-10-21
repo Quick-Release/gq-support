@@ -7,7 +7,9 @@
 #   scripts/ci/run-cell.sh minimum
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-eval "$(node scripts/ci/runtime-matrix.mjs env "${1:?usage: run-cell.sh <cell-id>}")"
+# An assignment keeps a failed lookup fatal; eval of a failed substitution would not be.
+cell_env=$(node scripts/ci/runtime-matrix.mjs env "${1:?usage: run-cell.sh <cell-id>}")
+eval "$cell_env"
 wp() { ddev wp --path=.test-site "$@"; }
 mkdir -p runtime-results
 
