@@ -6,6 +6,7 @@ import { limits } from "./limits";
 import { useSubmission } from "./useSubmission";
 import { useSession } from "./useSession";
 import { useRequests } from "./useRequests";
+import { useReportContext, type ContextKey } from "./useReportContext";
 import { Requests } from "./Requests";
 import { speak } from "@wordpress/a11y";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -33,6 +34,13 @@ function Contact() {
   );
 }
 
+/** Report context labels; each value is shown exactly as it would be sent. */
+const contextLabels = (): Record<ContextKey, string> => ({
+  wp_version: __("WordPress version", "gq-support"),
+  support_plugin_version: __("Support plugin version", "gq-support"),
+  originating_screen: __("Screen you opened support from", "gq-support"),
+});
+
 /** What an accepted outcome promises, and no more (docs/research/outage-draft-recovery.md, delivery promise). */
 const hint = (phase: string) => phase === "received"
   ? __("The service saved your report and will try to deliver it. Delivery is pending.", "gq-support")
@@ -53,13 +61,15 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   const focusRequests = useRef(false);
   const submission = useSubmission(visible, session, (resource, supersedes) => {
     setDescription(""); setSummary(""); setCopyState("");
+    context.reset();
     requests.add(resource, supersedes);
     // The new request is shown on top of My requests (docs/support-domain-design.md, Views).
     // Focus follows only if it was in the panel, where the hidden Send button held it.
     const doc = panel.current?.ownerDocument ?? document;
     focusRequests.current = !!panel.current?.contains(doc.activeElement) || doc.activeElement === doc.body;
     setTab("requests");
-  });
+  }, () => context.reload());
+  const context = useReportContext(visible, session, submission.key);
   const hasDraft = Boolean(description.trim() || summary.trim());
   const draftText = [summary, description].filter(Boolean).join("\n\n");
 
@@ -116,16 +126,22 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submission.locked) return;
-    const draft = { ...(summary.trim() ? { summary: summary.trim() } : {}), description: description.trim() };
+    if (submission.locked || context.loading) return;
+    const text = { ...(summary.trim() ? { summary: summary.trim() } : {}), description: description.trim() };
+    // Exactly the reviewed values still selected; the size check counts them and their envelope.
+    const draft = { ...text, ...context.reviewed() };
+    const bytes = (body: object) => new TextEncoder().encode(JSON.stringify({ ...body, submission_id: submission.key })).length;
     const message = !draft.description
       ? __("Enter a description.", "gq-support")
       : [...draft.description].length > maxDescriptionLength || [...summary.trim()].length > maxSummaryLength
         ? __("Your report is too long.", "gq-support")
         : /[\r\n]/.test(summary.trim())
           ? __("Summary must be one line.", "gq-support")
-          : new TextEncoder().encode(JSON.stringify({ ...draft, submission_id: "00000000-0000-4000-8000-000000000000" })).length > limits.bodyBytes
-            ? __("Your report is too long.", "gq-support") : "";
+          : bytes(draft) > limits.bodyBytes
+            ? bytes(text) > limits.bodyBytes
+              ? __("Your report is too long.", "gq-support")
+              : __("Your report is too long to send with the information included. Remove some information, or shorten your report.", "gq-support")
+            : "";
     setError(message);
     if (message) { speak(message, "assertive"); return; }
     await submission.send(draft);
@@ -148,6 +164,23 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
           <label htmlFor="gq-support-description" className="gq-support-label">{__("Description", "gq-support")}</label>
           <textarea id="gq-support-description" className="gq-support-field gq-support-description" ref={field} disabled={submission.locked} required placeholder={__("What happened, and what did you expect?", "gq-support")} value={description} onChange={(event) => { edit(); setDescription(event.target.value); setError(""); }} />
           <p className="gq-support-hint">{__("Your draft stays in this panel only while this page and your session stay open. Copy it before you leave or reload; a copy is yours to keep and isn't removed when your support data is erased.", "gq-support")}</p>
+          <fieldset className="gq-support-context" disabled={submission.locked}>
+            <legend className="gq-support-label">{__("Information included", "gq-support")}</legend>
+            <p className="gq-support-hint">{__("Sent with your report through GETQUICK to the project's private GitHub repository, where its collaborators can see it. This site's environment and a pseudonymous reference to you are always included. GitHub can keep copies in issue history and notifications. You won't see this information in My requests.", "gq-support")}</p>
+            {context.loading && <p className="gq-support-hint" role="status">{__("Collecting information…", "gq-support")}</p>}
+            {context.values.length > 0 && (
+              <ul className="gq-support-context-list">
+                {context.values.map((item) => (
+                  <li key={item.key}>
+                    <input id={`gq-support-context-${item.key}`} type="checkbox" checked={item.included} onChange={() => context.toggle(item.key)} />{" "}
+                    <label htmlFor={`gq-support-context-${item.key}`}>{contextLabels()[item.key]}: <code>{item.value}</code></label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {context.values.some((item) => item.included) && <button type="button" className="gq-support-link" onClick={context.removeAll}>{__("Remove all", "gq-support")}</button>}
+            {(context.failed || context.omitted) && <p className="gq-support-message" role="status">{__("Some information could not be collected.", "gq-support")}</p>}
+          </fieldset>
           {submission.message && !submission.accepted && <p role="status" className="gq-support-message">{submission.message}</p>}
           {submission.checkAgain && <button type="button" disabled={submission.waiting || session.paused} onClick={() => { void submission.send(); }}>{__("Check again", "gq-support")}</button>}
           {error && <p className="gq-support-error" role="alert">{error}</p>}
@@ -161,7 +194,9 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
               <textarea id="gq-support-copy" className="gq-support-field" ref={manual} readOnly value={draftText} />
             </div>
           )}
-          <button type="submit" disabled={session.paused || submission.locked || submission.waiting} className="gq-support-submit">{submission.retry ? __("Try again", "gq-support") : __("Send report", "gq-support")}</button>
+          <button type="submit" disabled={session.paused || submission.locked || submission.waiting || context.loading} className="gq-support-submit">
+            {submission.retry ? __("Try again", "gq-support") : context.failed ? __("Send without optional information", "gq-support") : __("Send report", "gq-support")}
+          </button>
         </form>
       </div>
       <div id="gq-support-requests" role="tabpanel" aria-labelledby="gq-support-requests-tab" hidden={tab !== "requests"}>

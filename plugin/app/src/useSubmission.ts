@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
 import { __, _n, sprintf } from '@wordpress/i18n';
 import type { SessionCheck } from './useSession';
+import type { Reviewed } from './useReportContext';
 
-type Draft = { summary?: string; description: string };
+/** Submitted text, and the reviewed Report context it is sent with, if any. */
+type Draft = { summary?: string; description: string } & Partial<Reviewed>;
 type Phase = 'draft' | 'sending' | 'checking' | 'received' | 'delivered' | 'unknown' | 'failed' | 'unsent' | 'error';
 type Session = { paused: boolean; changed: boolean; check: () => Promise<SessionCheck> };
 type Resource = { id: string; submission_id: string; delivery: string; status: string | null };
@@ -22,13 +24,22 @@ const acknowledged = (resource: Resource, httpStatus: number, submissionId: stri
   && (resource.delivery === 'delivered' ? resource.status === 'open' || resource.status === 'closed' : resource.status === null)
   && httpStatus === (resource.delivery === 'delivered' ? 201 : 202);
 
-/** One in-memory creation intent. Reconciliation always reuses its frozen body. */
-export function useSubmission(visible: boolean, session: Session, accepted: Accepted) {
+/**
+ * One in-memory creation intent. Reconciliation always reuses its frozen body,
+ * including its reviewed Report context. `reviewExpired` asks for a new review
+ * of the same Submission ID after WordPress found the envelope expired.
+ */
+export function useSubmission(visible: boolean, session: Session, accepted: Accepted, reviewExpired: () => void) {
   const [phase, setPhase] = useState<Phase>('draft');
   const [message, setMessage] = useState('');
   const [contact, setContact] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const intent = useRef<{ submission_id: string; supersedes_id?: string } & Draft>();
+  // The draft's Submission ID, known before sending so its Report context can be reviewed for it.
+  // A sent key is spent once its outcome needs a new intent.
+  const [key, setKey] = useState(() => crypto.randomUUID());
+  const keyRef = useRef(key);
+  const renewKey = () => { keyRef.current = crypto.randomUUID(); setKey(keyRef.current); };
   const supersedes = useRef<string>();
   const busy = useRef(false);
   const unresolved = useRef(false);
@@ -42,6 +53,8 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
 
   const reset = () => {
     generation.current++;
+    // A sent key is spent. Inline, so `reset` uses only refs and state setters.
+    if (intent.current) { keyRef.current = crypto.randomUUID(); setKey(keyRef.current); }
     intent.current = undefined;
     unresolved.current = false;
     busy.current = false;
@@ -86,7 +99,7 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
       if (current !== generation.current || !open.current) return;
       if (!intent.current) {
         if (!draft) return;
-        intent.current = { ...draft, submission_id: crypto.randomUUID(), ...(supersedes.current ? { supersedes_id: supersedes.current } : {}) };
+        intent.current = { ...draft, submission_id: keyRef.current, ...(supersedes.current ? { supersedes_id: supersedes.current } : {}) };
         setAttempts(0);
       }
       const payload = intent.current;
@@ -100,6 +113,7 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
         if (current !== generation.current) return;
         if (!acknowledged(resource, response.status, payload.submission_id)) throw new Error('ambiguous');
         intent.current = undefined;
+        renewKey();
         unresolved.current = false;
         notBefore.current = 0;
         if (resource.delivery === 'failed') {
@@ -136,7 +150,11 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
         } else {
           // A rejected check never proves that an earlier uncertain send failed: keep its key and frozen body.
           if (unresolved.current) setAttempts(AUTOMATIC_CHECKS);
-          else if (code === 'gq_support_idempotency_conflict') intent.current = undefined;
+          else if (code === 'gq_support_idempotency_conflict') { intent.current = undefined; renewKey(); } else if (code === 'gq_support_context_expired') {
+            // Nothing was accepted under this key and no earlier send is uncertain: keep it, and review again.
+            intent.current = undefined;
+            reviewExpired();
+          }
           setPhase(['gq_support_not_accepted', 'gq_support_idempotency_conflict'].includes(code) && !unresolved.current ? 'unsent' : 'error');
           setContact(CONTACT_CODES.includes(code) || unresolved.current);
           const messages: Record<string, string> = {
@@ -148,6 +166,9 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
             gq_support_idempotency_conflict: unresolved.current
               ? __("We couldn't confirm whether your report arrived. Check My requests before sending it again.", 'gq-support')
               : __('Not sent', 'gq-support'),
+            gq_support_context_expired: unresolved.current
+              ? __("We couldn't confirm whether your report arrived. Check My requests before sending it again.", 'gq-support')
+              : __('The information included needs checking again. Review it, then send your report.', 'gq-support'),
             rest_not_logged_in: __('Your session expired. Reload the page to continue.', 'gq-support'),
             rest_cookie_invalid_nonce: __('Your session expired. Reload the page to continue.', 'gq-support'),
             gq_support_forbidden: __('Your session expired. Reload the page to continue.', 'gq-support'),
@@ -178,6 +199,8 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
   const edit = () => { if (!locked) reset(); };
   return {
     send, edit, phase, message, locked, waiting, checkAgain,
+    /** The Submission ID the next new intent uses. */
+    key,
     checking: phase === 'checking',
     retry: phase === 'failed' || phase === 'unsent',
     /** The service holds the report: its outcome shows with the request list. */

@@ -4,7 +4,11 @@ import { __ } from '@wordpress/i18n';
 
 declare global {
   interface Window {
-    gqSupportLauncher: { session: string; ajaxUrl: string; timezone?: string; help?: { url: string; label: string } | null };
+    gqSupportLauncher: {
+      session: string; ajaxUrl: string; timezone?: string; help?: { url: string; label: string } | null;
+      /** The coarse screen the launcher was rendered on, if approved; never a URL. */
+      screen?: string | null;
+    };
   }
 }
 

@@ -104,6 +104,11 @@ final class GQ_Support_Privacy {
 				__( 'Delivery', 'gq-support' )       => $item['delivery'] ?? '',
 				__( 'Support status', 'gq-support' ) => $item['status'] ?? '',
 			);
+			// Context the service still holds: the Reporter's projection never shows it, but export does.
+			$context = is_array( $item['context'] ?? null ) ? GQ_Support_Report_Context::normalize( $item['context'] ) : null;
+			if ( null !== $context && array() !== $context['default'] ) {
+				$fields[ __( 'Report context', 'gq-support' ) ] = GQ_Support_Report_Context::describe( $context );
+			}
 			$data[] = array(
 				'group_id'    => self::GROUP,
 				'group_label' => __( 'Support requests', 'gq-support' ),
@@ -245,7 +250,8 @@ final class GQ_Support_Privacy {
 		}
 		$content  = '<p class="privacy-policy-tutorial">' . esc_html__( 'Suggested text for your privacy policy. Adapt it to your agreement with GETQUICK; it is not legal advice.', 'gq-support' ) . '</p>';
 		$content .= '<p>' . esc_html__( 'When you send a support request from this site\'s admin area, the summary and description you write are sent to our support provider, GETQUICK, which stores them on Cloudflare (database in the EU) and creates an issue in this project\'s private GitHub repository so that the development team can work on it. Your name, email address and username are not sent. The request is linked to you through a random identifier that is kept on this site. GitHub may email notifications of new issues to members of the development team.', 'gq-support' ) . '</p>';
-		$content .= '<p>' . esc_html__( 'Support requests are kept by GETQUICK for 12 months after they are closed; requests that never reached GitHub are kept for at most 12 months. The issue in GitHub stays part of this project\'s engineering history. If you ask this site to erase your personal data, your requests are deleted from GETQUICK\'s service and the text of your requests is removed from the GitHub issues, including older issues found by their pseudonymous reference. Copies that cannot be removed automatically, such as notification emails and earlier versions kept in GitHub\'s edit history, are reviewed and deleted by hand where possible.', 'gq-support' ) . '</p>';
+		$content .= '<p>' . esc_html__( 'Unless you remove them before sending, three technical details go with your request: the WordPress version, the support plugin version, and the kind of admin screen you opened support from (the dashboard, the posts list, the post editor or WooCommerce). They appear in the GitHub issue, not in your list of requests on this site. GETQUICK deletes its copy once the request reaches GitHub or fails. The address of the page you were on is never sent.', 'gq-support' ) . '</p>';
+		$content .= '<p>' . esc_html__( 'Support requests are kept by GETQUICK for 12 months after they are closed; requests that never reached GitHub are kept for at most 12 months. The issue in GitHub stays part of this project\'s engineering history. If you ask this site to erase your personal data, your requests are deleted from GETQUICK\'s service and the text and technical details of your requests are removed from the GitHub issues, including older issues found by their pseudonymous reference. Copies that cannot be removed automatically, such as notification emails and earlier versions kept in GitHub\'s edit history, are reviewed and deleted by hand where possible.', 'gq-support' ) . '</p>';
 		wp_add_privacy_policy_content( __( 'GETQUICK Support', 'gq-support' ), wp_kses_post( $content ) );
 	}
 

@@ -14,8 +14,15 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class GQ_Support_Plugin {
 
-	/** Approved site-admin screens; WooCommerce screens match by the `woocommerce` prefix. */
-	private const SCREENS = array( 'dashboard', 'post', 'edit-post' );
+	/**
+	 * Approved site-admin screens, each with its coarse Report context screen.
+	 * WooCommerce screens match by the `woocommerce` prefix.
+	 */
+	private const SCREENS = array(
+		'dashboard' => 'dashboard',
+		'edit-post' => 'post-list',
+		'post'      => 'post-editor',
+	);
 
 	/**
 	 * Explain why an already-active plugin cannot initialize without its dependency.
@@ -129,12 +136,21 @@ final class GQ_Support_Plugin {
 			return false;
 		}
 
-		$screen = get_current_screen();
-		if ( ! $screen || ( ! in_array( $screen->id, self::SCREENS, true ) && ! str_starts_with( $screen->id, 'woocommerce' ) ) ) {
+		if ( null === self::originating_screen() ) {
 			return false;
 		}
 
 		return 'connected' === GQ_Support_State::get()['connection'];
+	}
+
+	/**
+	 * The coarse screen this admin page reports as Report context, from the
+	 * already-built admin screen and never the request URL; null when the page
+	 * is not an approved one.
+	 */
+	private static function originating_screen(): ?string {
+		$id = (string) get_current_screen()?->id;
+		return self::SCREENS[ $id ] ?? ( str_starts_with( $id, 'woocommerce' ) ? 'woocommerce' : null );
 	}
 
 	/** Register the app without enqueueing it; only the tiny launcher is sent initially. */
@@ -161,6 +177,8 @@ final class GQ_Support_Plugin {
 			'loading'  => __( 'Loading support…', 'gq-support' ),
 			'error'    => __( 'Support could not load. Press to retry.', 'gq-support' ),
 			'help'     => GQ_Support_Fail_Safe::help(),
+			// Kept only in launcher memory until the Reporter opens the panel.
+			'screen'   => self::originating_screen(),
 		);
 		wp_add_inline_script( 'gq-support-launcher', 'window.gqSupportLauncher=' . wp_json_encode( $bootstrap ) . ';', 'before' );
 	}

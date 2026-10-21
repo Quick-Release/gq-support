@@ -118,6 +118,46 @@ try {
 	$gq_support_assert( str_contains( $gq_support_seen[0][0], '/v1/export?reporter_subject=' . $gq_support_subject ), 'The service receives the subject.' );
 	$gq_support_assert( ! str_contains( wp_json_encode( $gq_support_seen ), $gq_support_email ), 'The email address never leaves WordPress.' );
 	$gq_support_assert( ! empty( $gq_support_seen[0][1]['headers']['GQ-Support-Signature'] ), 'Export calls are signed.' );
+	$gq_support_assert( ! str_contains( wp_json_encode( $gq_support_first['data'] ), 'Report context' ), 'A request without context exports none.' );
+
+	// Report context the service still holds is exported, validated again; anything outside the schema is left out.
+	$gq_support_replies  = array(
+		array(
+			200,
+			array(
+				'items'       => array(
+					array(
+						'context' => array(
+							'schema'  => 1,
+							'default' => array(
+								'wp_version'         => '6.5.5',
+								'originating_screen' => 'post-editor',
+							),
+						),
+					) + $gq_support_item,
+					array(
+						'id'      => 'req_01M54MVN80H1GQ296DCQ8S14F1',
+						'context' => array(
+							'schema'  => 1,
+							'default' => array( 'wp_version' => '6.5<script>alert(1)</script>' ),
+						),
+					) + $gq_support_item,
+					array(
+						'id'      => 'req_01M54MVN80H1GQ296DCQ8S14F2',
+						'context' => null,
+					) + $gq_support_item,
+				),
+				'next_cursor' => null,
+			),
+		),
+	);
+	$gq_support_exported = $gq_support_export( $gq_support_email, 1 )['data'];
+	$gq_support_fields   = static function ( array $item ): array {
+		return wp_list_pluck( $item['data'], 'value', 'name' );
+	};
+	$gq_support_assert( "WordPress version: 6.5.5\nOriginating admin screen: post-editor" === ( $gq_support_fields( $gq_support_exported[0] )['Report context'] ?? null ), 'Retained Report context is exported.' );
+	$gq_support_assert( ! isset( $gq_support_fields( $gq_support_exported[1] )['Report context'] ) && ! str_contains( wp_json_encode( $gq_support_exported ), 'alert(1)' ), 'Context outside the schema is not exported.' );
+	$gq_support_assert( ! isset( $gq_support_fields( $gq_support_exported[2] )['Report context'] ), 'Cleared context exports nothing.' );
 
 	// The eraser never claims completion while the service still works or needs review.
 	$gq_support_seen    = array();
