@@ -1,6 +1,6 @@
 import { sha256 } from "./signature.ts";
 import type { Quota, SlotStorage } from "./storage.ts";
-import { CONTEXT_LIMITS, canonicalContext } from "./report-context.ts";
+import { CONTEXT_LIMITS, canonicalContext, storedContext } from "./report-context.ts";
 
 /**
  * The verified installation's authority. It comes only from the signing key
@@ -94,10 +94,12 @@ interface Row {
   created_at: number;
   status: string | null;
   state: string;
+  /** Delivery-only: never part of a Reporter projection. */
+  context_json: string | null;
 }
 
 const COLUMNS = `SELECT r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
-  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
+  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state, i.context_json FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
   WHERE r.slot = ?1 AND i.slot = ?1 AND r.erased_at IS NULL`;
 
 const resource = (row: Row, caller: Caller) => ({
@@ -203,7 +205,7 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
   const accepted: Row = {
     id, reporter_subject: input.reporter_subject, submission_id: input.submission_id, body_digest: digest,
     summary: input.summary ?? "", description: input.description, title: titleFor(input.summary, input.description),
-    created_at: now, status: null, state: "pending", supersedes_id: input.supersedes_id, superseded_at: null,
+    created_at: now, status: null, state: "pending", supersedes_id: input.supersedes_id, superseded_at: null, context_json: input.context,
   };
   const canSupersede = async () => {
     const predecessor = await storage.first<Row>(`${COLUMNS} AND r.id = ?2 AND r.reporter_subject = ?3`, input.supersedes_id, input.reporter_subject);
@@ -347,8 +349,9 @@ const EXPORT_PAGE = 50;
 
 /**
  * `GET /v1/export`: the attested Reporter's own requests in this Slot, oldest
- * first, including superseded ones. Only what the Reporter submitted and its
- * outcome: no repository, issue, digest, Submission ID or installation.
+ * first, including superseded ones. Only what the Reporter submitted, any
+ * Report context the service still holds, and its outcome: no repository,
+ * issue, digest, Submission ID or installation.
  */
 export const handleExport = async (storage: SlotStorage, url: URL, body: string, now: number): Promise<Response> => {
   const params = queryOf(url, ["reporter_subject", "cursor"], ["reporter_subject"]);
@@ -364,7 +367,8 @@ export const handleExport = async (storage: SlotStorage, url: URL, body: string,
   const items = rows.slice(0, EXPORT_PAGE);
   return json({
     items: items.map((row) => ({ id: row.id, summary: row.summary === "" ? null : row.summary, description: row.description,
-      created_at: new Date(row.created_at).toISOString(), delivery: DELIVERY[row.state], status: row.state === "delivered" ? row.status : null })),
+      created_at: new Date(row.created_at).toISOString(), delivery: DELIVERY[row.state], status: row.state === "delivered" ? row.status : null,
+      context: storedContext(row.context_json) })),
     next_cursor: rows.length > items.length ? encodeCursor(items[items.length - 1]!) : null,
   }, 200);
 };

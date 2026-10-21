@@ -294,6 +294,44 @@ describe("Support issues", () => {
     expect(github.requests.filter((r) => r.method === "PATCH")).toHaveLength(1);
   });
 
+  describe("Report context", () => {
+    const CONTEXT = '{"schema":1,"default":{"wp_version":"6.5.5","support_plugin_version":"0.1.8+build_7","originating_screen":"post-editor"}}';
+    const withContext: SupportIssueIntent = { ...intent, context: CONTEXT };
+    const plain = `<!-- gq-support:v1 intent=int_01J8Z6Q4M1ZC7XK2 -->\n**Support request** submitted via GETQUICK Support · \`production\` · installation \`inst_7c2e\` · reporter \`rs_4f9c1a\` · 2026-10-17T10:00:00.000Z\n\n### Description\n\n~~~~text\n@developer #1 ![](https://x)\n~~~\n\`\`\`\n<!-- forged -->\n~~~~`;
+
+    it("renders the reviewed values in their own section after the inert Reporter text", async () => {
+      const github = setup();
+      const created = await run(github, supportIssues.create(withContext));
+      expect(created.body).toBe(`${plain}\n\n### Report context\n\nReviewed and sent by the Reporter. The screen is a hint, not evidence of access.\n\n` +
+        "- WordPress version: `6.5.5`\n- Support plugin version: `0.1.8+build_7`\n- Originating admin screen: `post-editor`");
+      // Reconciliation rebuilds exactly this body from the frozen intent.
+      expect((await run(github, supportIssues.prepare(withContext))).body).toBe(created.body);
+    });
+
+    it.each([
+      ["nothing selected", '{"schema":1,"default":{}}'],
+      ["unreadable", "{not json"],
+      ["HTML in a value", '{"schema":1,"default":{"wp_version":"6.5<img src=x onerror=alert(1)>"}}'],
+      ["Markdown in a value", '{"schema":1,"default":{"wp_version":"6.5`](https://x)"}}'],
+      ["an unapproved section", '{"schema":1,"default":{"wp_version":"6.5.5"},"technical":{"php_version":"8.3"}}'],
+      ["an unapproved key", '{"schema":1,"default":{"url":"https://shop.example/wp-admin/post.php?post=1&_wpnonce=secret"}}'],
+    ])("renders no section for %s", async (_, context) => {
+      const created = await run(setup(), supportIssues.create({ ...intent, context }));
+      expect(created.body).toBe(plain);
+    });
+
+    it("loses the section to redaction, keeping only the marker and attribution", async () => {
+      const github = setup();
+      await run(github, Effect.gen(function* () {
+        const created = yield* supportIssues.create(withContext);
+        expect(yield* supportIssues.redact(target, intent.intentId, created, async () => true)).toMatchObject({ _tag: "Redacted" });
+        expect(github.issues[0]!.body).toBe(`${created.body!.split("\n", 2).join("\n")}\n\n### Description\n\nSupport request text erased at the Reporter's request.`);
+        expect(github.issues[0]!.body).not.toContain("6.5.5");
+        expect(github.issues[0]!.body).not.toContain("post-editor");
+      }));
+    });
+  });
+
   it("never edits an issue whose marker or identity changed, and reports moved or deleted issues", async () => {
     const github = setup();
     await run(github, Effect.gen(function* () {

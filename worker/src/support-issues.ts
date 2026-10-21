@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import { sha256 } from "./signature.ts";
 import { GitHubGateway, OutcomeUnknown, ValidationRejected, type GitHubIssue, type GitHubTarget, type ReadIssueError } from "./github-gateway.ts";
+import { contextSection } from "./report-context.ts";
 
 /** Trusted, pinned delivery inputs. Never construct these from Reporter request fields. */
 export interface SupportIssueIntent {
@@ -18,6 +19,8 @@ export interface SupportIssueIntent {
   readonly acceptedAt: number;
   readonly clientOriginLabel: string;
   readonly defaultDeveloper: string;
+  /** The Report context frozen at acceptance, as stored; null once cleared or when none was sent. */
+  readonly context?: string | null;
 }
 
 const marker = (intentId: string) => `<!-- gq-support:v1 intent=${intentId} -->`;
@@ -27,7 +30,8 @@ const bodyFor = (intent: SupportIssueIntent) => {
   const { environment, installationReference, reporterReference } = intent.attribution;
   const attribution = `${ATTRIBUTION}\`${environment}\` · ` +
     `installation \`${installationReference}\` · reporter \`${reporterReference}\` · ${new Date(intent.acceptedAt).toISOString()}`;
-  return [marker(intent.intentId), attribution, "", "### Description", "", `${fence}text`, intent.description, fence].join("\n");
+  return [marker(intent.intentId), attribution, "", "### Description", "", `${fence}text`, intent.description, fence,
+    ...contextSection(intent.context ?? null)].join("\n");
 };
 const validIntent = (intent: SupportIssueIntent) =>
   /^int_[A-Z0-9]+$/.test(intent.intentId) && Number.isFinite(new Date(intent.acceptedAt).getTime()) &&

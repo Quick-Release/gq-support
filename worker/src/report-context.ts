@@ -63,18 +63,21 @@ const LABELS: Record<ContextKey, string> = {
   originating_screen: "Originating admin screen",
 };
 
+/** A stored context, validated again; null when there is none or it is unreadable. */
+export const storedContext = (stored: string | null): ReportContext | null => {
+  if (stored === null) return null;
+  let canonical: string | null;
+  try { canonical = canonicalContext(JSON.parse(stored)); } catch { return null; }
+  return canonical === null ? null : JSON.parse(canonical) as ReportContext;
+};
+
 /**
  * The issue body's Report context section, separate from the Reporter's
- * text, or no lines when nothing was selected. A stored value is validated
- * again, so only grammar-checked values reach the Markdown code spans.
+ * text, or no lines when nothing was selected. Only grammar-checked values
+ * reach the Markdown code spans.
  */
 export const contextSection = (stored: string | null): string[] => {
-  if (stored === null) return [];
-  let parsed: unknown;
-  try { parsed = JSON.parse(stored); } catch { return []; }
-  const canonical = canonicalContext(parsed);
-  if (canonical === null) return [];
-  const fields = Object.entries((JSON.parse(canonical) as ReportContext).default) as [ContextKey, string][];
+  const fields = Object.entries(storedContext(stored)?.default ?? {}) as [ContextKey, string][];
   if (fields.length === 0) return [];
   return ["", "### Report context", "", "Reviewed and sent by the Reporter. The screen is a hint, not evidence of access.", "",
     ...fields.map(([key, value]) => `- ${LABELS[key]}: \`${value}\``)];
