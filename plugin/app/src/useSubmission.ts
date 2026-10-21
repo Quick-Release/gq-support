@@ -35,11 +35,13 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
   const [contact, setContact] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const intent = useRef<{ submission_id: string; supersedes_id?: string } & Draft>();
+  // Whether an intent is frozen: its text and Report context are what any retry sends.
+  const [pending, setPending] = useState(false);
   // The draft's Submission ID, known before sending so its Report context can be reviewed for it.
-  // A sent key is spent once its outcome needs a new intent.
-  const [key, setKey] = useState(() => crypto.randomUUID());
-  const keyRef = useRef(key);
-  const renewKey = () => { keyRef.current = crypto.randomUUID(); setKey(keyRef.current); };
+  // A sent one is spent once its outcome needs a new intent.
+  const [submissionId, setSubmissionId] = useState(() => crypto.randomUUID());
+  const submissionRef = useRef(submissionId);
+  const renewSubmissionId = () => { submissionRef.current = crypto.randomUUID(); setSubmissionId(submissionRef.current); };
   const supersedes = useRef<string>();
   const busy = useRef(false);
   const unresolved = useRef(false);
@@ -53,9 +55,11 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
 
   const reset = () => {
     generation.current++;
-    // A sent key is spent. Inline, so `reset` uses only refs and state setters.
-    if (intent.current) { keyRef.current = crypto.randomUUID(); setKey(keyRef.current); }
+    // A sent Submission ID is spent. Inline rather than renewSubmissionId(), so the session
+    // effect below depends only on refs and state setters.
+    if (intent.current) { submissionRef.current = crypto.randomUUID(); setSubmissionId(submissionRef.current); }
     intent.current = undefined;
+    setPending(false);
     unresolved.current = false;
     busy.current = false;
     setWaiting(false);
@@ -65,6 +69,9 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
     setAttempts(0);
   };
   useEffect(() => { if (session.changed) { supersedes.current = undefined; reset(); } }, [session.changed]);
+
+  /** The body a new intent for this draft would send. */
+  const intentFor = (draft: Draft) => ({ ...draft, submission_id: submissionRef.current, ...(supersedes.current ? { supersedes_id: supersedes.current } : {}) });
 
   const send = async (draft?: Draft, automatic = false) => {
     if (busy.current || !visible || session.changed) return;
@@ -99,7 +106,8 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
       if (current !== generation.current || !open.current) return;
       if (!intent.current) {
         if (!draft) return;
-        intent.current = { ...draft, submission_id: keyRef.current, ...(supersedes.current ? { supersedes_id: supersedes.current } : {}) };
+        intent.current = intentFor(draft);
+        setPending(true);
         setAttempts(0);
       }
       const payload = intent.current;
@@ -113,7 +121,8 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
         if (current !== generation.current) return;
         if (!acknowledged(resource, response.status, payload.submission_id)) throw new Error('ambiguous');
         intent.current = undefined;
-        renewKey();
+        setPending(false);
+        renewSubmissionId();
         unresolved.current = false;
         notBefore.current = 0;
         if (resource.delivery === 'failed') {
@@ -150,25 +159,24 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
         } else {
           // A rejected check never proves that an earlier uncertain send failed: keep its key and frozen body.
           if (unresolved.current) setAttempts(AUTOMATIC_CHECKS);
-          else if (code === 'gq_support_idempotency_conflict') { intent.current = undefined; renewKey(); } else if (code === 'gq_support_context_expired') {
-            // Nothing was accepted under this key and no earlier send is uncertain: keep it, and review again.
+          else if (code === 'gq_support_idempotency_conflict') { intent.current = undefined; setPending(false); renewSubmissionId(); } else if (code === 'gq_support_context_expired') {
+            // Nothing was accepted under this Submission ID and no earlier send is uncertain: keep it, and review again.
             intent.current = undefined;
+            setPending(false);
             reviewExpired();
           }
           setPhase(['gq_support_not_accepted', 'gq_support_idempotency_conflict'].includes(code) && !unresolved.current ? 'unsent' : 'error');
           setContact(CONTACT_CODES.includes(code) || unresolved.current);
+          const unconfirmed = __("We couldn't confirm whether your report arrived. Check My requests before sending it again.", 'gq-support');
           const messages: Record<string, string> = {
             gq_support_rate_limited: __('Too many requests, try again later.', 'gq-support'),
             gq_support_plugin_outdated: __('Support needs a plugin update.', 'gq-support'),
             gq_support_not_configured: __('Support is unavailable.', 'gq-support'),
             gq_support_disabled: __('Support is temporarily disabled.', 'gq-support'),
             gq_support_not_accepted: unresolved.current ? __('Checking…', 'gq-support') : __('Not sent', 'gq-support'),
-            gq_support_idempotency_conflict: unresolved.current
-              ? __("We couldn't confirm whether your report arrived. Check My requests before sending it again.", 'gq-support')
-              : __('Not sent', 'gq-support'),
+            gq_support_idempotency_conflict: unresolved.current ? unconfirmed : __('Not sent', 'gq-support'),
             gq_support_context_expired: unresolved.current
-              ? __("We couldn't confirm whether your report arrived. Check My requests before sending it again.", 'gq-support')
-              : __('The information included needs checking again. Review it, then send your report.', 'gq-support'),
+              ? unconfirmed : __('The information included needs checking again. Review it, then send your report.', 'gq-support'),
             rest_not_logged_in: __('Your session expired. Reload the page to continue.', 'gq-support'),
             rest_cookie_invalid_nonce: __('Your session expired. Reload the page to continue.', 'gq-support'),
             gq_support_forbidden: __('Your session expired. Reload the page to continue.', 'gq-support'),
@@ -200,7 +208,9 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
   return {
     send, edit, phase, message, locked, waiting, checkAgain,
     /** The Submission ID the next new intent uses. */
-    key,
+    submissionId, intentFor,
+    /** A sent intent is frozen; changing its text or Report context needs a new one (see `edit`). */
+    pending,
     checking: phase === 'checking',
     retry: phase === 'failed' || phase === 'unsent',
     /** The service holds the report: its outcome shows with the request list. */

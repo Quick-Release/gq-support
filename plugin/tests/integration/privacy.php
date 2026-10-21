@@ -155,7 +155,7 @@ try {
 	$gq_support_fields   = static function ( array $item ): array {
 		return wp_list_pluck( $item['data'], 'value', 'name' );
 	};
-	$gq_support_assert( "WordPress version: 6.5.5\nOriginating admin screen: post-editor" === ( $gq_support_fields( $gq_support_exported[0] )['Report context'] ?? null ), 'Retained Report context is exported.' );
+	$gq_support_assert( "WordPress version: 6.5.5\nScreen you opened support from: post-editor" === ( $gq_support_fields( $gq_support_exported[0] )['Report context'] ?? null ), 'Retained Report context is exported.' );
 	$gq_support_assert( ! isset( $gq_support_fields( $gq_support_exported[1] )['Report context'] ) && ! str_contains( wp_json_encode( $gq_support_exported ), 'alert(1)' ), 'Context outside the schema is not exported.' );
 	$gq_support_assert( ! isset( $gq_support_fields( $gq_support_exported[2] )['Report context'] ), 'Cleared context exports nothing.' );
 

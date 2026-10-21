@@ -139,6 +139,17 @@ switch ( $gq_support_violation ) {
 			20
 		);
 		break;
+	case 'preview':
+		// A Report context preview on every launcher click, beyond the panel's one per draft.
+		add_action(
+			'admin_enqueue_scripts',
+			static fn() => wp_add_inline_script(
+				'gq-support-launcher',
+				sprintf( 'document.addEventListener("click", function (event) { if (event.target.closest(".gq-support-launcher")) fetch(%s, { method: "POST", body: new URLSearchParams({ action: "gq_support_context" }) }); }, true);', wp_json_encode( admin_url( 'admin-ajax.php' ) ) )
+			),
+			20
+		);
+		break;
 	case 'list':
 		// A second list call whenever My requests is shown.
 		add_action(

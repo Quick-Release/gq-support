@@ -69,7 +69,7 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     focusRequests.current = !!panel.current?.contains(doc.activeElement) || doc.activeElement === doc.body;
     setTab("requests");
   }, () => context.reload());
-  const context = useReportContext(visible, session, submission.key);
+  const context = useReportContext(visible, session, submission);
   const hasDraft = Boolean(description.trim() || summary.trim());
   const draftText = [summary, description].filter(Boolean).join("\n\n");
 
@@ -130,7 +130,7 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     const text = { ...(summary.trim() ? { summary: summary.trim() } : {}), description: description.trim() };
     // Exactly the reviewed values still selected; the size check counts them and their envelope.
     const draft = { ...text, ...context.reviewed() };
-    const bytes = (body: object) => new TextEncoder().encode(JSON.stringify({ ...body, submission_id: submission.key })).length;
+    const bytes = (body: typeof draft) => new TextEncoder().encode(JSON.stringify(submission.intentFor(body))).length;
     const message = !draft.description
       ? __("Enter a description.", "gq-support")
       : [...draft.description].length > maxDescriptionLength || [...summary.trim()].length > maxSummaryLength
@@ -172,14 +172,14 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
               <ul className="gq-support-context-list">
                 {context.values.map((item) => (
                   <li key={item.key}>
-                    <input id={`gq-support-context-${item.key}`} type="checkbox" checked={item.included} onChange={() => context.toggle(item.key)} />{" "}
+                    <input id={`gq-support-context-${item.key}`} type="checkbox" checked={item.included} onChange={() => { edit(); context.toggle(item.key); }} />{" "}
                     <label htmlFor={`gq-support-context-${item.key}`}>{contextLabels()[item.key]}: <code>{item.value}</code></label>
                   </li>
                 ))}
               </ul>
             )}
-            {context.values.some((item) => item.included) && <button type="button" className="gq-support-link" onClick={context.removeAll}>{__("Remove all", "gq-support")}</button>}
-            {(context.failed || context.omitted) && <p className="gq-support-message" role="status">{__("Some information could not be collected.", "gq-support")}</p>}
+            {context.values.some((item) => item.included) && <button type="button" className="gq-support-link" onClick={() => { edit(); context.removeAll(); }}>{__("Remove all", "gq-support")}</button>}
+            {(context.failed || context.omitted) && <p className="gq-support-hint" role="status">{__("Some information could not be collected.", "gq-support")}</p>}
           </fieldset>
           {submission.message && !submission.accepted && <p role="status" className="gq-support-message">{submission.message}</p>}
           {submission.checkAgain && <button type="button" disabled={submission.waiting || session.paused} onClick={() => { void submission.send(); }}>{__("Check again", "gq-support")}</button>}

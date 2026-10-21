@@ -235,8 +235,8 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 		return array(
 			'submission_id'  => self::SUBMISSION,
 			'description'    => 'Checkout does nothing',
-			'context'        => GQ_Support_Report_Context::wire( $context ),
-			'context_review' => $review ?? GQ_Support_Report_Context::review( $context, self::SUBMISSION, GQ_Support_Access::subject(), time() ),
+			'context'        => GQ_Support_Report_Context::json_value( $context ),
+			'context_review' => $review ?? GQ_Support_Report_Context::envelope( $context, self::SUBMISSION, GQ_Support_Access::subject(), time() ),
 		);
 	}
 
@@ -387,7 +387,7 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 	/** Removing reviewed values is the Reporter's choice: any subset travels exactly as selected. */
 	public function test_any_reviewed_subset_travels_exactly(): void {
 		$reviewed = self::editor_context();
-		$review   = GQ_Support_Report_Context::review( $reviewed, self::SUBMISSION, GQ_Support_Access::subject(), time() );
+		$review   = GQ_Support_Report_Context::envelope( $reviewed, self::SUBMISSION, GQ_Support_Access::subject(), time() );
 		foreach ( array( array( 'wp_version' ), array( 'originating_screen' ), array() ) as $index => $kept ) {
 			$selected = array(
 				'schema'  => 1,
@@ -434,7 +434,7 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 			'default' => array( 'wp_version' => get_bloginfo( 'version' ) ),
 		);
 		$subject              = GQ_Support_Access::subject();
-		$review               = GQ_Support_Report_Context::review( $reviewed, self::SUBMISSION, $subject, time() );
+		$review               = GQ_Support_Report_Context::envelope( $reviewed, self::SUBMISSION, $subject, time() );
 		list( , $body, $mac ) = explode( '.', $review );
 		$payload              = $this->reviewed( $reviewed, $review );
 		switch ( $forgery ) {
@@ -454,10 +454,10 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 				$payload['context_review'] = 'v1.' . $body . '.' . strrev( $mac );
 				break;
 			case 'submission':
-				$payload['context_review'] = GQ_Support_Report_Context::review( $reviewed, wp_generate_uuid4(), $subject, time() );
+				$payload['context_review'] = GQ_Support_Report_Context::envelope( $reviewed, wp_generate_uuid4(), $subject, time() );
 				break;
 			case 'reporter':
-				$payload['context_review'] = GQ_Support_Report_Context::review( $reviewed, self::SUBMISSION, wp_generate_uuid4(), time() );
+				$payload['context_review'] = GQ_Support_Report_Context::envelope( $reviewed, self::SUBMISSION, wp_generate_uuid4(), time() );
 				break;
 			case 'installation':
 				GQ_Support_State::update( array( 'installation_id' => wp_generate_uuid4() ) );
@@ -495,7 +495,7 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 	/** An expired envelope still reconciles an accepted intent, and never authorizes a new acceptance. */
 	public function test_expired_review_only_reconciles(): void {
 		$context = self::editor_context();
-		$expired = GQ_Support_Report_Context::review( $context, self::SUBMISSION, GQ_Support_Access::subject(), time() - GQ_Support_Report_Context::REVIEW_SECONDS );
+		$expired = GQ_Support_Report_Context::envelope( $context, self::SUBMISSION, GQ_Support_Access::subject(), time() - GQ_Support_Report_Context::REVIEW_SECONDS );
 		$payload = $this->reviewed( $context, $expired );
 		self::assertSame( 202, $this->create( $payload )->get_status() );
 		self::assertTrue( $this->forwarded()['reconcile_only'] );
@@ -508,7 +508,7 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 		self::assertFalse( $response->get_data()['data']['retryable'] );
 		self::assertSame( self::SUBMISSION, $response->get_data()['data']['submission_id'] );
 		// One second before expiry, the same review still authorizes acceptance.
-		$fresh = GQ_Support_Report_Context::review( $context, self::SUBMISSION, GQ_Support_Access::subject(), time() - GQ_Support_Report_Context::REVIEW_SECONDS + 2 );
+		$fresh = GQ_Support_Report_Context::envelope( $context, self::SUBMISSION, GQ_Support_Access::subject(), time() - GQ_Support_Report_Context::REVIEW_SECONDS + 2 );
 		$this->create( $this->reviewed( $context, $fresh ) );
 		self::assertArrayNotHasKey( 'reconcile_only', $this->forwarded( 2 ) );
 	}
@@ -643,6 +643,7 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 			'nonce for another user' => array( 'foreign-nonce', 'forbidden' ),
 			'grant revoked'          => array( 'grant', 'forbidden' ),
 			'malformed submission'   => array( 'submission', 'invalid' ),
+			'not connected'          => array( 'disconnected', 'unavailable' ),
 		);
 	}
 
@@ -678,6 +679,9 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 				break;
 			case 'submission':
 				$fields['submission_id'] = 'not-a-uuid';
+				break;
+			case 'disconnected':
+				GQ_Support_State::update( GQ_Support_State::disconnected( 'not_connected' ) );
 				break;
 		}
 		self::assertSame( array( 'state' => $state ), $this->preview( $fields ) );

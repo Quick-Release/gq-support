@@ -169,7 +169,7 @@ final class GQ_Support_REST {
 				if ( 'invalid' === $review ) {
 					return self::error( 'gq_support_invalid_request', 400 );
 				}
-				$payload['context'] = GQ_Support_Report_Context::wire( $body['context'] );
+				$payload['context'] = GQ_Support_Report_Context::json_value( $body['context'] );
 				if ( 'expired' === $review ) {
 					// An expired review still reconciles an accepted intent, but never authorizes a new one.
 					$payload['reconcile_only'] = true;

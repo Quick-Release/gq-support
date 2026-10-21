@@ -31,7 +31,8 @@ export interface ReportContext {
   readonly default: Readonly<Partial<Record<ContextKey, string>>>;
 }
 
-const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
+/** UTF-8 bytes, the unit of every Report context limit. */
+export const utf8Bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -50,11 +51,11 @@ export const canonicalContext = (value: unknown): string | null => {
   for (const [key, valid] of Object.entries(DEFAULT_FIELDS) as [ContextKey, (value: string) => boolean][]) {
     if (!Object.hasOwn(fields, key)) continue;
     const field = fields[key];
-    if (typeof field !== "string" || bytes(field) > CONTEXT_LIMITS.scalarBytes || !valid(field)) return null;
+    if (typeof field !== "string" || utf8Bytes(field) > CONTEXT_LIMITS.scalarBytes || !valid(field)) return null;
     normalized[key] = field;
   }
   const canonical = JSON.stringify({ schema: CONTEXT_LIMITS.schema, default: normalized });
-  return bytes(canonical) <= CONTEXT_LIMITS.contextBytes ? canonical : null;
+  return utf8Bytes(canonical) <= CONTEXT_LIMITS.contextBytes ? canonical : null;
 };
 
 const LABELS: Record<ContextKey, string> = {

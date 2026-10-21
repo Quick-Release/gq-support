@@ -195,14 +195,19 @@ async function pluginTimers(page: Page, violation?: string) {
 const REST = /gq-support\/v1|rest_route=%2Fgq-support/;
 const PLUGIN_FILE = /\/plugins\/gq-support\//;
 
-/** B8 and B10 (and B7's request count): plugin REST calls and file requests on first open, on My requests, and on reopen. */
+const isPreview = (request: Request) => /admin-ajax\.php/.test(request.url()) && /action=gq_support_context/.test(request.postData() ?? '');
+
+/**
+ * B8 and B10 (and B7's request count): plugin REST calls, Report context previews and file requests
+ * on first open, on My requests, and on reopen.
+ */
 async function openCosts(page: Page, violation?: string) {
   await page.goto(`${site}/wp-admin/index.php?${violationParam(violation)}`);
   const launcher = page.getByRole('button', { name: /^Support/ });
   const dialog = page.getByRole('dialog', { name: 'Support' });
   await expect(launcher).toBeVisible();
   await page.waitForLoadState('networkidle');
-  const costs = { open: { rest: 0, files: 0 }, requests: { rest: 0, files: 0 }, reopen: { rest: 0, files: 0 } };
+  const costs = { open: { rest: 0, preview: 0, files: 0 }, requests: { rest: 0, preview: 0, files: 0 }, reopen: { rest: 0, preview: 0, files: 0 } };
   const lists: URL[] = [];
   let phase: keyof typeof costs | null = null;
   page.on('request', (request) => {
@@ -210,7 +215,8 @@ async function openCosts(page: Page, violation?: string) {
     if (REST.test(request.url())) {
       costs[phase].rest++;
       if (request.method() === 'GET') lists.push(new URL(request.url()));
-    } else if (PLUGIN_FILE.test(request.url())) costs[phase].files++;
+    } else if (isPreview(request)) costs[phase].preview++;
+    else if (PLUGIN_FILE.test(request.url())) costs[phase].files++;
   });
   // Requests start on the click itself; give late ones a moment to appear.
   const settle = async () => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(500); };
@@ -421,21 +427,30 @@ for (const woo of wooInstalled ? [false, true] : [false]) {
     test('B8 and B10: first open and reopen stay within their REST and file budgets', async ({ page }) => {
       await logIn(page);
       const costs = await openCosts(page);
-      // B7: at most the app's two files. B8: New report makes no REST call.
+      // B7: at most the app's two files. B8: New report makes no REST call and one Report context preview.
       expect(costs.open.rest).toBe(0);
+      expect(costs.open.preview).toBe(1);
       expect(costs.open.files).toBeLessThanOrEqual(2);
+      expect(costs.requests.preview).toBe(0);
       // B8: exactly one list call when My requests is shown, at the default page size or less.
       expect(costs.requests.rest).toBe(1);
       expect(costs.perPage).toHaveLength(1);
       expect(costs.perPage[0]).toBeLessThanOrEqual(20);
       // B10: nothing is fetched again without an explicit refresh, even when My requests is shown again.
-      expect(costs.reopen).toEqual({ rest: 0, files: 0 });
+      expect(costs.reopen).toEqual({ rest: 0, preview: 0, files: 0 });
     });
 
     test('B8: negative control, two list calls when My requests is shown', async ({ page }) => {
       await logIn(page);
       const costs = await openCosts(page, 'list');
       expect(costs.requests.rest, 'negative control: a second list call').toBeGreaterThan(1);
+    });
+
+    test('B8 and B10: negative control, a Report context preview on every open', async ({ page }) => {
+      await logIn(page);
+      const costs = await openCosts(page, 'preview');
+      expect(costs.open.preview, 'negative control: a second preview on first open').toBeGreaterThan(1);
+      expect(costs.reopen.preview, 'negative control: a preview on reopen').toBeGreaterThan(0);
     });
 
     test('B8 and B10: negative control, a REST call on every open', async ({ page }) => {

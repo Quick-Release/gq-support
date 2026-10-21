@@ -1,6 +1,6 @@
 import { sha256 } from "./signature.ts";
 import type { Quota, SlotStorage } from "./storage.ts";
-import { CONTEXT_LIMITS, canonicalContext, storedContext } from "./report-context.ts";
+import { CONTEXT_LIMITS, canonicalContext, storedContext, utf8Bytes } from "./report-context.ts";
 
 /**
  * The verified installation's authority. It comes only from the signing key
@@ -94,13 +94,15 @@ interface Row {
   created_at: number;
   status: string | null;
   state: string;
-  /** Delivery-only: never part of a Reporter projection. */
-  context_json: string | null;
+  /** Delivery-only Report context, read by the privacy export alone. */
+  context_json?: string | null;
 }
 
-const COLUMNS = `SELECT r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
-  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state, i.context_json FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
+const FIELDS = `r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
+  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state`;
+const FROM = `FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
   WHERE r.slot = ?1 AND i.slot = ?1 AND r.erased_at IS NULL`;
+const COLUMNS = `SELECT ${FIELDS} ${FROM}`;
 
 const resource = (row: Row, caller: Caller) => ({
   id: row.id,
@@ -194,7 +196,7 @@ const quotaWait = async (storage: SlotStorage, subject: string, now: number): Pr
 const create = async (storage: SlotStorage, caller: Caller, body: string, now: number): Promise<Response> => {
   const input = parseCreate(body);
   if (!input) return invalid();
-  if (input.context !== null && new TextEncoder().encode(body).byteLength > CONTEXT_LIMITS.createBodyBytes) {
+  if (input.context !== null && utf8Bytes(body) > CONTEXT_LIMITS.createBodyBytes) {
     return error("request_too_large", 413);
   }
   const limited = await throttle(storage, input.reporter_subject, now);
@@ -205,7 +207,7 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
   const accepted: Row = {
     id, reporter_subject: input.reporter_subject, submission_id: input.submission_id, body_digest: digest,
     summary: input.summary ?? "", description: input.description, title: titleFor(input.summary, input.description),
-    created_at: now, status: null, state: "pending", supersedes_id: input.supersedes_id, superseded_at: null, context_json: input.context,
+    created_at: now, status: null, state: "pending", supersedes_id: input.supersedes_id, superseded_at: null,
   };
   const canSupersede = async () => {
     const predecessor = await storage.first<Row>(`${COLUMNS} AND r.id = ?2 AND r.reporter_subject = ?3`, input.supersedes_id, input.reporter_subject);
@@ -362,13 +364,14 @@ export const handleExport = async (storage: SlotStorage, url: URL, body: string,
   if (!after) return invalid();
   const limited = await throttle(storage, subject, now);
   if (limited) return limited;
-  const rows = await storage.all<Row>(`${COLUMNS} AND r.reporter_subject = ?2 AND (r.created_at, r.id) > (?3, ?4)
+  // Only the export reads the delivery-only context the service still holds.
+  const rows = await storage.all<Row>(`SELECT ${FIELDS}, i.context_json ${FROM} AND r.reporter_subject = ?2 AND (r.created_at, r.id) > (?3, ?4)
     ORDER BY r.created_at, r.id LIMIT ?5`, subject, ...after, EXPORT_PAGE + 1);
   const items = rows.slice(0, EXPORT_PAGE);
   return json({
     items: items.map((row) => ({ id: row.id, summary: row.summary === "" ? null : row.summary, description: row.description,
       created_at: new Date(row.created_at).toISOString(), delivery: DELIVERY[row.state], status: row.state === "delivered" ? row.status : null,
-      context: storedContext(row.context_json) })),
+      context: storedContext(row.context_json ?? null) })),
     next_cursor: rows.length > items.length ? encodeCursor(items[items.length - 1]!) : null,
   }, 200);
 };

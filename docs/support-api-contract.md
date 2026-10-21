@@ -113,7 +113,7 @@ Every error is a `WP_Error` whose `data` is `{ status, correlation_id, retryable
 | 413 | `gq_support_payload_too_large` | Body over 32 KB | Inline error |
 | 404 | `gq_support_not_found` | Unknown or out-of-scope request | "Not found" |
 | 409 | `gq_support_idempotency_conflict` | Same key, different body | "Not sent", new key on retry |
-| 412 | `gq_support_context_expired` | Create: the review envelope expired and the service holds no intent for this key | The panel reviews the context again for the same key; if an earlier send is uncertain, "Check My requests" |
+| 412 | `gq_support_context_expired` | Create: the review envelope expired and the service holds no intent for this Submission ID | The panel reviews the context again for the same Submission ID; if an earlier send is uncertain, "Check My requests" |
 | 426 | `gq_support_plugin_outdated` | Worker no longer supports this plugin version | "Support needs a plugin update" |
 | 429 | `gq_support_rate_limited` + `Retry-After` | Per-subject or per-installation limit | "Too many requests, try again later" |
 | 503 | `gq_support_not_configured` | No connection, or the Worker rejected the installation credential | "Support is unavailable"; operator sees detail on the setup page |

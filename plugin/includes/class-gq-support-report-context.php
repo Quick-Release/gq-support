@@ -48,9 +48,6 @@ final class GQ_Support_Report_Context {
 		'originating_screen'     => 'screen',
 	);
 
-	/** Compact UTF-8, byte for byte what the browser and the service serialize. */
-	private const JSON = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS;
-
 	/**
 	 * Validate submitted context, decoded with JSON objects as `stdClass`, so an
 	 * array never passes for an object. Nothing is dropped or truncated: a
@@ -114,7 +111,7 @@ final class GQ_Support_Report_Context {
 	 * @phpstan-param Context $context
 	 * @return array{schema: int, default: object}
 	 */
-	public static function wire( array $context ): array {
+	public static function json_value( array $context ): array {
 		return array(
 			'schema'  => $context['schema'],
 			'default' => (object) $context['default'],
@@ -128,7 +125,7 @@ final class GQ_Support_Report_Context {
 	 * @phpstan-param Context $context
 	 */
 	public static function encode( array $context ): string {
-		return (string) wp_json_encode( self::wire( $context ), self::JSON );
+		return GQ_Support_Service_Client::encode( self::json_value( $context ) );
 	}
 
 	/**
@@ -182,15 +179,14 @@ final class GQ_Support_Report_Context {
 	 * @param int    $now           Epoch seconds.
 	 * @phpstan-param Context $context
 	 */
-	public static function review( array $context, string $submission_id, string $subject, int $now ): string {
+	public static function envelope( array $context, string $submission_id, string $subject, int $now ): string {
 		$payload = self::base64url(
-			(string) wp_json_encode(
+			GQ_Support_Service_Client::encode(
 				array(
 					'sid'     => $submission_id,
 					'exp'     => $now + self::REVIEW_SECONDS,
-					'context' => self::wire( $context ),
-				),
-				self::JSON
+					'context' => self::json_value( $context ),
+				)
 			)
 		);
 		return 'v1.' . $payload . '.' . self::mac( $payload, $subject );
@@ -261,16 +257,17 @@ final class GQ_Support_Report_Context {
 		if ( '' === $submission_id ) {
 			wp_send_json( array( 'state' => 'invalid' ) );
 		}
-		$subject = GQ_Support_Access::subject();
-		if ( is_wp_error( $subject ) ) {
+		// Like the support routes, a site without a connection has no Reporter subject to bind.
+		$subject = 'connected' === GQ_Support_State::get()['connection'] ? GQ_Support_Access::subject() : null;
+		if ( ! is_string( $subject ) ) {
 			wp_send_json( array( 'state' => 'unavailable' ) );
 		}
 		$collected = self::collect( $input( 'screen', '/^[a-z-]{1,32}\z/' ) );
 		wp_send_json(
 			array(
 				'state'      => 'current',
-				'context'    => self::wire( $collected['context'] ),
-				'review'     => self::review( $collected['context'], $submission_id, $subject, time() ),
+				'context'    => self::json_value( $collected['context'] ),
+				'review'     => self::envelope( $collected['context'], $submission_id, $subject, time() ),
 				'expires_in' => self::REVIEW_SECONDS,
 				'omitted'    => $collected['omitted'],
 			)
@@ -287,7 +284,7 @@ final class GQ_Support_Report_Context {
 		$labels = array(
 			'wp_version'             => __( 'WordPress version', 'gq-support' ),
 			'support_plugin_version' => __( 'Support plugin version', 'gq-support' ),
-			'originating_screen'     => __( 'Originating admin screen', 'gq-support' ),
+			'originating_screen'     => __( 'Screen you opened support from', 'gq-support' ),
 		);
 		$lines  = array();
 		foreach ( $context['default'] as $key => $value ) {

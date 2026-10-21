@@ -161,6 +161,68 @@ test('a late preview for a new Submission ID cannot restore a removed value', as
   expect(submissions[1]!.context_review).not.toBe(submissions[0]!.context_review);
 });
 
+test('changing the selection after a send that was not accepted sends a new intent with exactly the new selection', async ({ page }) => {
+  const asked = previews(page);
+  const submissions = await intercept(page, (attempt, payload) => attempt === 1
+    ? { status: 503, body: { code: 'gq_support_not_accepted', data: { status: 503, retryable: true } } }
+    : accepted(payload));
+  await open(page);
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(message(page)).toContainText('Not sent');
+  await page.getByRole('checkbox', { name: /^WordPress version/ }).uncheck();
+  await expect.poll(() => asked.length).toBe(2);
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(message(page)).toContainText('Received');
+  expect(submissions[1]!.submission_id).not.toBe(submissions[0]!.submission_id);
+  expect(asked[1]!.get('submission_id')).toBe(submissions[1]!.submission_id);
+  expect(submissions[1]!.context!.default).toEqual({ support_plugin_version: PLUGIN_VERSION, originating_screen: 'dashboard' });
+});
+
+test('a frozen intent sent without optional information shows no values on reopening', async ({ page }) => {
+  const asked = previews(page);
+  const failing = async (route: import('@playwright/test').Route) => {
+    if (isPreview(route.request())) await route.fulfill({ status: 500, body: '' });
+    else await route.fallback();
+  };
+  await page.route('**/admin-ajax.php', failing);
+  const submissions = await intercept(page, (attempt, payload) => attempt === 1
+    ? { status: 503, body: { code: 'gq_support_not_accepted', data: { status: 503, retryable: true } } }
+    : accepted(payload));
+  await open(page);
+  await page.getByRole('button', { name: 'Send without optional information' }).click();
+  await expect(message(page)).toContainText('Not sent');
+  // Collection would work now, but the frozen intent carries no context.
+  await page.unroute('**/admin-ajax.php', failing);
+  await page.getByRole('button', { name: 'Close support' }).click();
+  await page.getByRole('button', { name: /^Support/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Some information could not be collected.' })).toBeVisible();
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(message(page)).toContainText('Received');
+  expect(submissions[1]).toEqual(submissions[0]);
+  expect(submissions[1]).not.toHaveProperty('context');
+  // No preview for the frozen Submission ID after the failed one; the next draft has its own.
+  expect(asked.filter(fields => fields.get('submission_id') === submissions[0]!.submission_id)).toHaveLength(1);
+});
+
+test('an uncertain send whose review then expires keeps its frozen intent and asks the Reporter to check', async ({ page }) => {
+  const asked = previews(page);
+  const submissions = await intercept(page, attempt => attempt === 1
+    ? { status: 504, body: { code: 'gq_support_outcome_unknown', data: { status: 504, retryable: true } } }
+    : { status: 412, body: { code: 'gq_support_context_expired', data: { status: 412, retryable: false } } });
+  await open(page);
+  await page.getByRole('button', { name: 'Send report' }).click();
+  await expect(message(page)).toContainText("couldn't confirm", { timeout: 5000 });
+  await expect(page.getByRole('textbox', { name: 'Description' })).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: /^WordPress version/ })).toBeDisabled();
+  await page.getByRole('button', { name: 'Check again' }).click();
+  await expect.poll(() => submissions.length).toBe(3);
+  // Never a new Submission ID, a new review or changed context for an intent that may have arrived.
+  expect(submissions[1]).toEqual(submissions[0]);
+  expect(submissions[2]).toEqual(submissions[0]);
+  expect(asked).toHaveLength(1);
+});
+
 test('an expired review is collected again for the same Submission ID before the report is sent', async ({ page }) => {
   const asked = previews(page);
   const submissions = await intercept(page, (attempt, payload) => attempt === 1

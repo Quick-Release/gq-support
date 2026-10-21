@@ -23,27 +23,30 @@ let db: D1Database;
 let production: Installation, staging: Installation;
 let logged: unknown[][];
 
-beforeAll(async () => {
-  stage = await localStage(["shared"]);
-  db = stage.databases.shared;
-});
-afterAll(() => stage.dispose());
-beforeEach(async () => {
-  await db.batch(["request_rate", "intake_debit", "delivery_intent", "support_request", "replay", "enrollment_rate", "enrollment_code", "installation_key"]
-    .map((table) => db.prepare(`DELETE FROM ${table}`)));
-  const clients = harness(db, mappings);
-  production = await clients.enroll("acme-shop/production", "installation-a");
-  staging = await clients.enroll("acme-shop/staging", "installation-b");
-  logged = [];
-  for (const method of ["log", "info", "warn", "error", "debug"] as const) {
-    vi.spyOn(console, method).mockImplementation((...args) => { logged.push(args); });
-  }
-});
-afterEach(() => {
-  // Context is never logged: nothing is logged at all.
-  expect(logged).toEqual([]);
-  vi.restoreAllMocks();
-});
+/** A fresh Slot pair in a local D1 for each test of the HTTP boundary. */
+const withService = () => {
+  beforeAll(async () => {
+    stage = await localStage(["shared"]);
+    db = stage.databases.shared;
+  });
+  afterAll(() => stage.dispose());
+  beforeEach(async () => {
+    await db.batch(["request_rate", "intake_debit", "delivery_intent", "support_request", "replay", "enrollment_rate", "enrollment_code", "installation_key"]
+      .map((table) => db.prepare(`DELETE FROM ${table}`)));
+    const clients = harness(db, mappings);
+    production = await clients.enroll("acme-shop/production", "installation-a");
+    staging = await clients.enroll("acme-shop/staging", "installation-b");
+    logged = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args) => { logged.push(args); });
+    }
+  });
+  afterEach(() => {
+    // Context is never logged: nothing is logged at all.
+    expect(logged).toEqual([]);
+    vi.restoreAllMocks();
+  });
+};
 
 /** The create body WordPress forwards: the browser fields, the attested identity, and no review envelope. */
 const forwarded = (fields: Record<string, unknown> = {}, subject = REPORTER) => JSON.stringify({
@@ -68,6 +71,10 @@ describe("the shared context schema", () => {
   it.each(fixtures.cases.map((fixture) => [fixture.name, fixture] as const))("normalizes or rejects: %s", (_, fixture) => {
     expect(canonicalContext(fixture.context)).toBe("canonical" in fixture ? fixture.canonical : null);
   });
+});
+
+describe("the create schema", () => {
+  withService();
 
   it("accepts each valid shared context at create and rejects each invalid one without recording anything", async () => {
     for (const [index, fixture] of fixtures.cases.entries()) {
@@ -81,6 +88,7 @@ describe("the shared context schema", () => {
 });
 
 describe("accepting a request with Report context", () => {
+  withService();
   it("freezes the canonical reviewed context with the create intent and keeps it out of every projection", async () => {
     const response = await submit({ context: { default: { originating_screen: "post-editor", wp_version: "6.5.5" }, schema: 1 } });
     expect(response.status).toBe(202);
@@ -160,6 +168,7 @@ describe("accepting a request with Report context", () => {
 });
 
 describe("reconciling after the review envelope expired", () => {
+  withService();
   it("returns the accepted intent for an exact replay, and conflicts for a changed one", async () => {
     const { id } = await (await submit()).json() as { id: string };
     const replay = await submit({ reconcile_only: true });
