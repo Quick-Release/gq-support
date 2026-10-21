@@ -12,3 +12,7 @@ Not every revocation goes through the Operator CLI. Re-enrollment replaces a Slo
 
 - A self-revocation writes the ledger first. If the main write then fails, the request fails and the site can retry; until it does, the key still works, and a later restore revokes it, which is what the site asked for.
 - Re-enrollment and an Operator `revoke` write the main database first (the CLI after its git-tracked log), then the ledger. A lost ledger write leaves the key revoked in the main database, and the next cleanup pass's mirror records it. Only a restore within that minute could revive the key; the CLI's log still covers Operator revocations.
+
+## Amendment: the title digest in the ledger
+
+The ledger's copy of a cleanup record carries the keyed title digest for as long as the main database's copy does; no erased title text is mirrored. What it holds, its key and when it is cleared are in the [privacy design](../support-privacy-design.md#title-digest).
