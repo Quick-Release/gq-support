@@ -127,7 +127,6 @@ try {
 	$gq_support_assert( GQ_Support_State::get() === $gq_support_state && get_option( GQ_Support_Signing_Key::OPTION ) === $gq_support_key, 'The fail-safe must not revoke, rotate or forget the Installation credential.' );
 
 	// Privacy calls fail like an unreachable service: never a claimed export or erasure.
-	require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
 	update_option( GQ_Support_Privacy::ERASURES_OPTION, array( 'era_01J8Z6Q4M1ZC7X000000000000' => array( 'state' => 'in_progress' ) ), false );
 	$gq_support_assert( false === GQ_Support_Privacy::refresh_erasures(), 'An erasure refresh must not claim an answer.' );
 	delete_option( GQ_Support_Privacy::ERASURES_OPTION );

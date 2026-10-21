@@ -46,40 +46,31 @@ final class GQ_Support_Plugin {
 		self::register_privacy();
 
 		if ( is_admin() ) {
-			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-setup-page.php';
 			GQ_Support_Setup_Page::register();
 		}
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			GQ_Support_Lifecycle::ensure_site();
-			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-cli.php';
 			WP_CLI::add_command( 'gq-support', GQ_Support_CLI::class );
 		}
 	}
 
 	/**
-	 * Privacy tools, user deletion and the privacy guide fire rarely: their
-	 * class loads only when one of these hooks does.
+	 * Privacy tools, user deletion and the privacy guide fire rarely: the autoloader
+	 * loads their class only when one of these hooks does.
 	 */
 	private static function register_privacy(): void {
-		$lazy = static function ( string $method ): callable {
-			return static function ( ...$args ) use ( $method ) {
-				require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
-				return GQ_Support_Privacy::$method( ...$args );
-			};
-		};
-		add_filter( 'wp_privacy_personal_data_exporters', $lazy( 'register_exporter' ) );
-		add_filter( 'wp_privacy_personal_data_erasers', $lazy( 'register_eraser' ) );
-		add_action( 'admin_init', $lazy( 'add_policy_content' ) );
-		add_action( 'delete_user', $lazy( 'erase_deleted_user' ) );
-		add_action( 'wpmu_delete_user', $lazy( 'erase_deleted_network_user' ) );
-		add_action( 'gq_support_retry_erasure', $lazy( 'retry_erasure' ), 10, 2 );
+		add_filter( 'wp_privacy_personal_data_exporters', array( GQ_Support_Privacy::class, 'register_exporter' ) );
+		add_filter( 'wp_privacy_personal_data_erasers', array( GQ_Support_Privacy::class, 'register_eraser' ) );
+		add_action( 'admin_init', array( GQ_Support_Privacy::class, 'add_policy_content' ) );
+		add_action( 'delete_user', array( GQ_Support_Privacy::class, 'erase_deleted_user' ) );
+		add_action( 'wpmu_delete_user', array( GQ_Support_Privacy::class, 'erase_deleted_network_user' ) );
+		add_action( 'gq_support_retry_erasure', array( GQ_Support_Privacy::class, 'retry_erasure' ), 10, 2 );
 	}
 
 	/** Load support controllers only when WordPress initializes REST. */
 	public static function register_rest(): void {
 		GQ_Support_Lifecycle::ensure_site();
-		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-rest.php';
 		GQ_Support_REST::register();
 	}
 

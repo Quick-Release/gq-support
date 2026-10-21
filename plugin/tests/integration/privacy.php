@@ -172,7 +172,6 @@ try {
 	);
 	$gq_support_assert( GQ_Support_Privacy::refresh_erasures(), 'A refresh reaches the service.' );
 	$gq_support_assert( str_ends_with( $gq_support_seen[0][0], '/v1/erasures/era_01M54MVN80H1GQ296DCQ8S14F0' ), 'A refresh reads each listed erasure.' );
-	require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-setup-page.php';
 	wp_set_current_user( $gq_support_user );
 	wp_get_current_user()->add_cap( 'gq_support_manage_settings' );
 	ob_start();

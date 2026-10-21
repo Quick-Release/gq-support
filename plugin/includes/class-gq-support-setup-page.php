@@ -182,7 +182,6 @@ final class GQ_Support_Setup_Page {
 	 * @param bool $disabled Whether the fail-safe hides the refresh button.
 	 */
 	private static function render_erasures( bool $disabled ): void {
-		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
 		$erasures = GQ_Support_Privacy::erasures();
 		if ( array() === $erasures ) {
 			return;
@@ -230,7 +229,6 @@ final class GQ_Support_Setup_Page {
 	 */
 	public static function handle_refresh_erasures(): void {
 		self::authorize( 'refresh_erasures' );
-		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
 		self::redirect( GQ_Support_Privacy::refresh_erasures() ? 'erasures_refreshed' : 'unreachable' );
 	}
 
