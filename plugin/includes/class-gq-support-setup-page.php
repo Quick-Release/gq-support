@@ -57,6 +57,8 @@ final class GQ_Support_Setup_Page {
 
 		$status    = GQ_Support_Connection::status();
 		$connected = GQ_Support_State::holds_credential( $status );
+		$disabled  = GQ_Support_Fail_Safe::disabled();
+		$help      = GQ_Support_Fail_Safe::help();
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Display-only message key set by our own redirect.
 		$notice = isset( $_GET['gq_support_notice'] ) ? sanitize_key( wp_unslash( $_GET['gq_support_notice'] ) ) : '';
 		?>
@@ -64,6 +66,28 @@ final class GQ_Support_Setup_Page {
 			<h1><?php esc_html_e( 'GETQUICK Support', 'gq-support' ); ?></h1>
 			<?php self::render_notice( $notice ); ?>
 			<table class="form-table" role="presentation">
+				<?php if ( $disabled ) : ?>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Support', 'gq-support' ); ?></th>
+						<td>
+							<strong><?php esc_html_e( 'Temporarily disabled', 'gq-support' ); ?></strong>
+							<p class="description"><?php esc_html_e( 'GQ_SUPPORT_DISABLED is set in wp-config.php. Reporters see no support panel, and this site sends nothing to the support service. The connection, its key and requests the service already received are unchanged. Remove the constant to turn support back on.', 'gq-support' ); ?></p>
+						</td>
+					</tr>
+				<?php endif; ?>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Independent help', 'gq-support' ); ?></th>
+					<td>
+						<?php if ( null !== $help ) : ?>
+							<?php GQ_Support_Fail_Safe::render_link( $help ); ?>
+							<p class="description"><?php esc_html_e( 'Shown to Reporters when support is unavailable. Give it to them outside WordPress too.', 'gq-support' ); ?></p>
+						<?php elseif ( GQ_Support_Fail_Safe::help_configured() ) : ?>
+							<?php esc_html_e( 'Not valid. GQ_SUPPORT_HELP_URL must be an https, mailto or tel address without a query string, and GQ_SUPPORT_HELP_LABEL at most 120 characters on one line.', 'gq-support' ); ?>
+						<?php else : ?>
+							<?php esc_html_e( 'Not set. GETQUICK sets the verified contact with GQ_SUPPORT_HELP_URL and GQ_SUPPORT_HELP_LABEL in wp-config.php.', 'gq-support' ); ?>
+						<?php endif; ?>
+					</td>
+				</tr>
 				<tr>
 					<th scope="row"><?php esc_html_e( 'Connection', 'gq-support' ); ?></th>
 					<td><?php echo esc_html( self::connection_label( $status['connection'] ) ); ?></td>
@@ -117,7 +141,7 @@ final class GQ_Support_Setup_Page {
 				<?php endif; ?>
 			</table>
 
-			<?php if ( 'connected' !== $status['connection'] ) : ?>
+			<?php if ( ! $disabled && 'connected' !== $status['connection'] ) : ?>
 				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 					<input type="hidden" name="action" value="gq_support_enroll" />
 					<?php wp_nonce_field( 'gq_support_enroll' ); ?>
@@ -130,7 +154,7 @@ final class GQ_Support_Setup_Page {
 				</form>
 			<?php endif; ?>
 
-			<?php if ( $connected ) : ?>
+			<?php if ( ! $disabled && $connected ) : ?>
 				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline-block">
 					<input type="hidden" name="action" value="gq_support_test" />
 					<?php wp_nonce_field( 'gq_support_test' ); ?>
@@ -145,7 +169,7 @@ final class GQ_Support_Setup_Page {
 				<?php endif; ?>
 			<?php endif; ?>
 
-			<?php self::render_erasures(); ?>
+			<?php self::render_erasures( $disabled ); ?>
 		</div>
 		<?php
 	}
@@ -154,8 +178,10 @@ final class GQ_Support_Setup_Page {
 	 * Personal data erasures this site requested, until GETQUICK closes them
 	 * with nothing left unresolved.
 	 * Shows the last known state; only the refresh button asks the service.
+	 *
+	 * @param bool $disabled Whether the fail-safe hides the refresh button.
 	 */
-	private static function render_erasures(): void {
+	private static function render_erasures( bool $disabled ): void {
 		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
 		$erasures = GQ_Support_Privacy::erasures();
 		if ( array() === $erasures ) {
@@ -187,11 +213,15 @@ final class GQ_Support_Setup_Page {
 				<?php endforeach; ?>
 			</tbody>
 		</table>
-		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-			<input type="hidden" name="action" value="gq_support_refresh_erasures" />
-			<?php wp_nonce_field( 'gq_support_refresh_erasures' ); ?>
-			<?php submit_button( __( 'Refresh erasure status', 'gq-support' ), 'secondary' ); ?>
-		</form>
+		<?php if ( $disabled ) : ?>
+			<p class="description"><?php esc_html_e( 'Erasure status cannot be refreshed while support is disabled.', 'gq-support' ); ?></p>
+		<?php else : ?>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action" value="gq_support_refresh_erasures" />
+				<?php wp_nonce_field( 'gq_support_refresh_erasures' ); ?>
+				<?php submit_button( __( 'Refresh erasure status', 'gq-support' ), 'secondary' ); ?>
+			</form>
+		<?php endif; ?>
 		<?php
 	}
 
@@ -266,6 +296,7 @@ final class GQ_Support_Setup_Page {
 
 	/**
 	 * Only site admins with the capability, and only with this form's nonce.
+	 * Every action calls the service, so none runs while the fail-safe is set.
 	 *
 	 * @param string $action The handler's action.
 	 */
@@ -274,6 +305,9 @@ final class GQ_Support_Setup_Page {
 			wp_die( esc_html__( 'Sorry, you are not allowed to manage GETQUICK Support.', 'gq-support' ), 403 );
 		}
 		check_admin_referer( "gq_support_{$action}" );
+		if ( GQ_Support_Fail_Safe::disabled() ) {
+			self::redirect( 'disabled' );
+		}
 		GQ_Support_Lifecycle::ensure_site();
 	}
 
@@ -306,6 +340,7 @@ final class GQ_Support_Setup_Page {
 			'disconnected_unrevoked' => array( 'warning', __( 'Disconnected locally, but the service could not be told. Ask GETQUICK to revoke this site\'s key.', 'gq-support' ) ),
 			'managed'                => array( 'error', __( 'This connection is managed by server configuration.', 'gq-support' ) ),
 			'erasures_refreshed'     => array( 'info', __( 'Erasure status refreshed.', 'gq-support' ) ),
+			'disabled'               => array( 'warning', __( 'Support is temporarily disabled by GQ_SUPPORT_DISABLED in wp-config.php. Nothing was sent to the support service.', 'gq-support' ) ),
 		);
 		if ( ! isset( $messages[ $notice ] ) ) {
 			return;

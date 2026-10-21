@@ -28,6 +28,10 @@ final class GQ_Support_Service_Client {
 	 * @return array{status: int, body: array<string, mixed>, retry_after: string}|WP_Error
 	 */
 	public static function request( string $method, string $path, ?array $payload, GQ_Support_Signer $signer, int $timeout ) {
+		// Every support operation reaches the service through here, so the fail-safe holds even for a caller that does not check it.
+		if ( GQ_Support_Fail_Safe::disabled() ) {
+			return new WP_Error( 'gq_support_disabled', 'Support is disabled by server configuration.' );
+		}
 		$base = defined( 'GQ_SUPPORT_SERVICE_URL' ) ? (string) constant( 'GQ_SUPPORT_SERVICE_URL' ) : self::BASE_URL;
 		if ( 'https' !== wp_parse_url( $base, PHP_URL_SCHEME ) ) {
 			return new WP_Error( 'gq_support_not_configured', 'The support service URL must use HTTPS.' );

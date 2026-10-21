@@ -53,6 +53,8 @@ for scenario in state no-remote-calls legacy-upgrade enroll interrupted-setup te
 done
 wp eval-file plugin/tests/integration/access.php
 wp eval-file plugin/tests/integration/privacy.php
+# Its own process: it defines GQ_SUPPORT_DISABLED for the rest of the request.
+wp eval-file plugin/tests/integration/fail-safe.php
 ddev exec --dir /var/www/html/plugin composer install --quiet
 wp eval-file plugin/tests/contract/run.php
 # Verify actual public and admin HTTP responses, not hook registrations.

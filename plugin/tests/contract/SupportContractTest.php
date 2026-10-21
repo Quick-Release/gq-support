@@ -436,7 +436,8 @@ final class GQ_Support_Contract_Test extends TestCase {
 			static function ( $fixture ) {
 				return array( $fixture );
 			},
-			self::fixtures( 'local-errors' )
+			// A defined GQ_SUPPORT_DISABLED would outlive its case here: integration/fail-safe.php runs it in its own process.
+			wp_list_filter( self::fixtures( 'local-errors' ), array( 'scenario' => 'disabled' ), 'NOT' )
 		);
 	}
 

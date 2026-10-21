@@ -19,3 +19,9 @@ msgstr "A carregar o apoio…"
 
 msgid "Support could not load. Press to retry."
 msgstr "Não foi possível carregar o apoio. Prima para tentar novamente."
+
+msgid "For help, contact:"
+msgstr "Para obter ajuda, contacte:"
+
+msgid "Support is temporarily disabled on this site."
+msgstr "O apoio está temporariamente desativado neste site."

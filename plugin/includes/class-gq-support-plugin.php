@@ -41,6 +41,7 @@ final class GQ_Support_Plugin {
 		add_action( 'wp_ajax_nopriv_gq_support_session', array( __CLASS__, 'check_session' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_launcher' ) );
 		add_action( 'admin_footer', array( __CLASS__, 'render_launcher' ) );
+		add_action( 'admin_notices', array( __CLASS__, 'render_disabled_notice' ) );
 		add_action( 'admin_print_footer_scripts', array( __CLASS__, 'render_deferred_assets' ), 20 );
 		self::register_privacy();
 
@@ -146,7 +147,7 @@ final class GQ_Support_Plugin {
 
 	/** Register the app without enqueueing it; only the tiny launcher is sent initially. */
 	public static function enqueue_launcher(): void {
-		if ( ! self::eligible() ) {
+		if ( GQ_Support_Fail_Safe::disabled() || ! self::eligible() ) {
 			return;
 		}
 
@@ -167,8 +168,27 @@ final class GQ_Support_Plugin {
 			'timezone' => wp_timezone_string(),
 			'loading'  => __( 'Loading support…', 'gq-support' ),
 			'error'    => __( 'Support could not load. Press to retry.', 'gq-support' ),
+			'help'     => GQ_Support_Fail_Safe::help(),
 		);
 		wp_add_inline_script( 'gq-support-launcher', 'window.gqSupportLauncher=' . wp_json_encode( $bootstrap ) . ';', 'before' );
+	}
+
+	/**
+	 * While `GQ_SUPPORT_DISABLED` is set, a Reporter who would have the launcher
+	 * sees why it is missing and the independent contact, from server-rendered core markup only.
+	 */
+	public static function render_disabled_notice(): void {
+		if ( ! GQ_Support_Fail_Safe::disabled() || ! self::eligible() ) {
+			return;
+		}
+		$help = GQ_Support_Fail_Safe::help();
+		echo '<div class="notice notice-info gq-support-disabled"><p>';
+		echo esc_html__( 'Support is temporarily disabled on this site.', 'gq-support' );
+		if ( null !== $help ) {
+			echo ' ';
+			GQ_Support_Fail_Safe::render_contact( $help );
+		}
+		echo '</p></div>';
 	}
 
 	/** Later hooks render only when `enqueue_launcher()` accepted this request. */
@@ -187,7 +207,14 @@ final class GQ_Support_Plugin {
 				<?php echo esc_html__( 'Support', 'gq-support' ); ?>
 				<span class="gq-support-draft-indicator" hidden><span class="gq-support-sr-only"><?php echo esc_html__( 'Unsent draft', 'gq-support' ); ?></span></span>
 			</button>
-			<span class="gq-support-launcher-status gq-support-sr-only" role="status" aria-live="polite"></span>
+			<div class="gq-support-launcher-notice">
+				<span class="gq-support-launcher-status gq-support-sr-only" role="status" aria-live="polite"></span>
+				<?php $help = GQ_Support_Fail_Safe::help(); ?>
+				<?php if ( null !== $help ) : ?>
+					<?php // Server-rendered, so it works when the app assets do not. ?>
+					<p class="gq-support-launcher-help" hidden><?php GQ_Support_Fail_Safe::render_contact( $help ); ?></p>
+				<?php endif; ?>
+			</div>
 		</div>
 		<?php
 	}

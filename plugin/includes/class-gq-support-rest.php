@@ -132,6 +132,9 @@ final class GQ_Support_REST {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public static function dispatch( WP_REST_Request $request ) {
+		if ( GQ_Support_Fail_Safe::disabled() ) {
+			return self::error( 'gq_support_disabled', 503 );
+		}
 		$query_keys = 'POST' === $request->get_method() || $request['id'] ? array() : array( 'scope', 'per_page', 'cursor' );
 		if ( array_diff( array_keys( $request->get_query_params() ), array_merge( $query_keys, array( 'rest_route' ) ) ) || $request->get_body_params() || ( 'POST' !== $request->get_method() && '' !== (string) $request->get_body() ) ) {
 			return self::error( 'gq_support_invalid_request', 400 );
