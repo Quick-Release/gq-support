@@ -15,11 +15,11 @@ This covers the **plain-text MVP** only: Submitted text, Support status and Deli
 3. extend export and erasure to cover its data, including abandoned uploads for #15;
 4. add its tests to the list at the end of this document.
 
-The [Report context decision](support-context-design.md) narrows this gate: minimal, disclosed, removable WordPress/support-plugin versions and a coarse originating screen are approved for future MVP implementation; rich Technical details remain deferred and explicitly opt-in. Default context uses disclosure and removal controls, not the technical-details opt-in. Neither category is enabled merely by this decision: its inventory, review flow, export/erasure handling and adversarial/performance checks must ship together. Optional context is excluded from Reporter list/read projections and all logs.
+The [Report context decision](support-context-design.md) narrows this gate: minimal, disclosed, removable WordPress/support-plugin versions and a coarse originating screen are approved for future MVP implementation; rich Technical details remain deferred and explicitly opt-in. Default context uses disclosure and removal controls, not the technical-details opt-in. Neither category is enabled merely by this decision: its inventory, review flow, export/erasure handling and adversarial/performance checks must ship together. The minimal context shipped that way in [#71](https://github.com/Quick-Release/gq-support/issues/71); Technical details remain gated. Optional context is excluded from Reporter list/read projections and all logs.
 
-| Approved future context | Collection and access | Retention and deletion owner |
+| Approved context | Collection and access | Retention and deletion owner |
 |---|---|---|
-| WordPress/support-plugin versions; coarse originating screen | Reviewed/removable by Reporter; service and private Project repository collaborators only | Browser draft/review memory follows draft lifecycle; D1 delivery-intent context cleared at terminal delivery outcome; GitHub context follows repository policy and Reporter erasure |
+| WordPress/support-plugin versions; coarse originating screen (implemented, #71) | Reviewed/removable by Reporter; service and private Project repository collaborators only | Browser draft/review memory follows draft lifecycle; D1 delivery-intent context cleared at terminal delivery outcome; GitHub context follows repository policy and Reporter erasure |
 | PHP version, database engine/version, active theme slug/version (deferred) | Explicit technical-details action plus per-field preview/removal; same destination/access | Same limits/lifecycle as minimal context; no enablement before the optional-feature privacy gate |
 
 The field-by-field source, trust, purpose, sensitivity and exclusion inventory is in the context decision. Export includes still-retained context even though the Reporter projection omits it. Erasure removes context from D1 and the App-authored GitHub body; history/notifications/Developer quotations remain residual-copy exceptions. No extra retention store is authorized for preview or retries. The existing Environment and opaque attribution remain separate and subject to ADR 0018.
@@ -29,11 +29,13 @@ The field-by-field source, trust, purpose, sensitivity and exclusion inventory i
 | Data | Where | Purpose | Access | Retention | Deletion owner |
 |---|---|---|---|---|---|
 | Draft Summary and Description | Browser memory | Composing a request | The Reporter | Until reload, navigation or user switch. Never persisted | Browser |
+| Previewed Report context and its review envelope | Browser memory | Reviewing what goes with a request | The Reporter | Until reload, navigation or user switch; frozen into a sent intent like its text. Never persisted | Browser |
 | Reporter subject | WordPress user meta for that site | Pseudonymous ownership key | WordPress server | Until the user is deleted | WordPress (user deletion triggers erasure, see below) |
 | Submitted text, Reporter subject, Submission ID, digest | D1 `support_request` | Reporter list, idempotency | Worker, scoped by Slot | Delivered: **12 months after the last observed close**; open delivered requests are kept and reopen resets the clock. Never confirmed delivered: text at most **12 months from acceptance**, unless erased sooner | Service purge job; erasure |
 | Repository and issue IDs, status projection | D1 `support_request` | Delivery, status sync | Worker | With the request | As above |
 | Delivery intent and bookkeeping | D1 `delivery_intent` | Delivery outbox | Worker | With the request | As above |
-| `context_json` | D1 `delivery_intent` | Server context for the issue body (#14) | Worker | Set to `NULL` at a terminal state | Delivery |
+| `context_json` | D1 `delivery_intent` | Reviewed Report context for the issue body (#71) | Worker; included in export | Set to `NULL` when the create intent is `delivered` or `failed`, and on erasure or purge | Delivery; erasure |
+| Report context in the issue body | GitHub, Project repository | Reproducing the report | Project collaborators | The Client's repository policy | Removed by redaction; edit history and notifications are residual copies |
 | Issue title and body | GitHub, Project repository | The Client's engineering record | Project collaborators | The Client's repository policy | Redacted on erasure; otherwise the Client |
 | Pseudonymous attribution (environment, installation reference, short subject hash) | GitHub issue body | Letting Developers ask an Operator about a request | Project collaborators | With the issue | Not personal data by itself; kept by redaction |
 | GitHub notification emails | Mailboxes of watchers and assignees | GitHub behaviour | Recipients | Outside our control | **Residual copy** |
@@ -198,7 +200,9 @@ Registered with `wp_add_privacy_policy_content()` under the plugin's name. This 
 
 > **Support requests.** When you send a support request from this site's admin area, the summary and description you write are sent to our support provider, GETQUICK, which stores them on Cloudflare (database in the EU) and creates an issue in this project's private GitHub repository so that the development team can work on it. Your name, email address and username are not sent. The request is linked to you through a random identifier that is kept on this site. GitHub may email notifications of new issues to members of the development team.
 >
-> Support requests are kept by GETQUICK for 12 months after they are closed. The issue in GitHub stays part of this project's engineering history. If you ask this site to erase your personal data, your requests are deleted from GETQUICK's service and the text of your requests is removed from the GitHub issues. Copies that we cannot remove automatically, such as notification emails and earlier versions kept in GitHub's edit history, are reviewed and deleted by hand where possible.
+> Unless you remove them before sending, three technical details go with your request: the WordPress version, the support plugin version, and the kind of admin screen you opened support from (the dashboard, the posts list, the post editor or WooCommerce). They appear in the GitHub issue, not in your list of requests on this site. GETQUICK deletes its copy once the request reaches GitHub or fails. The address of the page you were on is never sent.
+>
+> Support requests are kept by GETQUICK for 12 months after they are closed. The issue in GitHub stays part of this project's engineering history. If you ask this site to erase your personal data, your requests are deleted from GETQUICK's service and the text and technical details of your requests are removed from the GitHub issues. Copies that we cannot remove automatically, such as notification emails and earlier versions kept in GitHub's edit history, are reviewed and deleted by hand where possible.
 
 ## Human review points
 
@@ -221,3 +225,4 @@ These need legal or contractual review and are not engineering decisions:
 8. **Offboarding:** the grace period is honoured, only that Slot is purged, and a staging Slot sharing the repository is untouched.
 9. **Logs contain no secrets or content:** log fixtures from accept, deliver, erasure and export paths contain no text, subject, subject hash, Submission ID, nonce, signature or token.
 10. **Retention purge:** closed requests over 12 months are purged; an open or reopened request is not.
+11. **Report context (#71):** export includes context the service still holds and nothing once it is cleared; erasure clears it from D1 at once and redaction removes its issue section; list, read and create projections never carry it; delivery and request logs never contain it.

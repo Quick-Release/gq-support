@@ -34,7 +34,7 @@ All times are UTC epoch milliseconds. IDs are service-issued ULIDs with a type p
 | `slot` | Owner (ADR 0014) |
 | `reporter_subject` | Attested Reporter subject |
 | `submission_id` | Browser UUID |
-| `body_digest` | SHA-256 of the canonical Summary and Description. A repeat with a different digest returns 409 |
+| `body_digest` | SHA-256 of the canonical Summary and Description, and of the reviewed Report context when one was sent. A repeat with a different digest returns 409 |
 | `summary`, `description`, `title` | Submitted text (ADR 0015). `title` is derived once, at acceptance |
 | `created_at` | Acceptance time |
 | `installation_id` | Audit only: which enrolled installation submitted the request |
@@ -62,9 +62,9 @@ Constraints and indexes:
 | `kind`, `seq` | `create` only in the MVP. `seq` orders later intents (#28, ADR 0006). `UNIQUE (request_id, seq)` |
 | `state` | `pending`, `in_flight`, `delivered`, `failed`, `outcome_unknown` |
 | `attempts`, `first_attempt_at`, `lease_expires_at`, `next_attempt_at`, `last_error_class` | Delivery bookkeeping. The error is a class only, never a provider body |
-| `context_json` | Server-side context from #14 that goes into the issue body. Set to `NULL` when the intent reaches a terminal state |
+| `context_json` | The canonical reviewed Report context that goes into the issue body, or `NULL`. Set to `NULL` when the intent is `delivered` or `failed` |
 
-The [Report context decision](support-context-design.md) defines this as a frozen, reviewed, bounded context snapshot, not live diagnostic output. Its implementation must extend intake schemas, intent fingerprinting, fixtures and storage together; existing code does not yet collect it. Clear it on terminal outcome and privacy cleanup; never append recollected fields during delivery/recovery. Keep only the existing restricted metadata when uncertain-outcome erasure requires reconciliation.
+The [Report context decision](support-context-design.md) defines this as a frozen, reviewed, bounded context snapshot, not live diagnostic output. [#71](https://github.com/Quick-Release/gq-support/issues/71) implements it with the intake schemas, intent fingerprinting, fixtures and storage together ([implementation notes](support-context-design.md#implementation-of-the-minimal-context-71)). Clear it on terminal outcome and privacy cleanup; never append recollected fields during delivery/recovery. Keep only the existing restricted metadata when uncertain-outcome erasure requires reconciliation.
 
 Index `due (next_attempt_at) WHERE state IN ('pending', 'outcome_unknown')` and `leases (lease_expires_at) WHERE state = 'in_flight'`.
 

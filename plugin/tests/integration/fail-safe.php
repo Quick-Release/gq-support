@@ -117,6 +117,35 @@ try {
 	}
 	$gq_support_assert( array() === $gq_support_seen, 'Disabled support routes must not contact the service.' );
 
+	// The Report context preview collects nothing while support is disabled.
+	$_POST           = array(
+		'session'       => GQ_Support_Access::session(),
+		'nonce'         => wp_create_nonce( 'wp_rest' ),
+		'submission_id' => '3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11',
+		'screen'        => 'dashboard',
+	);
+	$gq_support_exit = new class() extends Exception {};
+	$gq_support_done = static function () use ( $gq_support_exit ) {
+		return static function () use ( $gq_support_exit ) {
+			throw $gq_support_exit;
+		};
+	};
+	add_filter( 'wp_doing_ajax', '__return_true' );
+	add_filter( 'wp_die_ajax_handler', $gq_support_done );
+	ob_start();
+	try {
+		do_action( 'wp_ajax_gq_support_context' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's AJAX hook for the plugin's action.
+	} catch ( Exception $gq_support_error ) {
+		$gq_support_assert( $gq_support_error === $gq_support_exit, 'The preview ends as an AJAX response.' );
+	} finally {
+		$gq_support_preview = (string) ob_get_clean();
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+		remove_filter( 'wp_die_ajax_handler', $gq_support_done );
+		$_POST = array();
+	}
+	$gq_support_assert( '{"state":"disabled"}' === $gq_support_preview, 'A disabled site previews no Report context.' );
+	$gq_support_assert( array() === $gq_support_seen, 'A disabled preview contacts no service.' );
+
 	// Setup operations, shared by the setup page and WP-CLI, refuse before any service call or local change.
 	$gq_support_state = GQ_Support_State::get();
 	$gq_support_key   = get_option( GQ_Support_Signing_Key::OPTION );
