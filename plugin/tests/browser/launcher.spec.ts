@@ -229,7 +229,9 @@ test('the closed launcher never covers admin controls', async ({ page }) => {
       await page.goto(`${site}/wp-admin/${screen}`);
       const tour = page.getByRole('dialog', { name: 'Welcome to the block editor' });
       if (await tour.isVisible()) await tour.getByRole('button', { name: 'Close' }).click();
-      await expect(page.locator('#gq-support-root')).toBeVisible();
+      // Landing on wp-login.php means the session was lost, not that the launcher failed to mount.
+      expect(page.url(), `${screen} at ${viewport.width}px`).not.toContain('/wp-login.php');
+      await expect(page.locator('#gq-support-root'), `${screen} at ${viewport.width}px`).toBeVisible();
       expect(await controlsCoveredByLauncher(page), `${screen} at ${viewport.width}px`).toEqual([]);
     }
   }
