@@ -37,7 +37,7 @@ final class GQ_Support_Service_Client {
 			return new WP_Error( 'gq_support_not_configured', 'The support service URL must use HTTPS.' );
 		}
 
-		$body     = null === $payload ? '' : (string) wp_json_encode( $payload );
+		$body     = null === $payload ? '' : self::encode( $payload );
 		$response = wp_safe_remote_request(
 			untrailingslashit( $base ) . $path,
 			array(
@@ -69,5 +69,15 @@ final class GQ_Support_Service_Client {
 			'body'        => $decoded,
 			'retry_after' => (string) wp_remote_retrieve_header( $response, 'retry-after' ),
 		);
+	}
+
+	/**
+	 * The exact body sent: compact UTF-8, the same bytes the browser's JSON
+	 * would take, so a forwarded create stays within the browser's 32 KiB cap.
+	 *
+	 * @param array<string, mixed> $payload JSON body.
+	 */
+	public static function encode( array $payload ): string {
+		return (string) wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS );
 	}
 }

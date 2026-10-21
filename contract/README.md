@@ -1,6 +1,8 @@
 # Support v1 contract fixtures
 
-These JSON cases belong to both implementations of [the API contract](../docs/support-api-contract.md). They contain no credentials or customer data. The WordPress PHPUnit suite reads every case, and the Worker suite reads `create.json`, `resources.json` and `signing.json` rather than copying expected values.
+These JSON cases belong to both implementations of [the API contract](../docs/support-api-contract.md). They contain no credentials or customer data. The WordPress PHPUnit suite reads every case, and the Worker suite reads `context.json`, `create.json`, `resources.json` and `signing.json` rather than copying expected values.
+
+- `context.json`: the Report context schema ([context design](../docs/support-context-design.md)) and its shared limits. Each case is a submitted context and, when valid, its canonical serialization; an invalid one has no `canonical`. Both sides normalize every case, and both create routes accept the valid ones and reject the rest. WordPress also attaches a review envelope for the case; it never forwards one.
 
 - `create.json`: browser payload, trailing JSON whitespace (`padding`, in bytes), and expected HTTP status. Serialize compactly as UTF-8 without escaping Unicode or slashes, then append the padding. This makes the 32 KiB boundary exact. Field lengths are Unicode code points after trimming.
 - `list.json`: pagination, cursor, and scope boundaries.

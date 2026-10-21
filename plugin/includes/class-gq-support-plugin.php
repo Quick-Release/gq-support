@@ -39,6 +39,7 @@ final class GQ_Support_Plugin {
 		add_action( 'rest_api_init', array( __CLASS__, 'register_rest' ) );
 		add_action( 'wp_ajax_gq_support_session', array( __CLASS__, 'check_session' ) );
 		add_action( 'wp_ajax_nopriv_gq_support_session', array( __CLASS__, 'check_session' ) );
+		add_action( 'wp_ajax_gq_support_context', array( GQ_Support_Report_Context::class, 'preview' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_launcher' ) );
 		add_action( 'admin_footer', array( __CLASS__, 'render_launcher' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'render_disabled_notice' ) );
@@ -82,7 +83,7 @@ final class GQ_Support_Plugin {
 		nocache_headers();
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The session binding authorizes only a same-session nonce refresh; no mutation.
 		$expected = isset( $_GET['session'] ) && is_string( $_GET['session'] ) ? sanitize_text_field( wp_unslash( $_GET['session'] ) ) : '';
-		if ( ! is_user_logged_in() || get_current_user_id() !== wp_validate_auth_cookie( '', 'logged_in' ) || '' === wp_get_session_token() || ! hash_equals( GQ_Support_Access::session(), $expected ) ) {
+		if ( ! GQ_Support_Access::current_session( $expected ) ) {
 			wp_send_json( array( 'state' => 'changed' ) );
 		}
 		if ( ! GQ_Support_Access::can( 'gq_support_submit_requests' ) ) {

@@ -71,4 +71,13 @@ final class GQ_Support_Access {
 	public static function session(): string {
 		return hash_hmac( 'sha256', get_current_blog_id() . ':' . get_current_user_id() . ':' . wp_get_session_token(), wp_salt( 'nonce' ) );
 	}
+
+	/**
+	 * Whether a real cookie session is the one this binding names.
+	 *
+	 * @param string $binding The tab's session binding.
+	 */
+	public static function current_session( string $binding ): bool {
+		return is_user_logged_in() && get_current_user_id() === wp_validate_auth_cookie( '', 'logged_in' ) && '' !== wp_get_session_token() && hash_equals( self::session(), $binding );
+	}
 }
