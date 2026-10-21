@@ -20,6 +20,7 @@
     "lint:php": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcs",
     "lint:php:fix": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcbf",
     "analyse:php": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer analyse",
+    "test:ci": "node --test 'scripts/ci/*.test.mjs'",
     "test:size": "node plugin/tests/performance/size-gate.mjs && node --test 'plugin/tests/performance/*.test.mjs'",
     "bench:timing": "node plugin/tests/performance/timing-benchmark.mjs"
   },

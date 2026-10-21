@@ -1,21 +1,41 @@
 #!/usr/bin/env bash
 # Run from the repository root; creates an isolated disposable DDEV WordPress site.
+# A CI matrix cell (.github/runtime-matrix.json) selects its runtime with WP_VERSION,
+# GQ_SUPPORT_PHP_VERSION (8.0) and GQ_SUPPORT_DATABASE (mysql:8.0); unset keeps .ddev/config.yaml.
+# An existing site keeps its WordPress and database, so switching either needs a fresh site.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
+site=${GQ_SUPPORT_TEST_URL:-https://gq-support-lifecycle-testsite.ddev.site}
+# DDEV merges config.*.yaml over config.yaml; this one is untracked.
+runtime_config=.ddev/config.gq-runtime.yaml
+{
+  [[ -z "${GQ_SUPPORT_PHP_VERSION:-}" ]] || printf 'php_version: "%s"\n' "$GQ_SUPPORT_PHP_VERSION"
+  [[ -z "${GQ_SUPPORT_DATABASE:-}" ]] || printf 'database:\n  type: %s\n  version: "%s"\n' "${GQ_SUPPORT_DATABASE%%:*}" "${GQ_SUPPORT_DATABASE#*:}"
+} > "$runtime_config"
+[[ -s "$runtime_config" ]] || rm "$runtime_config"
 mkdir -p .test-site/wp-content/plugins/gq-design .test-site/wp-content/plugins
 # GQ_SUPPORT_PLUGIN_DIR installs another tree, such as the release package, in place of plugin/.
 ln -sfn "../../../${GQ_SUPPORT_PLUGIN_DIR:-plugin}" .test-site/wp-content/plugins/gq-support
 printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > .test-site/wp-content/plugins/gq-design/gq-design.php
 ddev start
+php_version() { ddev exec php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;'; }
+if [[ -n "${GQ_SUPPORT_PHP_VERSION:-}" && "$(php_version)" != "$GQ_SUPPORT_PHP_VERSION" ]]; then ddev restart; fi
 wp() { ddev wp --path=.test-site "$@"; }
 if ! ddev exec test -f .test-site/wp-includes/version.php 2>/dev/null; then
   core_args=(--skip-content)
   if [[ -n "${WP_VERSION:-}" ]]; then core_args+=("--version=$WP_VERSION"); fi
   wp core download "${core_args[@]}"
 fi
+# WordPress reports x.y.0 releases as x.y.
+expected_wp=${WP_VERSION:-}
+[[ "$expected_wp" =~ ^([0-9]+\.[0-9]+)\.0$ ]] && expected_wp=${BASH_REMATCH[1]}
+if [[ "$expected_wp" =~ ^[0-9.]+$ && "$(wp core version)" != "$expected_wp" ]]; then
+  echo "The test site runs WordPress $(wp core version), not $WP_VERSION; remove .test-site to switch versions." >&2
+  exit 1
+fi
 if ! ddev exec test -f .test-site/wp-config.php 2>/dev/null; then wp config create --dbname=db --dbuser=db --dbpass=db --dbhost=db; fi
 if ! wp core is-installed >/dev/null 2>&1; then
-  wp core install --url=https://gq-support-lifecycle-testsite.ddev.site --title='Lifecycle test' --admin_user=admin --admin_password=admin --admin_email=admin@example.test --skip-email
+  wp core install --url="$site" --title='Lifecycle test' --admin_user=admin --admin_password=admin --admin_email=admin@example.test --skip-email
 fi
 if wp eval 'exit( is_multisite() ? 0 : 1 );' >/dev/null 2>&1; then
   echo 'run.sh requires a single-site test installation; multisite.sh runs after it.' >&2
@@ -24,6 +44,12 @@ fi
 wp theme install twentytwentyfour --activate
 # Avatars load from gravatar.com, and an admin page's load event waits for them: keep browser tests off the internet.
 wp option update show_avatars 0
+# The object-cache cell: Redis from the ddev-redis add-on, which CI installs before this script.
+if [[ -n "${GQ_SUPPORT_REDIS_CACHE_VERSION:-}" ]]; then
+  wp config set WP_REDIS_HOST redis
+  wp plugin install redis-cache --version="$GQ_SUPPORT_REDIS_CACHE_VERSION" --activate
+  wp redis enable --force
+fi
 if wp plugin is-active gq-support 2>/dev/null; then wp plugin deactivate gq-support; fi
 if wp plugin is-active gq-design 2>/dev/null; then wp plugin deactivate gq-design; fi
 had_identity=0
@@ -66,7 +92,6 @@ page_html=$(curl -fsSL "$page_url")
 if ! wp user get editor >/dev/null 2>&1; then
   wp user create editor editor@example.test --role=editor --user_pass=editor >/dev/null
 fi
-site=https://gq-support-lifecycle-testsite.ddev.site
 cookies=$(mktemp -d)
 reset_editor() { wp eval '( new WP_User( get_user_by( "login", "editor" ) ) )->remove_cap( "gq_support_submit_requests" );'; }
 trap 'rm -rf "$cookies"; reset_editor' EXIT
