@@ -131,7 +131,10 @@ test('a pending receipt ends intake checks and never ages into a failure', async
   await send(page);
   await expect(message(page)).toHaveText('Received');
   await expect(page.locator('#gq-support-panel')).toContainText('Delivery is pending');
-  await page.clock.runFor(25 * 60 * 60 * 1000);
+  // Over a day with the tab open. runFor would call every page timer on the way, and on a slow runner
+  // WooCommerce's 250 ms chart resize poll reschedules itself after install, onto this clock: 360,000
+  // calls. Fast-forwarding still fires each due timer once and moves Date past a day.
+  await page.clock.fastForward(25 * 60 * 60 * 1000);
   await expect(message(page)).toHaveText('Received');
   expect(creates).toHaveLength(1);
 });
