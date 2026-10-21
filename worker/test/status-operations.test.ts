@@ -107,6 +107,7 @@ it("re-sweeps every repository from an outage start, repairing status that norma
     window_end: null, repositories: 2, due_refreshes: 0, suspended_repositories: "[]", occurred_at: now }]);
 });
 
+// Four simulated days of ticks take about 3.5 s alone; a parallel full run can pass the 5 s default.
 it("restores every status after a four-day outage, within the tick bounds and behind delivery", async () => {
   const DAY = 24 * 60 * MINUTE;
   const globex = await installations.enroll("globex/production", "installation-b");
@@ -180,7 +181,7 @@ it("restores every status after a four-day outage, within the tick bounds and be
   // Counts only: the refresh owed by the last sweep before the outage was still due when the command ran.
   expect(await audit()).toEqual([{ id: expect.any(String), actor: "operator-1", action: "reconcile", window_start: outageStart,
     window_end: null, repositories: 2, due_refreshes: 1, suspended_repositories: "[]", occurred_at: outageStart + 4 * DAY }]);
-});
+}, 15_000);
 
 it("re-reads every open request, catching deletions and transfers since the last daily pass", async () => {
   const deleted = await delivered();
