@@ -18,7 +18,6 @@ const BROWSERS = ['chromium', 'firefox', 'webkit'];
 const SUITES = ['acceptance', 'performance'];
 const TOPOLOGIES = ['subdirectory', 'subdomain'];
 const EXACT = /^\d+\.\d+\.\d+$/;
-const FLOATING = ['latest', 'nightly'];
 
 export function loadManifest(path = join(ROOT, '.github', 'runtime-matrix.json')) {
   return JSON.parse(readFileSync(path, 'utf8'));

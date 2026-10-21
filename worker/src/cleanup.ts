@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubTarget } from "./github-gateway.ts";
-import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress, type ResidualCopy } from "./support-issues.ts";
+import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress } from "./support-issues.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { imageOf, ledgerStore, mirrorToLedger, removal, type LedgerEntry } from "./ledger.ts";
 import { DAY, MUTATION_INTERVAL_MS } from "./delivery-store.ts";
@@ -25,7 +25,6 @@ const reconcileAt = (since: number, count: number) => since + ([60_000, 300_000,
 export type Statement = readonly [sql: string, parameters: readonly (string | number | null)[]];
 type CleanupState = "draining" | "reconciling" | "redacting" | "unresolved" | "resolved" | "excepted";
 type Outcome = "purged" | "redacted" | "lost" | "found";
-type Residual = ResidualCopy | "multiple_matches";
 
 const encoder = new TextEncoder();
 /**

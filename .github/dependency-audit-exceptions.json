@@ -1,0 +1,14 @@
+{
+  "$comment": "Time-bounded exceptions to the dependency audit (scripts/ci/dependency-audit.mjs). Each one covers one advisory in one package, reached only through `via` for pnpm, until `expires` (at most 120 days ahead). Renew only after re-checking for a fix.",
+  "exceptions": [
+    {
+      "tool": "pnpm",
+      "advisory": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "via": "plugin__app>@wordpress/scripts>",
+      "owner": "vvaz",
+      "expires": "2027-01-19",
+      "reason": "No patched braces release exists (<=3.0.3 affected). It is a stack-exhaustion denial of service on deeply nested brace patterns; here braces only expands glob patterns from repository and @wordpress/scripts configuration in the app build and dev-server watchers, never untrusted input, and nothing ships to WordPress sites. Move to the first patched release when one appears."
+    }
+  ]
+}

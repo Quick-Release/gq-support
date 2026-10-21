@@ -24,3 +24,5 @@ package-dist/
 benchmark-results/
 .ddev/config.gq-runtime.yaml
 runtime-results/
+audit-results/
+secret-scan/

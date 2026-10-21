@@ -5,8 +5,6 @@ import { __ } from "@wordpress/i18n";
 import { speak } from "@wordpress/a11y";
 import type { Scope, SupportRequest, useRequests } from "./useRequests";
 
-const textDomain = "gq-support";
-
 type Props = {
   requests: ReturnType<typeof useRequests>;
   /** The session can carry the Support manager grant for this installation. */
@@ -18,12 +16,12 @@ type Props = {
 
 /** One honest badge per item (docs/support-domain-design.md, Reporter experience). */
 const badge = (item: SupportRequest) => item.delivery === "delivered"
-  ? item.status === "closed" ? __("Closed", textDomain) : __("Open", textDomain)
-  : item.delivery === "accepted-pending" ? __("Received", textDomain)
-    : item.delivery === "failed" ? __("Not sent", textDomain) : __("Delivery needs review", textDomain);
+  ? item.status === "closed" ? __("Closed", "gq-support") : __("Open", "gq-support")
+  : item.delivery === "accepted-pending" ? __("Received", "gq-support")
+    : item.delivery === "failed" ? __("Not sent", "gq-support") : __("Delivery needs review", "gq-support");
 
-const hint = (item: SupportRequest) => item.delivery === "accepted-pending" ? __("Delivery is pending", textDomain)
-  : item.delivery === "outcome-unknown" ? __("Our team is checking whether this report arrived. Refresh to see its status.", textDomain) : "";
+const hint = (item: SupportRequest) => item.delivery === "accepted-pending" ? __("Delivery is pending", "gq-support")
+  : item.delivery === "outcome-unknown" ? __("Our team is checking whether this report arrived. Refresh to see its status.", "gq-support") : "";
 
 // The site timezone, when the browser knows it; the browser's own otherwise.
 const formatDate = (iso: string) => {
@@ -41,29 +39,29 @@ export function Requests({ requests, site, disabled, onNewReport }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const { phase, items, error } = requests;
   useEffect(() => { if (error) speak(error, "assertive"); }, [error]);
-  const updated = __("Requests updated.", textDomain);
-  useEffect(() => { if (requests.refreshed) speak(updated); }, [requests.refreshed]);
-  const status = requests.loading ? __("Loading requests…", textDomain) : requests.refreshed ? updated : "";
+  const updated = __("Requests updated.", "gq-support");
+  useEffect(() => { if (requests.refreshed) speak(updated); }, [requests.refreshed, updated]);
+  const status = requests.loading ? __("Loading requests…", "gq-support") : requests.refreshed ? updated : "";
   return (
     <div className="gq-support-requests">
       <div className="gq-support-toolbar">
         {site && (
-          <label className="gq-support-scope">
-            {__("Show", textDomain)}{" "}
-            <select value={requests.scope} disabled={disabled || requests.loading} onChange={(event) => requests.choose(event.target.value as Scope)}>
-              <option value="mine">{__("My requests", textDomain)}</option>
-              <option value="site">{__("All requests on this site", textDomain)}</option>
+          <label className="gq-support-scope" htmlFor="gq-support-scope">
+            {__("Show", "gq-support")}{" "}
+            <select id="gq-support-scope" value={requests.scope} disabled={disabled || requests.loading} onChange={(event) => requests.choose(event.target.value as Scope)}>
+              <option value="mine">{__("My requests", "gq-support")}</option>
+              <option value="site">{__("All requests on this site", "gq-support")}</option>
             </select>
           </label>
         )}
-        <button type="button" className="gq-support-refresh" disabled={disabled || requests.loading} onClick={requests.refresh}>{__("Refresh", textDomain)}</button>
+        <button type="button" className="gq-support-refresh" disabled={disabled || requests.loading} onClick={requests.refresh}>{__("Refresh", "gq-support")}</button>
       </div>
       <p role="status" className="gq-support-status">{status}</p>
       {phase === "error" && <p className="gq-support-error" role="alert">{error}</p>}
       {phase === "ready" && items.length === 0 && (
         <p>
-          {__("No requests yet", textDomain)}{" "}
-          <button type="button" className="gq-support-link" onClick={onNewReport}>{__("New report", textDomain)}</button>
+          {__("No requests yet", "gq-support")}{" "}
+          <button type="button" className="gq-support-link" onClick={onNewReport}>{__("New report", "gq-support")}</button>
         </p>
       )}
       {items.length > 0 && (
@@ -75,7 +73,7 @@ export function Requests({ requests, site, disabled, onNewReport }: Props) {
               <li key={item.id} className="gq-support-item">
                 <button type="button" className="gq-support-item-toggle" aria-expanded={open} aria-controls={details} onClick={() => setExpanded(open ? null : item.id)}>
                   <span className="gq-support-item-title">{item.title}</span>
-                  {requests.scope === "site" && item.own && <span className="gq-support-badge">{__("Yours", textDomain)}</span>}
+                  {requests.scope === "site" && item.own && <span className="gq-support-badge">{__("Yours", "gq-support")}</span>}
                   <span className={`gq-support-badge gq-support-badge-${item.delivery === "delivered" ? item.status : item.delivery}`}>{badge(item)}</span>
                 </button>
                 <div id={details} className="gq-support-item-details" hidden={!open}>
@@ -88,7 +86,7 @@ export function Requests({ requests, site, disabled, onNewReport }: Props) {
           })}
         </ul>
       )}
-      {requests.more && <button type="button" className="gq-support-link" disabled={disabled || requests.loading} onClick={requests.loadMore}>{__("Show more", textDomain)}</button>}
+      {requests.more && <button type="button" className="gq-support-link" disabled={disabled || requests.loading} onClick={requests.loadMore}>{__("Show more", "gq-support")}</button>}
     </div>
   );
 }

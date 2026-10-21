@@ -59,6 +59,7 @@ export const notFound = () => error("gq_support_not_found", 404);
 export const PURGED_TEXT = `summary = '', description = '', title = '', reporter_subject = '', submission_id = id, body_digest = ''`;
 
 // PHP's trim(), which WordPress applies before forwarding, not JavaScript's wider one.
+// eslint-disable-next-line no-control-regex -- NUL and vertical tab are exactly PHP's set.
 const trim = (text: string) => text.replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, "");
 const characters = (text: string) => [...text].length;
 

@@ -137,9 +137,9 @@ pnpm deploy:worker
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and `main` push. Its `Required validation` job is the one check `main` should require. It always runs, and fails when a required job failed, was cancelled, or was skipped although the change affects its suite. The plan job decides which suites (`php`, `size`, `wordpress`, `worker`) a change affects with `scripts/ci/affected-suites.mjs`:
+`.github/workflows/ci.yml` runs on every pull request and `main` push. Its `Required validation` job is the one check `main` should require. It always runs, and fails when a required job failed, was cancelled, or was skipped although the change affects its suite. The plan job decides which suites (`lint`, `php`, `size`, `wordpress`, `worker`) a change affects with `scripts/ci/affected-suites.mjs`. The dependency audit and the secret scan are not suites: they run on every change.
 
-- Documentation-only changes skip every suite and still report success.
+- Documentation-only changes skip every suite and still report success once the audit and the secret scan pass.
 - `contract/**` and both signing implementations run the WordPress and Worker suites.
 - The root toolchain, `scripts/ci/`, the runtime matrix and the CI workflows run every suite.
 - A path no rule classifies runs every suite.
@@ -161,6 +161,21 @@ While the `Protect main` ruleset still requires `Asset size gate`, `PHP result` 
 3. Confirm that a documentation-only PR passes.
 4. Make `Required validation` the ruleset's only required status check.
 5. Delete the `php-result` and `worker-result` jobs.
+
+### Lint, dependency audit and secret scan
+
+These gates feed `Required validation` like the suites above. None of them needs a credential.
+
+- **JS/TS lint** (`lint` suite, `pnpm lint:js`). The Reporter app uses the WordPress configuration that `wp-scripts lint-js` applies by default, in `plugin/app/eslint.config.cjs`. Only style rules are off there, so the app keeps its layout: Prettier, `curly`, nested ternaries and `@param` tags that repeat the TypeScript signature. The Worker, the launcher, browser and performance tests, and scripts use `eslint.config.mjs`, which is ESLint's and typescript-eslint's recommended rules. Warnings fail the gate as well. `pnpm test:lint` plants a violation in each scope and checks that it fails. The app build and the Worker job run TypeScript; lint does not repeat it.
+- **Dependency audit** (`pnpm audit:deps`). This runs `pnpm audit` and `composer audit --locked` over the frozen lockfiles, including development dependencies, because build tools run in CI. It also runs `composer validate --strict`. A high, critical or unrated advisory fails the gate, and so does a scanner that timed out or returned no report, because an unreachable advisory endpoint is not a clean audit. Lower severities and abandoned Composer packages are kept in the `dependency-audit` artifact for review, together with tool versions and lockfile digests.
+  - Fix an advisory by updating the dependency. When a parent pins a vulnerable version, add a scoped `overrides` entry in `pnpm-workspace.yaml` that names the advisory.
+  - When no fix exists, add an entry to `.github/dependency-audit-exceptions.json`. It needs `tool`, `advisory` (any of its IDs), `package`, `via` (for pnpm, the dependency-path prefix it was judged for), `owner`, `reason` and `expires`. The expiry may be at most 120 days ahead. An exception covers nothing outside its path prefix, an expired one fails the gate, and an unused one is reported so it can be removed.
+- **Secret scan** (`pnpm scan:secrets`). `scripts/ci/gitleaks.sh` runs gitleaks 8.30.1, which is downloaded once and refused unless its SHA-256 matches the pin. Every output is redacted. Gitleaks' default rules are extended in `.gitleaks.toml` with rules for this project's secrets: the generated and constant-backed WordPress signing keys, GitHub App webhook secrets, and WordPress auth cookies and nonces. GitHub App PEMs and provider tokens are covered by the default rules.
+  - Every CI run scans every commit's changes over the full history. The size job scans the assembled package, and a release scans it again before publishing.
+  - Workflows may upload artifacts only through `.github/actions/upload-scanned-artifact`. It scans the files with `scripts/ci/scan-artifact.sh`, including inside archives, before uploading them, and it requires `retention-days`. A failure diagnostic that contains a secret is therefore withheld and fails its job.
+  - `scripts/ci/secret-scan.test.mjs` generates a canary for every rule and checks that each one is caught and that the output is redacted. It also checks that the public keys, signatures and the shared fixture in `contract/fixtures/signing.json` pass. That fixture is allowed only at that path and only with that value.
+  - Content without a recognisable format, such as Submitted text, Reporter subjects or Submission IDs, is caught by canary. A test that wants to detect such a leak builds `gqcanary_` plus at least 20 random lowercase letters or digits at run time. Any scanned log, response or artifact that contains the canary then fails. The canary must not appear literally in source.
+- **Workflow policy** (`node scripts/ci/workflow-policy.mjs`, run by the plan job). Every third-party action is pinned to a full commit SHA, with its release in a comment. No job in a workflow that runs on pull requests gets a write token (the manual-only CI simulation is the one listed exception), `pull_request_target` is not allowed, and every artifact goes through the scanning upload from an allowlisted report path. To update an action, resolve the release tag to its commit (`gh api repos/OWNER/ACTION/commits/TAG --jq .sha`), review the change, and replace both the SHA and the comment.
 
 ### Browser tests before a push
 

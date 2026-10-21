@@ -10,7 +10,6 @@ import { Requests } from "./Requests";
 import { speak } from "@wordpress/a11y";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 
-const textDomain = "gq-support";
 const maxDescriptionLength = limits.description;
 const maxSummaryLength = limits.summary;
 
@@ -28,7 +27,7 @@ function Contact() {
   const external = help.url.toLowerCase().startsWith("https:");
   return (
     <p className="gq-support-hint">
-      {__("Need help another way? Contact:", textDomain)}{" "}
+      {__("Need help another way? Contact:", "gq-support")}{" "}
       <a href={help.url} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined}>{help.label}</a>
     </p>
   );
@@ -36,8 +35,8 @@ function Contact() {
 
 /** What an accepted outcome promises, and no more (docs/research/outage-draft-recovery.md, delivery promise). */
 const hint = (phase: string) => phase === "received"
-  ? __("The service saved your report and will try to deliver it. Delivery is pending.", textDomain)
-  : phase === "unknown" ? __("The service saved your report, and our team is checking whether it arrived. Don't send it again; refresh to see its status.", textDomain) : "";
+  ? __("The service saved your report and will try to deliver it. Delivery is pending.", "gq-support")
+  : phase === "unknown" ? __("The service saved your report, and our team is checking whether it arrived. Don't send it again; refresh to see its status.", "gq-support") : "";
 
 export function App({ registerToggle, onVisibilityChange }: Props) {
   const [visible, setVisible] = useState(true);
@@ -57,7 +56,8 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     requests.add(resource, supersedes);
     // The new request is shown on top of My requests (docs/support-domain-design.md, Views).
     // Focus follows only if it was in the panel, where the hidden Send button held it.
-    focusRequests.current = !!panel.current?.contains(document.activeElement) || document.activeElement === document.body;
+    const doc = panel.current?.ownerDocument ?? document;
+    focusRequests.current = !!panel.current?.contains(doc.activeElement) || doc.activeElement === doc.body;
     setTab("requests");
   });
   const hasDraft = Boolean(description.trim() || summary.trim());
@@ -66,6 +66,8 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   useEffect(() => {
     if (session.changed) { setDescription(""); setSummary(""); setError(""); setCopyState(""); }
   }, [session.changed]);
+  // Reports draft changes; the effect on `visible` below reports visibility changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => onVisibilityChange(visible, hasDraft), [hasDraft]);
   useEffect(() => { if (submission.accepted) speak(submission.message); }, [submission.accepted, submission.message]);
   useEffect(() => { if (copyState === "manual") manual.current?.select(); }, [copyState]);
@@ -74,18 +76,22 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     focusRequests.current = false;
   }, [tab]);
   // The list loads the first time My requests is shown; reopening reuses it.
+  // `requests` is a new object on every render; its phase is what decides whether to load.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (visible && tab === "requests" && !session.changed) requests.show(); }, [visible, tab, requests.phase, session.changed]);
   const open = () => { setTab("new"); setVisible(true); };
   const close = () => setVisible(false);
   useEffect(() => registerToggle(visible ? close : open));
+  // Focus moves only when the panel opens, not on every keystroke in the draft.
   useEffect(() => {
     onVisibilityChange(visible, hasDraft);
     if (visible) field.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   useEffect(() => {
     if (!visible) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && panel.current?.contains(document.activeElement)) { event.preventDefault(); close(); }
+      if (event.key === "Escape" && panel.current?.contains(panel.current.ownerDocument.activeElement)) { event.preventDefault(); close(); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -102,7 +108,7 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     try {
       await navigator.clipboard.writeText(draftText);
       setCopyState("copied");
-      speak(__("Draft copied.", textDomain));
+      speak(__("Draft copied.", "gq-support"));
     } catch {
       // Clipboard access can be denied: offer the text to select and copy by hand.
       setCopyState("manual");
@@ -113,13 +119,13 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     if (submission.locked) return;
     const draft = { ...(summary.trim() ? { summary: summary.trim() } : {}), description: description.trim() };
     const message = !draft.description
-      ? __("Enter a description.", textDomain)
+      ? __("Enter a description.", "gq-support")
       : [...draft.description].length > maxDescriptionLength || [...summary.trim()].length > maxSummaryLength
-        ? __("Your report is too long.", textDomain)
+        ? __("Your report is too long.", "gq-support")
         : /[\r\n]/.test(summary.trim())
-          ? __("Summary must be one line.", textDomain)
+          ? __("Summary must be one line.", "gq-support")
           : new TextEncoder().encode(JSON.stringify({ ...draft, submission_id: "00000000-0000-4000-8000-000000000000" })).length > limits.bodyBytes
-            ? __("Your report is too long.", textDomain) : "";
+            ? __("Your report is too long.", "gq-support") : "";
     setError(message);
     if (message) { speak(message, "assertive"); return; }
     await submission.send(draft);
@@ -128,34 +134,34 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
   return (
     <section ref={panel} id="gq-support-panel" className="gq-support-panel" role="dialog" aria-modal="false" aria-labelledby="gq-support-title" hidden={!visible}>
       <div className="gq-support-header">
-        <h2 id="gq-support-title" className="gq-support-title">{__("Support", textDomain)}</h2>
-        <button type="button" className="gq-support-close" onClick={close} aria-label={__("Close support", textDomain)}>×</button>
+        <h2 id="gq-support-title" className="gq-support-title">{__("Support", "gq-support")}</h2>
+        <button type="button" className="gq-support-close" onClick={close} aria-label={__("Close support", "gq-support")}>×</button>
       </div>
-      <div className="gq-support-tabs" role="tablist" aria-label={__("Support views", textDomain)}>
-        <button type="button" role="tab" className="gq-support-tab" id="gq-support-new-tab" aria-controls="gq-support-new" aria-selected={tab === "new"} tabIndex={tab === "new" ? 0 : -1} onKeyDown={tabKeyDown} onClick={() => setTab("new")}>{__("New report", textDomain)}</button>
-        <button type="button" role="tab" className="gq-support-tab" id="gq-support-requests-tab" aria-controls="gq-support-requests" aria-selected={tab === "requests"} tabIndex={tab === "requests" ? 0 : -1} onKeyDown={tabKeyDown} onClick={() => setTab("requests")}>{__("My requests", textDomain)}</button>
+      <div className="gq-support-tabs" role="tablist" aria-label={__("Support views", "gq-support")}>
+        <button type="button" role="tab" className="gq-support-tab" id="gq-support-new-tab" aria-controls="gq-support-new" aria-selected={tab === "new"} tabIndex={tab === "new" ? 0 : -1} onKeyDown={tabKeyDown} onClick={() => setTab("new")}>{__("New report", "gq-support")}</button>
+        <button type="button" role="tab" className="gq-support-tab" id="gq-support-requests-tab" aria-controls="gq-support-requests" aria-selected={tab === "requests"} tabIndex={tab === "requests" ? 0 : -1} onKeyDown={tabKeyDown} onClick={() => setTab("requests")}>{__("My requests", "gq-support")}</button>
       </div>
       <div id="gq-support-new" role="tabpanel" aria-labelledby="gq-support-new-tab" hidden={tab !== "new"}>
         <form onSubmit={submit} noValidate>
-          <label htmlFor="gq-support-summary" className="gq-support-label">{__("Summary (optional)", textDomain)}</label>
+          <label htmlFor="gq-support-summary" className="gq-support-label">{__("Summary (optional)", "gq-support")}</label>
           <input id="gq-support-summary" className="gq-support-field" value={summary} disabled={submission.locked} onChange={(event) => { edit(); setSummary(event.target.value); }} />
-          <label htmlFor="gq-support-description" className="gq-support-label">{__("Description", textDomain)}</label>
-          <textarea id="gq-support-description" className="gq-support-field gq-support-description" ref={field} disabled={submission.locked} required placeholder={__("What happened, and what did you expect?", textDomain)} value={description} onChange={(event) => { edit(); setDescription(event.target.value); setError(""); }} />
-          <p className="gq-support-hint">{__("Your draft stays in this panel only while this page and your session stay open. Copy it before you leave or reload; a copy is yours to keep and isn't removed when your support data is erased.", textDomain)}</p>
+          <label htmlFor="gq-support-description" className="gq-support-label">{__("Description", "gq-support")}</label>
+          <textarea id="gq-support-description" className="gq-support-field gq-support-description" ref={field} disabled={submission.locked} required placeholder={__("What happened, and what did you expect?", "gq-support")} value={description} onChange={(event) => { edit(); setDescription(event.target.value); setError(""); }} />
+          <p className="gq-support-hint">{__("Your draft stays in this panel only while this page and your session stay open. Copy it before you leave or reload; a copy is yours to keep and isn't removed when your support data is erased.", "gq-support")}</p>
           {submission.message && !submission.accepted && <p role="status" className="gq-support-message">{submission.message}</p>}
-          {submission.checkAgain && <button type="button" disabled={submission.waiting || session.paused} onClick={() => { void submission.send(); }}>{__("Check again", textDomain)}</button>}
+          {submission.checkAgain && <button type="button" disabled={submission.waiting || session.paused} onClick={() => { void submission.send(); }}>{__("Check again", "gq-support")}</button>}
           {error && <p className="gq-support-error" role="alert">{error}</p>}
           {session.blocked && <p className="gq-support-error" role="alert">{session.message}</p>}
           {submission.contact && <Contact />}
-          {hasDraft && !session.changed && <button type="button" className="gq-support-link" onClick={() => { void copyDraft(); }}>{__("Copy draft", textDomain)}</button>}
-          {copyState === "copied" && hasDraft && <p className="gq-support-hint">{__("Draft copied.", textDomain)}</p>}
+          {hasDraft && !session.changed && <button type="button" className="gq-support-link" onClick={() => { void copyDraft(); }}>{__("Copy draft", "gq-support")}</button>}
+          {copyState === "copied" && hasDraft && <p className="gq-support-hint">{__("Draft copied.", "gq-support")}</p>}
           {copyState === "manual" && hasDraft && (
             <div>
-              <label htmlFor="gq-support-copy" className="gq-support-label">{__("Copying is blocked. Select this text and copy it:", textDomain)}</label>
+              <label htmlFor="gq-support-copy" className="gq-support-label">{__("Copying is blocked. Select this text and copy it:", "gq-support")}</label>
               <textarea id="gq-support-copy" className="gq-support-field" ref={manual} readOnly value={draftText} />
             </div>
           )}
-          <button type="submit" disabled={session.paused || submission.locked || submission.waiting} className="gq-support-submit">{submission.retry ? __("Try again", textDomain) : __("Send report", textDomain)}</button>
+          <button type="submit" disabled={session.paused || submission.locked || submission.waiting} className="gq-support-submit">{submission.retry ? __("Try again", "gq-support") : __("Send report", "gq-support")}</button>
         </form>
       </div>
       <div id="gq-support-requests" role="tabpanel" aria-labelledby="gq-support-requests-tab" hidden={tab !== "requests"}>

@@ -8,7 +8,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /** Every required suite, in the order reports list them. */
-export const SUITES = ['php', 'size', 'wordpress', 'worker'];
+export const SUITES = ['lint', 'php', 'size', 'wordpress', 'worker'];
 
 // First match wins. Each rule says why its suites are the complete set for those paths.
 export const RULES = [
@@ -18,15 +18,21 @@ export const RULES = [
   { pattern: /^lefthook\.yml$|^scripts\/(phpcs-staged|pre-push-browser|sync-project-status)\.sh$|^scripts\/github-webhook-staging\.py$/, suites: [] },
   // Workflows that are not part of pull-request validation run and report on their own.
   { pattern: /^\.github\/workflows\/(benchmark|compatibility|deploy-worker|dispatch-registry|github-app-spike|github-webhook-spike|project-status|release-plugin)\.yml$/, suites: [] },
-  // Shared toolchain, the runtime matrix and this validation itself reach every consumer.
-  { pattern: /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.nvmrc)$|^scripts\/ci\/|^\.github\/runtime-matrix\.json$|^\.github\/workflows\/(ci|wordpress-lane)\.yml$/, suites: SUITES },
+  // Read only by the dependency audit, which runs on every change.
+  { pattern: /^\.github\/dependency-audit-exceptions\.json$/, suites: [] },
+  // Shared toolchain, the runtime matrix, the secret-scanning upload every job uses and this
+  // validation itself reach every consumer.
+  { pattern: /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.nvmrc|\.gitleaks\.toml)$|^scripts\/ci\/|^\.github\/actions\/|^\.github\/runtime-matrix\.json$|^\.github\/workflows\/(ci|wordpress-lane)\.yml$/, suites: SUITES },
+  // Lint configuration and its negative controls change only what the lint suite reports.
+  { pattern: /^eslint\.config\.mjs$|^plugin\/app\/eslint\.config\.cjs$|^scripts\/lint-gate\.test\.mjs$/, suites: ['lint'] },
   // Shared contract fixtures and both signing implementations must agree in both languages.
   { pattern: /^contract\//, suites: ['wordpress', 'worker'] },
   { pattern: /^plugin\/includes\/class-gq-support-sign(er|ing-key)\.php$/, suites: ['php', 'wordpress', 'worker'] },
-  { pattern: /^worker\/src\/signature\.ts$/, suites: ['wordpress', 'worker'] },
-  { pattern: /^worker\//, suites: ['worker'] },
+  { pattern: /^worker\/src\/signature\.ts$/, suites: ['lint', 'wordpress', 'worker'] },
+  { pattern: /^worker\//, suites: ['lint', 'worker'] },
   { pattern: /^plugin\/.*\.php$|^plugin\/(composer\.(json|lock)|\.phpcs\.xml\.dist|phpstan\.neon\.dist)$/, suites: ['php', 'wordpress'] },
-  { pattern: /^plugin\/(app|assets|tests\/performance)\//, suites: ['size', 'wordpress'] },
+  { pattern: /^plugin\/(app|assets|tests\/performance)\//, suites: ['lint', 'size', 'wordpress'] },
+  { pattern: /^plugin\/tests\/.*\.(?:[cm]?js|ts)$/, suites: ['lint', 'wordpress'] },
   { pattern: /^plugin\/|^\.ddev\//, suites: ['wordpress'] },
 ];
 

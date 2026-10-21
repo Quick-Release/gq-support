@@ -169,6 +169,8 @@ export function useSubmission(visible: boolean, session: Session, accepted: Acce
     const delay = Math.max(notBefore.current - Date.now(), 1000 * 2 ** attempts);
     const timer = window.setTimeout(() => { void send(undefined, true); }, Math.min(2147483647, delay));
     return () => window.clearTimeout(timer);
+    // `send` is a new function on every render; depending on it would restart the backoff each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, session.paused, phase, waiting, attempts]);
 
   const checkAgain = unresolved.current && (phase === 'error' || (phase === 'checking' && attempts >= AUTOMATIC_CHECKS));
