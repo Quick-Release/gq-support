@@ -223,7 +223,7 @@ jobs:
 
   size:
     # Budgets B5 and B7 in docs/research/idle-performance-budgets.md. The counter gate
-    # (B1, B4, B8, B10–B13) is plugin/tests/browser/performance.spec.ts, which the
+    # (B1–B4, B6, B8, B10–B13) is plugin/tests/browser/performance.spec.ts, which the
     # *-counters runtime cells run. Report-only timings (T1–T3) are benchmark.yml.
     name: Asset size gate
     needs: plan
