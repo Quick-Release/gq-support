@@ -121,11 +121,14 @@ export function useRequests(session: Session) {
       clear(target);
       void fetchPage(target, null, false);
     },
-    /** An accepted receipt joins a loaded list; a replacement hides its failed predecessor. */
+    /**
+     * An accepted receipt joins a loaded list, or the first page once it loads; a replacement
+     * hides its failed predecessor.
+     */
     add: (item: unknown, supersedes?: string) => {
-      if (!loaded.current || !valid(item)) return;
+      if (!valid(item)) return;
       receipts.current = [item, ...receipts.current.filter(known => known.id !== item.id)];
-      setItems(previous => [item, ...previous.filter(known => known.id !== item.id && known.id !== supersedes)]);
+      if (loaded.current) setItems(previous => [item, ...previous.filter(known => known.id !== item.id && known.id !== supersedes)]);
     },
   };
 }
