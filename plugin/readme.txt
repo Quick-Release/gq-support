@@ -4,7 +4,7 @@ Tags: support, issue-tracking, bug-report
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.1.8
+Stable tag: 0.1.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,13 @@ Adds an in-dashboard support widget for authenticated users to submit reports an
 This plugin is under active development. Authorized Reporters on a connected installation see a Support launcher on supported admin screens; sending reports is not available yet.
 
 == Changelog ==
+
+= 0.1.9 =
+* Let Reporters review and remove the WordPress version, plugin version and originating screen sent with a Support request.
+* Keep unsent drafts recoverable in the open tab, bound the widget load to 10 seconds, and add the GQ_SUPPORT_DISABLED fail-safe with an independent contact.
+* Add privacy export and erasure for Support requests, including erasures whose delivery outcome is unknown.
+* Load plugin classes on first use to keep public requests within the memory budget.
+* Translate the plugin's admin, privacy and export text into European Portuguese.
 
 = 0.1.8 =
 * Update the support service to Alchemy beta.83 and Effect 4.0.5, including HTTP API compatibility fixes.
