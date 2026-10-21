@@ -378,6 +378,9 @@ test('a hung app load stops after 10 seconds, offers the contact, and a late loa
   });
   await page.clock.install();
   await page.goto(`${site}/wp-admin/`);
+  // An installed clock keeps real time, so time spent between the click and runFor would count toward
+  // the 10 seconds. Paused (a second ahead, so never in the past), only runFor moves it.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
   const launcher = page.getByRole('button', { name: /^Support/ });
   await launcher.click();
   await expect.poll(() => loads).toBe(1);
