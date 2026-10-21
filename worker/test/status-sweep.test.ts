@@ -234,7 +234,7 @@ it("leaves a request under erasure suppression untouched", async () => {
   const installation = await enroll(production);
   const request = await accept(installation);
   await tick();
-  await stage.databases.shared.prepare("INSERT INTO delivery_suppression VALUES ('request', ?, 'erasure')").bind(request.id).run();
+  await stage.databases.shared.prepare("INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('request', ?, 'erasure')").bind(request.id).run();
   advance(MINUTE);
   github.edit(issueOf(), { state: "closed" });
   advance(SWEEP);

@@ -1,0 +1,362 @@
+name: CI
+
+# `Required validation` is the one required pull-request check. It always runs, and fails when a
+# required job failed, was cancelled, or was skipped although the change affects its suite. The
+# plan job decides which suites a change affects (scripts/ci/affected-suites.mjs); this workflow
+# has no path filters, so a required check can never stay pending because of paths.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      simulate:
+        description: Exercise `Required validation` with a deliberate failure, cancellation or unexpected skip
+        type: choice
+        options: [none, failure, cancelled, unexpected-skip]
+        default: none
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    name: Plan validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      suites: ${{ steps.affected.outputs.suites }}
+      cells: ${{ steps.cells.outputs.cells }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # A pull request checks out its merge commit, whose first parent is the base.
+          fetch-depth: 2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      # The script tests include the secret scanner's canaries (secret-scan.test.mjs).
+      - name: CI script tests, runtime and workflow policy
+        run: |
+          node --test 'scripts/ci/*.test.mjs'
+          node scripts/ci/runtime-matrix.mjs policy
+          node scripts/ci/workflow-policy.mjs
+
+      - name: Affected suites
+        id: affected
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SIMULATE: ${{ inputs.simulate }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SIMULATE" ] && [ "$SIMULATE" != none ]; then
+            # A simulation runs only its own job, so each case shows one cause.
+            suites='["simulation"]'
+          elif [ "$EVENT" = pull_request ]; then
+            suites=$(git diff --name-only HEAD^1 HEAD | node scripts/ci/affected-suites.mjs)
+          elif [ "$EVENT" = push ] && git fetch --no-tags --depth=1 origin "$BEFORE"; then
+            suites=$(git diff --name-only "$BEFORE" HEAD | node scripts/ci/affected-suites.mjs)
+          else
+            suites=$(node scripts/ci/affected-suites.mjs --all)
+          fi
+          echo "suites=$suites" >> "$GITHUB_OUTPUT"
+
+      - name: Pull-request runtime cells
+        id: cells
+        run: echo "cells=$(node scripts/ci/runtime-matrix.mjs cells pr)" >> "$GITHUB_OUTPUT"
+
+  php:
+    name: PHPCS + PHPStan
+    needs: plan
+    if: contains(needs.plan.outputs.suites, '"php"')
+    # GitHub's image ships PHP 8.3, so setup-php installs nothing; installing 8.4 took ~55 s.
+    # The tool's PHP does not change results: PHPStan checks the phpVersion range in
+    # phpstan.neon.dist, and Composer resolves for the platform pinned in composer.json.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.3"
+          coverage: none
+          tools: composer:v2, cs2pr
+
+      - uses: ramsey/composer-install@a8d0d959dab41457692a5e2041bd9b757a119e3f # 3.2.1
+        with:
+          working-directory: plugin
+
+      - name: PHPCS
+        run: vendor/bin/phpcs --report-full --report-checkstyle=./phpcs-report.xml
+
+      - name: Annotate PHPCS results
+        if: ${{ always() }}
+        run: cs2pr ./phpcs-report.xml
+
+      - name: PHPStan
+        if: ${{ always() }}
+        run: composer analyse -- --error-format=github
+
+      - name: Keep the PHPCS report
+        if: ${{ always() }}
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: phpcs-report
+          path: plugin/phpcs-report.xml
+          if-no-files-found: ignore
+          retention-days: 30
+
+  lint:
+    name: JS/TS lint
+    needs: plan
+    if: contains(needs.plan.outputs.suites, '"lint"')
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The app with the WordPress configuration; the Worker, launcher, tests and scripts with
+      # eslint.config.mjs. TypeScript itself is checked by the app build and the Worker job.
+      - name: Lint the app, Worker, launcher, tests and scripts
+        run: pnpm lint:js
+      - name: Lint gate negative controls
+        run: pnpm test:lint
+
+  # Always runs: advisories are published against unchanged lockfiles.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      # Composer audits the lockfile against Packagist's advisories; nothing is installed.
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.3"
+          coverage: none
+          tools: composer:v2
+      - name: Audit the pnpm and Composer lockfiles
+        run: node scripts/ci/dependency-audit.mjs audit-results
+      - name: Keep the audit report
+        if: ${{ always() }}
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: dependency-audit
+          path: audit-results/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Always runs: a secret can arrive in any path, documentation included.
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Every commit's changes, so a secret removed by a later commit is still found.
+          fetch-depth: 0
+      - name: Scan the full history
+        run: |
+          mkdir -p secret-scan
+          scripts/ci/gitleaks.sh version > secret-scan/gitleaks-version.txt
+          scripts/ci/gitleaks.sh git --verbose --report-format json --report-path secret-scan/history.json .
+      # Findings are redacted: the report names rule, file, line and commit, never the value.
+      - name: Keep the scan report
+        if: ${{ always() }}
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: secret-scan
+          path: secret-scan/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  worker:
+    name: Worker typecheck + tests
+    needs: plan
+    if: contains(needs.plan.outputs.suites, '"worker"')
+    # The suite is CPU-bound across test files: 4 vCPUs take about half as long as 2,
+    # so the per-vCPU-minute cost stays about the same.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check deployment CLI startup
+        run: pnpm exec alchemy deploy --help
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  size:
+    # Budgets B5 and B7 in docs/research/idle-performance-budgets.md. The counter gate
+    # (B1–B4, B6, B8, B10–B13) is plugin/tests/browser/performance.spec.ts, which the
+    # *-counters runtime cells run. Report-only timings (T1–T3) are benchmark.yml.
+    name: Asset size gate
+    needs: plan
+    if: contains(needs.plan.outputs.suites, '"size"')
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Build the Reporter app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:app
+
+      - name: Size gate and its negative controls
+        run: pnpm test:size
+
+      # The built assets are the only package files the history scan cannot see; a release scans
+      # the package again before it is published.
+      - name: Secret scan of the assembled package
+        run: |
+          scripts/assemble-plugin-package.sh package-dist
+          scripts/ci/gitleaks.sh dir --verbose package-dist
+
+  wordpress:
+    # The pull-request cells of .github/runtime-matrix.json: WordPress 6.5.0 on PHP 8.0 and the
+    # current endpoint, single site then multisite, plus PHP 8.1–8.3 integration.
+    name: ${{ matrix.cell.name }}
+    needs: plan
+    if: contains(needs.plan.outputs.suites, '"wordpress"')
+    strategy:
+      # A failure in one cell must not cancel, and hide, another's result.
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.plan.outputs.cells) }}
+    uses: ./.github/workflows/wordpress-lane.yml
+    with:
+      cell: ${{ toJSON(matrix.cell) }}
+
+  # Manual runs only (workflow_dispatch `simulate`): prove `Required validation` fails on each case.
+  simulation:
+    name: Simulated required-check failure
+    needs: plan
+    if: contains(needs.plan.outputs.suites, '"simulation"') && inputs.simulate != 'unexpected-skip'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+    steps:
+      - name: Fail deliberately
+        if: inputs.simulate == 'failure'
+        run: exit 1
+      - name: Cancel this run deliberately
+        if: inputs.simulate == 'cancelled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+          sleep 600
+
+  required:
+    name: Required validation
+    if: always()
+    needs: [plan, lint, audit, secrets, php, worker, size, wordpress, simulation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      # Diagnostics only: the verdict below depends on job results, never on these files.
+      - name: Collect runtime reports
+        if: contains(needs.plan.outputs.suites, '"wordpress"')
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: runtime-*
+          path: runtime-results
+          merge-multiple: true
+
+      - name: Resolved runtime matrix
+        if: contains(needs.plan.outputs.suites, '"wordpress"')
+        continue-on-error: true
+        run: node scripts/ci/runtime-matrix.mjs resolved runtime-results
+
+      - name: Keep the resolved runtime matrix
+        if: contains(needs.plan.outputs.suites, '"wordpress"')
+        continue-on-error: true
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: resolved-runtime-matrix
+          path: runtime-results/resolved-matrix.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Verdict
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          AFFECTED: ${{ needs.plan.outputs.suites }}
+          # Every job above with the suite that may let it skip; `always` jobs may never skip.
+          JOBS: '{"plan":"always","lint":"lint","audit":"always","secrets":"always","php":"php","worker":"worker","size":"size","wordpress":"wordpress","simulation":"simulation"}'
+        run: node scripts/ci/required-validation.mjs
+
+  # Transitional: the `Protect main` ruleset still requires these two names (with `Asset size
+  # gate`). Delete both jobs once it requires `Required validation` instead; see README.
+  php-result:
+    name: PHP result
+    if: always()
+    needs: required
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.required.result }}
+
+  worker-result:
+    name: Worker result
+    if: always()
+    needs: required
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.required.result }}

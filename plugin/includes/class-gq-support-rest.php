@@ -132,6 +132,9 @@ final class GQ_Support_REST {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public static function dispatch( WP_REST_Request $request ) {
+		if ( GQ_Support_Fail_Safe::disabled() ) {
+			return self::error( 'gq_support_disabled', 503 );
+		}
 		$query_keys = 'POST' === $request->get_method() || $request['id'] ? array() : array( 'scope', 'per_page', 'cursor' );
 		if ( array_diff( array_keys( $request->get_query_params() ), array_merge( $query_keys, array( 'rest_route' ) ) ) || $request->get_body_params() || ( 'POST' !== $request->get_method() && '' !== (string) $request->get_body() ) ) {
 			return self::error( 'gq_support_invalid_request', 400 );
@@ -155,12 +158,27 @@ final class GQ_Support_REST {
 		$path     = '/v1/requests';
 		$payload  = null;
 		if ( $create ) {
-			$payload = $request->get_json_params();
-			$invalid = self::validate_create( $request );
-			if ( is_wp_error( $invalid ) ) {
-				return $invalid;
+			$body = self::validate_create( $request );
+			if ( is_wp_error( $body ) ) {
+				return $body;
 			}
-			$payload = array_map( 'trim', $payload ) + $identity;
+			$payload = array_map( 'trim', array_intersect_key( $body, array_flip( array( 'submission_id', 'summary', 'description', 'supersedes_id' ) ) ) );
+			if ( isset( $body['context'] ) ) {
+				// Only reviewed values travel. The envelope itself stays here: it is not part of the intent.
+				$review = GQ_Support_Report_Context::verify( $body['context_review'], $body['context'], $payload['submission_id'], $subject, time() );
+				if ( 'invalid' === $review ) {
+					return self::error( 'gq_support_invalid_request', 400 );
+				}
+				$payload['context'] = GQ_Support_Report_Context::json_value( $body['context'] );
+				if ( 'expired' === $review ) {
+					// An expired review still reconciles an accepted intent, but never authorizes a new one.
+					$payload['reconcile_only'] = true;
+				}
+			}
+			$payload += $identity;
+			if ( isset( $payload['context'] ) && strlen( GQ_Support_Service_Client::encode( $payload ) ) > GQ_Support_Limits::BODY_BYTES ) {
+				return self::error( 'gq_support_payload_too_large', 413 );
+			}
 		} else {
 			if ( $request['id'] ) {
 				$path .= '/' . rawurlencode( $request['id'] );
@@ -191,6 +209,7 @@ final class GQ_Support_REST {
 				413 => 'gq_support_payload_too_large',
 				500 => 'gq_support_internal',
 				409 => 'gq_support_idempotency_conflict',
+				412 => 'gq_support_context_expired',
 				426 => 'gq_support_plugin_outdated',
 				429 => 'gq_support_rate_limited',
 				503 => $create ? 'gq_support_not_accepted' : 'gq_support_unavailable',
@@ -263,17 +282,26 @@ final class GQ_Support_REST {
 	}
 
 	/**
-	 * Reject authority overrides and enforce the v1 plain-text create schema.
+	 * Reject authority overrides and enforce the v1 create schema. Report context
+	 * and its review envelope travel together; the context is normalized here.
 	 *
 	 * @param WP_REST_Request $request Browser request.
-	 * @return true|WP_Error
+	 * @return array<string, mixed>|WP_Error The decoded body.
 	 */
 	private static function validate_create( WP_REST_Request $request ) {
 		if ( strlen( $request->get_body() ) > GQ_Support_Limits::BODY_BYTES ) {
 			return self::error( 'gq_support_payload_too_large', 413 );
 		}
 		$body = json_decode( (string) $request->get_body(), true );
-		if ( ! is_array( $body ) || array_diff( array_keys( $body ), array( 'submission_id', 'summary', 'description', 'supersedes_id' ) )
+		if ( is_array( $body ) && ( array_key_exists( 'context', $body ) || array_key_exists( 'context_review', $body ) ) ) {
+			// Decode objects as objects, so a JSON array never passes for one.
+			$context = GQ_Support_Report_Context::parse( json_decode( (string) $request->get_body() )->context ?? null );
+			if ( null === $context || ! is_string( $body['context_review'] ?? null ) ) {
+				return self::error( 'gq_support_invalid_request', 400 );
+			}
+			$body['context'] = $context;
+		}
+		if ( ! is_array( $body ) || array_diff( array_keys( $body ), array( 'submission_id', 'summary', 'description', 'supersedes_id', 'context', 'context_review' ) )
 			|| ! isset( $body['submission_id'], $body['description'] ) || ! is_string( $body['submission_id'] )
 			|| ! preg_match( '/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i', $body['submission_id'] )
 			|| ( array_key_exists( 'supersedes_id', $body ) && ( ! is_string( $body['supersedes_id'] ) || ! preg_match( '/^req_[0-9A-HJKMNP-TV-Z]{26}$/', $body['supersedes_id'] ) ) )
@@ -281,7 +309,7 @@ final class GQ_Support_REST {
 			|| ( array_key_exists( 'summary', $body ) && ( ! is_string( $body['summary'] ) || '' === trim( $body['summary'] ) || mb_strlen( trim( $body['summary'] ) ) > GQ_Support_Limits::SUMMARY_CHARACTERS || preg_match( '/[\r\n]/', trim( $body['summary'] ) ) ) ) ) {
 			return self::error( 'gq_support_invalid_request', 400 );
 		}
-		return true;
+		return $body;
 	}
 
 	/**

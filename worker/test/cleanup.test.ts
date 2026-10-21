@@ -41,8 +41,8 @@ beforeEach(async () => {
   key = await digestKey("test App private key");
 });
 afterEach(async () => {
-  // No log line from any flow carries Submitted text, subjects or credentials.
-  expect(logs.join("\n")).not.toMatch(/Private report text|Checkout fails|00000000-0000-4000|ghs_|Bearer/);
+  // No log line from any flow carries Submitted text, subjects, the subject's `rs_` hash or credentials.
+  expect(logs.join("\n")).not.toMatch(/Private report text|Checkout fails|00000000-0000-4000|rs_[a-f0-9]{32}|ghs_|Bearer/);
   await stage.dispose();
   vi.useRealTimers();
 });
@@ -144,7 +144,7 @@ it("an uncertain result is reconciled read-only, then the found issue is redacte
   await cleanup();
   await expectMinimal(request.id);
   // Only the keyed title digest outlives the text, and only while automatic retitling remains possible.
-  expect(await cleanupRow(request.id)).toMatchObject({ state: "reconciling", title_digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  expect(await cleanupRow(request.id)).toMatchObject({ state: "reconciling", title_digest: expect.stringMatching(/^[a-f0-9]{16}\.[a-f0-9]{64}$/) });
   advance(60_000);
   await cleanup();
   expectRedacted(github.issues[0]!, "Support request (erased)");
@@ -355,12 +355,37 @@ it("unresolved records cross 45-day compaction; the tombstone window starts afte
   expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "excepted" });
   expect(await operator("erasure-close", erasure, "operator-1")).toBe("Erasure closed");
   await expect(operator("erasure-close", erasure, "operator-1")).rejects.toThrow("Only a finished, open erasure");
+  // Closing never completes it, and the excepted record's tombstone window starts at the close.
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "closed", residual: ["remote_outcome"] });
+  await cleanup();
+  expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "excepted" });
+  expect(await suppressed(uncertain.id)).toBe(true);
+  advance(45 * DAY);
   await cleanup();
   expect(await cleanupRow(uncertain.id)).toBeNull();
   expect(await suppressed(uncertain.id)).toBe(false);
   expect(await erasureStatus(db(), erasure)).toBeNull();
   expect(posts()).toHaveLength(1);
 }, 30_000);
+
+it("a completed erasure's tombstone window starts when its reference search ends", async () => {
+  const request = await accept();
+  const erasure = await erase();
+  github.next(() => undefined); // installation token
+  github.next(() => Response.json({ message: "rate limit" }, { status: 429, headers: { "retry-after": String(12 * 3_600) } }));
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "in_progress", counts: { pending: 0 } });
+  advance(12 * 3_600_000);
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "completed" });
+  advance(45 * DAY - 12 * 3_600_000);
+  await cleanup();
+  expect(await cleanupRow(request.id)).toBeNull(); // resolved at recording, so compacted first
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "completed" });
+  advance(12 * 3_600_000);
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toBeNull();
+});
 
 it("offboarding suppresses creates, purges content after 30 days and leaves the Client's issues", async () => {
   const delivered = await accept();
@@ -488,3 +513,14 @@ it("a search that keeps failing is reported, not taken as proof", async () => {
   for (let hour = 0; hour < 25; hour++) { advance(3_600_000); await cleanup(); }
   expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "needs_review", residual: ["reference_search"] });
 }, 30_000);
+
+it("a digest made before the key rotated leaves the title for review, not as retitled", async () => {
+  await accept();
+  await sweep();
+  const erasure = await erase();
+  await cleanup(await digestKey("the rotated App private key"));
+  advance(10_000);
+  await cleanup(await digestKey("the rotated App private key"));
+  expectRedacted(github.issues[0]!, "Checkout fails");
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ residual: ["edit_history", "title_review"] });
+});

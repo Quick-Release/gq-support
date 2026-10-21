@@ -15,7 +15,8 @@ export interface DeliveryRow {
   github_installation_id: number | null; environment: string | null; client_origin_label: string | null;
   default_developer: string | null; attempt_started_at: number | null; drain_until: number | null;
   retry_deadline: number; unknown_since: number | null; reconciliation_count: number; reconciliation_json: string | null;
-  review_json: string | null; operator_reconcile_until: number | null; repair_pending: number; title: string; description: string; created_at: number; installation_id: string;
+  review_json: string | null; operator_reconcile_until: number | null; repair_pending: number; context_json: string | null;
+  title: string; description: string; created_at: number; installation_id: string;
   repository_id: number; reporter_subject: string; issue_id: number | null; issue_number: number | null; issue_node_id: string | null;
 }
 const columns = `i.*, r.title, r.description, r.created_at, r.installation_id, r.repository_id, r.reporter_subject,
@@ -45,7 +46,7 @@ export const deliveryStore = (db: QueryDatabase) => {
     },
     async expire(now: number) {
       return (await statement(`UPDATE delivery_intent AS i SET state = 'failed', next_attempt_at = NULL,
-        owner = NULL, lease_expires_at = NULL, last_error_class = 'DeliveryDeadline'
+        owner = NULL, lease_expires_at = NULL, last_error_class = 'DeliveryDeadline', context_json = NULL
         WHERE i.id IN (SELECT i.id FROM delivery_intent i WHERE i.state = 'pending' AND i.retry_deadline <= ?
           AND (i.owner IS NULL OR i.lease_expires_at <= ?) AND ${unsuppressed} LIMIT 100)
         AND i.state = 'pending' AND i.retry_deadline <= ? RETURNING id, generation`, now, now, now)
@@ -146,15 +147,16 @@ export const deliveryStore = (db: QueryDatabase) => {
           ON CONFLICT (installation_id) DO UPDATE SET next_mutation_at = MAX(next_mutation_at, excluded.next_mutation_at),
             provider_cooldown_until = MAX(provider_cooldown_until, excluded.provider_cooldown_until)`,
           outcome.providerUntil!, outcome.providerUntil!, row.id, row.owner, row.generation, now)] : []),
-        statement(`UPDATE delivery_intent SET state = ?, next_attempt_at = ?, last_error_class = ?, owner = NULL,
-          lease_expires_at = NULL, unknown_since = COALESCE(unknown_since, ?), reconciliation_json = ?,
-          review_json = ?, reconciliation_count = reconciliation_count + CASE WHEN state = 'outcome_unknown' AND ? IS NULL THEN 1 ELSE 0 END,
-          repair_pending = ?
-          WHERE id = ? AND slot = ? AND owner = ? AND generation = ? AND lease_expires_at > ?
-          AND (? IS NULL OR EXISTS (SELECT 1 FROM support_request WHERE id = ? AND slot = ? AND issue_id = ? AND issue_node_id = ?))`,
+        // Report context lives only until a terminal outcome: delivered or failed.
+        statement(`UPDATE delivery_intent SET state = ?1, next_attempt_at = ?2, last_error_class = ?3, owner = NULL,
+          lease_expires_at = NULL, unknown_since = COALESCE(unknown_since, ?4), reconciliation_json = ?5,
+          review_json = ?6, reconciliation_count = reconciliation_count + CASE WHEN state = 'outcome_unknown' AND ?5 IS NULL THEN 1 ELSE 0 END,
+          repair_pending = ?7, context_json = CASE WHEN ?1 IN ('delivered', 'failed') THEN NULL ELSE context_json END
+          WHERE id = ?8 AND slot = ?9 AND owner = ?10 AND generation = ?11 AND lease_expires_at > ?12
+          AND (?13 IS NULL OR EXISTS (SELECT 1 FROM support_request WHERE id = ?14 AND slot = ?9 AND issue_id = ?13 AND issue_node_id = ?15))`,
           outcome.state, outcome.next, outcome.error ?? null, outcome.unknownSince ?? null, outcome.progress ?? null,
-          outcome.review ?? null, outcome.progress ?? null, outcome.repair ? 1 : 0, row.id, row.slot, row.owner, row.generation, now,
-          issue?.id ?? null, row.request_id, row.slot, issue?.id ?? null, issue?.nodeId ?? null),
+          outcome.review ?? null, outcome.repair ? 1 : 0, row.id, row.slot, row.owner, row.generation, now,
+          issue?.id ?? null, row.request_id, issue?.nodeId ?? null),
       ]);
     },
   };

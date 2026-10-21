@@ -24,6 +24,8 @@ const intentFor = (row: DeliveryRow) => io(async (): Promise<SupportIssueIntent>
   target: { installationId: row.github_installation_id!, repositoryId: row.repository_id }, intentId: row.id,
   title: row.title, description: row.description, acceptedAt: row.created_at,
   clientOriginLabel: row.client_origin_label!, defaultDeveloper: row.default_developer!,
+  // Frozen at acceptance; never recollected or enriched here.
+  context: row.context_json,
   attribution: { environment: row.environment!,
     installationReference: `inst_${(await sha256(JSON.stringify([row.slot, row.installation_id]))).slice(0, 32)}`,
     reporterReference: await reporterReference(row.slot, row.reporter_subject) },

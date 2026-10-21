@@ -20,7 +20,10 @@ final class GQ_Support_Privacy {
 	/** One retry of a deleted user's erasure, scheduled when the first call fails. Hooked by GQ_Support_Plugin. */
 	public const RETRY_HOOK = 'gq_support_retry_erasure';
 
-	/** Erasures this site recorded, listed until an Operator closes them. */
+	/**
+	 * Erasures this site recorded, with their last known state, listed until an
+	 * Operator closes them with no remote outcome left unresolved.
+	 */
 	public const ERASURES_OPTION = 'gq_support_erasures';
 
 	private const GROUP = 'gq-support-requests';
@@ -101,6 +104,11 @@ final class GQ_Support_Privacy {
 				__( 'Delivery', 'gq-support' )       => $item['delivery'] ?? '',
 				__( 'Support status', 'gq-support' ) => $item['status'] ?? '',
 			);
+			// Context the service still holds: the Reporter's projection never shows it, but export does.
+			$context = is_array( $item['context'] ?? null ) ? GQ_Support_Report_Context::normalize( $item['context'] ) : null;
+			if ( null !== $context && array() !== $context['default'] ) {
+				$fields[ __( 'Report context', 'gq-support' ) ] = GQ_Support_Report_Context::describe( $context );
+			}
 			$data[] = array(
 				'group_id'    => self::GROUP,
 				'group_label' => __( 'Support requests', 'gq-support' ),
@@ -123,7 +131,9 @@ final class GQ_Support_Privacy {
 
 	/**
 	 * Record an erasure for the Reporter. Never reports complete while the
-	 * service is still working, needs review, or could not be reached.
+	 * service is still working, needs review or could not be reached, nor
+	 * reports nothing retained while a residual copy is known, even once an
+	 * Operator has closed the erasure.
 	 *
 	 * @param string $email WordPress privacy request email address.
 	 * @param int    $page  1-based page; the service handles the whole erasure at once.
@@ -141,12 +151,12 @@ final class GQ_Support_Privacy {
 		}
 		$status = self::record_erasure( $subject );
 		if ( null === $status ) {
-			return new WP_Error( 'gq_support_unavailable', __( 'The support service could not record the erasure. Nothing was recorded; try again.', 'gq-support' ) );
+			return new WP_Error( 'gq_support_unavailable', __( 'The support service could not record the erasure. Try again.', 'gq-support' ) );
 		}
 		$counts  = is_array( $status['counts'] ?? null ) ? $status['counts'] : array();
 		$removed = (int) ( $counts['purged'] ?? 0 ) + (int) ( $counts['redacted'] ?? 0 ) + (int) ( $counts['pending'] ?? 0 ) > 0;
 		$state   = $status['state'] ?? '';
-		if ( 'completed' === $state || 'closed' === $state ) {
+		if ( 'completed' === $state || ( 'closed' === $state && array() === self::residual( $status ) ) ) {
 			return array(
 				'items_removed'  => $removed,
 				'items_retained' => false,
@@ -154,14 +164,19 @@ final class GQ_Support_Privacy {
 				'done'           => true,
 			);
 		}
+		if ( 'closed' === $state && self::unresolved( $status ) ) {
+			$message = __( 'Support request text was erased, but GETQUICK could not confirm whether a copy reached GitHub, so the erasure is incomplete. The Support settings page shows it.', 'gq-support' );
+		} elseif ( 'closed' === $state ) {
+			$message = __( 'Support request text was erased. GETQUICK has reviewed the copies that could not be removed automatically, such as earlier versions kept in GitHub.', 'gq-support' );
+		} elseif ( 'needs_review' === $state ) {
+			$message = __( 'Support request text was erased. Some copies need review by GETQUICK, such as earlier versions kept in GitHub; the Support settings page shows the erasure until it is closed.', 'gq-support' );
+		} else {
+			$message = __( 'Support request erasure is continuing. The Support settings page shows its progress.', 'gq-support' );
+		}
 		return array(
 			'items_removed'  => $removed,
 			'items_retained' => true,
-			'messages'       => array(
-				'needs_review' === $state
-					? __( 'Support request text was erased. Some copies need review by GETQUICK, such as earlier versions kept in GitHub; the Support settings page shows the erasure until it is closed.', 'gq-support' )
-					: __( 'Support request erasure is continuing. The Support settings page shows its progress.', 'gq-support' ),
-			),
+			'messages'       => array( $message ),
 			'done'           => true,
 		);
 	}
@@ -235,7 +250,8 @@ final class GQ_Support_Privacy {
 		}
 		$content  = '<p class="privacy-policy-tutorial">' . esc_html__( 'Suggested text for your privacy policy. Adapt it to your agreement with GETQUICK; it is not legal advice.', 'gq-support' ) . '</p>';
 		$content .= '<p>' . esc_html__( 'When you send a support request from this site\'s admin area, the summary and description you write are sent to our support provider, GETQUICK, which stores them on Cloudflare (database in the EU) and creates an issue in this project\'s private GitHub repository so that the development team can work on it. Your name, email address and username are not sent. The request is linked to you through a random identifier that is kept on this site. GitHub may email notifications of new issues to members of the development team.', 'gq-support' ) . '</p>';
-		$content .= '<p>' . esc_html__( 'Support requests are kept by GETQUICK for 12 months after they are closed; requests that never reached GitHub are kept for at most 12 months. The issue in GitHub stays part of this project\'s engineering history. If you ask this site to erase your personal data, your requests are deleted from GETQUICK\'s service and the text of your requests is removed from the GitHub issues, including older issues found by their pseudonymous reference. Copies that cannot be removed automatically, such as notification emails and earlier versions kept in GitHub\'s edit history, are reviewed and deleted by hand where possible.', 'gq-support' ) . '</p>';
+		$content .= '<p>' . esc_html__( 'Unless you remove them before sending, your request also includes the WordPress version, the support plugin version, and the kind of admin screen you opened support from (the dashboard, the posts list, the post editor or WooCommerce). These appear in the GitHub issue, not in your list of requests on this site. GETQUICK deletes its copy once the request reaches GitHub or fails. The address of the page you were on is never sent.', 'gq-support' ) . '</p>';
+		$content .= '<p>' . esc_html__( 'Support requests are kept by GETQUICK for 12 months after they are closed; requests that never reached GitHub are kept for at most 12 months. The issue in GitHub stays part of this project\'s engineering history. If you ask this site to erase your personal data, your requests are deleted from GETQUICK\'s service and the text of your requests and the information sent with them are removed from the GitHub issues, including older issues found by their pseudonymous reference. Copies that cannot be removed automatically, such as notification emails and earlier versions kept in GitHub\'s edit history, are reviewed and deleted by hand where possible.', 'gq-support' ) . '</p>';
 		wp_add_privacy_policy_content( __( 'GETQUICK Support', 'gq-support' ), wp_kses_post( $content ) );
 	}
 
@@ -271,13 +287,98 @@ final class GQ_Support_Privacy {
 		if ( is_wp_error( $result ) || 202 !== $result['status'] || ! isset( $result['body']['id'] ) || ! is_string( $result['body']['id'] ) ) {
 			return null;
 		}
-		$erasures = get_option( self::ERASURES_OPTION, array() );
-		$erasures = is_array( $erasures ) ? $erasures : array();
-		if ( ! in_array( $result['body']['id'], $erasures, true ) ) {
-			$erasures[] = $result['body']['id'];
-			update_option( self::ERASURES_OPTION, $erasures, false );
-		}
+		$erasures                          = self::erasures();
+		$erasures[ $result['body']['id'] ] = self::listed( $result['body'] );
+		update_option( self::ERASURES_OPTION, $erasures, false );
 		return $result['body'];
+	}
+
+	/**
+	 * The residual-copy kinds an erasure status reports.
+	 *
+	 * @param array<string, mixed> $status The service's erasure status.
+	 * @return array<int|string, mixed>
+	 */
+	private static function residual( array $status ): array {
+		return is_array( $status['residual'] ?? null ) ? $status['residual'] : array();
+	}
+
+	/**
+	 * Whether a possible GitHub copy is still unresolved: the erasure stays
+	 * incomplete even after an Operator closes it.
+	 *
+	 * @param array<string, mixed> $status The service's erasure status.
+	 */
+	private static function unresolved( array $status ): bool {
+		return in_array( 'remote_outcome', self::residual( $status ), true );
+	}
+
+	/**
+	 * The listed form of an erasure status; one without a state is still in progress.
+	 *
+	 * @param array<string, mixed> $status The service's erasure status.
+	 * @return array{state: string, checked_at: int, unresolved: bool}
+	 */
+	private static function listed( array $status ): array {
+		return array(
+			'state'      => is_string( $status['state'] ?? null ) ? $status['state'] : 'in_progress',
+			'checked_at' => time(),
+			'unresolved' => self::unresolved( $status ),
+		);
+	}
+
+	/**
+	 * This site's open erasures and their last known state, by erasure ID.
+	 *
+	 * @return array<string, array{state: string, checked_at: int, unresolved: bool}>
+	 */
+	public static function erasures(): array {
+		$stored   = get_option( self::ERASURES_OPTION, array() );
+		$erasures = array();
+		foreach ( is_array( $stored ) ? $stored : array() as $id => $erasure ) {
+			if ( is_string( $id ) && preg_match( '/^era_[0-9A-HJKMNP-TV-Z]{26}$/', $id ) && is_array( $erasure ) ) {
+				$erasures[ $id ] = array(
+					'state'      => (string) ( $erasure['state'] ?? '' ),
+					'checked_at' => (int) ( $erasure['checked_at'] ?? 0 ),
+					'unresolved' => ! empty( $erasure['unresolved'] ),
+				);
+			}
+		}
+		return $erasures;
+	}
+
+	/**
+	 * Ask the service for each open erasure's state, on a site admin's request.
+	 * A no longer known erasure leaves the list, as does a closed one with no
+	 * unresolved remote outcome. An unexpected reply keeps the last known state.
+	 *
+	 * @return bool Whether the service answered for every erasure.
+	 */
+	public static function refresh_erasures(): bool {
+		$answers  = array();
+		$complete = true;
+		foreach ( array_keys( self::erasures() ) as $id ) {
+			$result = self::send( 'GET', '/v1/erasures/' . $id, null );
+			if ( ! is_wp_error( $result ) && 404 === $result['status'] ) {
+				$answers[ $id ] = null;
+			} elseif ( ! is_wp_error( $result ) && 200 === $result['status'] && is_string( $result['body']['state'] ?? null ) ) {
+				$closed         = 'closed' === $result['body']['state'] && ! self::unresolved( $result['body'] );
+				$answers[ $id ] = $closed ? null : self::listed( $result['body'] );
+			} else {
+				$complete = false;
+			}
+		}
+		// Read again, so an erasure recorded during the calls is kept.
+		$erasures = self::erasures();
+		foreach ( $answers as $id => $answer ) {
+			if ( null === $answer ) {
+				unset( $erasures[ $id ] );
+			} elseif ( isset( $erasures[ $id ] ) ) {
+				$erasures[ $id ] = $answer;
+			}
+		}
+		update_option( self::ERASURES_OPTION, $erasures, false );
+		return $complete;
 	}
 
 	/**

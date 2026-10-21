@@ -60,6 +60,7 @@ final class GQ_Support_CLI {
 			'connected_at' => (string) $status['connected_at'],
 			'fingerprint'  => (string) $status['fingerprint'],
 			'managed'      => $status['managed'] ? 'yes' : 'no',
+			'disabled'     => GQ_Support_Fail_Safe::disabled() ? 'yes' : 'no',
 			'last_test'    => null === $status['last_test'] ? '' : $status['last_test']['result'] . ' at ' . gmdate( 'c', $status['last_test']['at'] ),
 		);
 		WP_CLI\Utils\format_items( $assoc_args['format'] ?? 'table', array( $row ), array_keys( $row ) );

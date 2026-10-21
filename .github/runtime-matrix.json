@@ -1,0 +1,34 @@
+{
+  "$comment": "Supported runtimes and the CI cells that prove them (docs/research/ci-compatibility-and-security-tests.md). Change pins only in a reviewed PR; the compatibility workflow's discovery canary reports newer upstream releases. scripts/ci/runtime-matrix.mjs checks this file against the plugin headers and static-analysis ranges.",
+  "supported": {
+    "wordpress": "6.5",
+    "testedUpTo": "7.1",
+    "php": { "minimum": "8.0", "maximum": "8.4" }
+  },
+  "tools": {
+    "ddev-redis": "v3.0.0",
+    "redis-cache": "3.0.0"
+  },
+  "cells": [
+    { "id": "minimum", "tier": "pr", "wordpress": "6.5.0", "php": "8.0", "woocommerce": "9.4.3", "react": "18.2.0", "browser": "chromium", "suite": "acceptance", "multisite": "subdirectory" },
+    { "id": "minimum-counters", "tier": "pr", "wordpress": "6.5.0", "php": "8.0", "woocommerce": "9.4.3", "react": "18.2.0", "browser": "chromium", "suite": "performance" },
+    { "id": "patched-minimum", "tier": "pr", "wordpress": "6.5.13", "php": "8.2", "woocommerce": "9.4.3", "react": "18.2.0", "browser": "chromium", "suite": "acceptance" },
+    { "id": "stable", "tier": "pr", "wordpress": "7.1.3", "php": "8.4", "woocommerce": "11.2.1", "react": "18.3.1", "browser": "chromium", "suite": "acceptance", "multisite": "subdirectory", "pluginCheck": "2.1.0" },
+    { "id": "stable-counters", "tier": "pr", "wordpress": "7.1.3", "php": "8.4", "woocommerce": "11.2.1", "react": "18.3.1", "browser": "chromium", "suite": "performance" },
+    { "id": "php-8.1", "tier": "pr", "wordpress": "7.1.3", "php": "8.1", "react": "18.3.1" },
+    { "id": "php-8.2", "tier": "pr", "wordpress": "7.1.3", "php": "8.2", "react": "18.3.1" },
+    { "id": "php-8.3", "tier": "pr", "wordpress": "7.1.3", "php": "8.3", "react": "18.3.1" },
+
+    { "id": "previous-minor", "tier": "scheduled", "wordpress": "7.0.7", "php": "8.4", "woocommerce": "11.2.1", "react": "18.3.1", "browser": "chromium", "suite": "acceptance" },
+    { "id": "mysql-8.0", "tier": "scheduled", "wordpress": "7.1.3", "php": "8.4", "database": "mysql:8.0", "multisite": "subdirectory" },
+    { "id": "mariadb-10.11", "tier": "scheduled", "wordpress": "7.1.3", "php": "8.4", "database": "mariadb:10.11", "multisite": "subdirectory" },
+    { "id": "object-cache", "tier": "scheduled", "wordpress": "7.1.3", "php": "8.4", "woocommerce": "11.2.1", "objectCache": true, "browser": "chromium", "suite": "acceptance" },
+    { "id": "multisite-subdomain", "tier": "scheduled", "wordpress": "7.1.3", "php": "8.4", "multisite": "subdomain" },
+    { "id": "firefox", "tier": "scheduled", "wordpress": "7.1.3", "php": "8.4", "woocommerce": "11.2.1", "browser": "firefox", "suite": "acceptance" },
+    { "id": "webkit", "tier": "scheduled", "wordpress": "7.1.3", "php": "8.4", "woocommerce": "11.2.1", "browser": "webkit", "suite": "acceptance" },
+
+    { "id": "wordpress-nightly", "tier": "canary", "wordpress": "nightly", "php": "8.4", "browser": "chromium", "suite": "acceptance" },
+    { "id": "php-8.5", "tier": "canary", "wordpress": "7.1.3", "php": "8.5", "woocommerce": "11.2.1", "browser": "chromium", "suite": "acceptance" },
+    { "id": "floating-latest", "tier": "canary", "wordpress": "latest", "php": "8.4", "woocommerce": "latest", "browser": "chromium", "suite": "acceptance", "multisite": "subdirectory", "pluginCheck": "latest" }
+  ]
+}

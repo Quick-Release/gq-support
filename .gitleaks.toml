@@ -1,0 +1,58 @@
+# Secret scanning rules for scripts/ci/gitleaks.sh: gitleaks' default rules plus this project's
+# own secrets. scripts/ci/secret-scan.test.mjs plants a synthetic canary for every rule below and
+# proves each one is caught, and that the expected fixtures pass.
+
+title = "gq-support"
+
+[extend]
+useDefault = true
+
+# A WordPress installation's Ed25519 signing key (ADR 0012): 64 bytes, base64. Generated keys are
+# stored in the `gq_support_signing_key` option (`"secret"` in its JSON or PHP-serialized form);
+# managed keys come from the `GQ_SUPPORT_SIGNING_KEY` constant; the contract calls it
+# `secret_key`. Public keys (32 bytes) and signatures (no key keyword) do not match.
+[[rules]]
+id = "gq-support-signing-key"
+description = "WordPress installation Ed25519 signing key"
+regex = '''(?i)(?:secret(?:[_-]?key)?|signing[_-]?key|private[_-]?key)(?:["']?\s*(?:=>|[:=,])\s*["']?|";s:88:")([A-Za-z0-9+/]{86}==)'''
+keywords = ["secret", "signing", "private"]
+
+# GitHub App webhook secrets, current and previous (docs/runbooks/github-webhooks.md).
+[[rules]]
+id = "gq-support-webhook-secret"
+description = "GitHub App webhook secret"
+regex = '''(?i)webhook[_-]?(?:previous[_-]?)?secret["']?\s*(?:=>|[:=])\s*["'`]?([A-Za-z0-9+/=_-]{32,})'''
+entropy = 3.5
+keywords = ["webhook"]
+
+# WordPress authentication cookies: `user|expiration|token|hmac`, raw or URL-encoded.
+[[rules]]
+id = "wordpress-auth-cookie"
+description = "WordPress authentication cookie"
+regex = '''wordpress_(?:logged_in|sec)_[0-9a-f]{32}=([^;\s"']*(?:\||%7C)[^;\s"']{20,})'''
+keywords = ["wordpress_logged_in_", "wordpress_sec_"]
+
+# WordPress nonces: ten hex characters in a header, query argument or bootstrap setting.
+[[rules]]
+id = "wordpress-nonce"
+description = "WordPress nonce"
+regex = '''(?i)(?:x-wp-nonce|_wpnonce|["']?nonce)["']?\s*(?:=>|[:=])\s*["']?([0-9a-f]{10})(?:[^0-9a-z]|$)'''
+keywords = ["nonce"]
+
+# Synthetic canaries for content that has no recognisable format, such as Submitted text, Reporter
+# subjects and Submission IDs. Tests build them at run time (`gqcanary_` and at least 20 random
+# letters or digits), so a canary in any scanned log, response, package or artifact is a leak.
+[[rules]]
+id = "gq-support-canary"
+description = "Synthetic leak canary"
+regex = '''gqcanary_[a-z0-9]{20,}'''
+keywords = ["gqcanary_"]
+
+# The documented signing fixture of contract/README.md: a deterministic key every test shares,
+# allowed only at that path and only with that exact value.
+[[allowlists]]
+description = "Shared contract signing fixture"
+targetRules = ["generic-api-key", "gq-support-signing-key"]
+condition = "AND"
+paths = ['''(?:^|/)contract/fixtures/signing\.json$''']
+regexes = ['''^AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQGKiOPddAnxlf1S2y08ul1yymcJvx2UEhvzdIgBtA9vXA==$''']

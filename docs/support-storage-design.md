@@ -34,7 +34,7 @@ All times are UTC epoch milliseconds. IDs are service-issued ULIDs with a type p
 | `slot` | Owner (ADR 0014) |
 | `reporter_subject` | Attested Reporter subject |
 | `submission_id` | Browser UUID |
-| `body_digest` | SHA-256 of the canonical Summary and Description. A repeat with a different digest returns 409 |
+| `body_digest` | SHA-256 of the canonical Summary and Description, and of the reviewed Report context when one was sent. A repeat with a different digest returns 409 |
 | `summary`, `description`, `title` | Submitted text (ADR 0015). `title` is derived once, at acceptance |
 | `created_at` | Acceptance time |
 | `installation_id` | Audit only: which enrolled installation submitted the request |
@@ -62,7 +62,9 @@ Constraints and indexes:
 | `kind`, `seq` | `create` only in the MVP. `seq` orders later intents (#28, ADR 0006). `UNIQUE (request_id, seq)` |
 | `state` | `pending`, `in_flight`, `delivered`, `failed`, `outcome_unknown` |
 | `attempts`, `first_attempt_at`, `lease_expires_at`, `next_attempt_at`, `last_error_class` | Delivery bookkeeping. The error is a class only, never a provider body |
-| `context_json` | Server-side context from #14 that goes into the issue body. Set to `NULL` when the intent reaches a terminal state |
+| `context_json` | The canonical reviewed Report context that goes into the issue body, or `NULL`. Set to `NULL` when the intent is `delivered` or `failed` |
+
+The [Report context decision](support-context-design.md) defines this as a frozen, reviewed, bounded context snapshot, not live diagnostic output. [#71](https://github.com/Quick-Release/gq-support/issues/71) implements it with the intake schemas, intent fingerprinting, fixtures and storage together ([implementation notes](support-context-design.md#implementation-of-the-minimal-context-71)). Clear it on terminal outcome and privacy cleanup; never append recollected fields during delivery/recovery. Keep only the existing restricted metadata when uncertain-outcome erasure requires reconciliation.
 
 Index `due (next_attempt_at) WHERE state IN ('pending', 'outcome_unknown')` and `leases (lease_expires_at) WHERE state = 'in_flight'`.
 
@@ -70,7 +72,7 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 ### Delivery extensions decided after the initial schema
 
-[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`) and `0004` the per-call request budget (`request_rate`); `0005`–`0007` add delivery ownership and pacing, and `0012` adds `support_request.erased_at` and the `erasure`, `support_cleanup`, `offboarding` and `cleanup_audit` tables for erasure, offboarding and retention cleanup ([privacy design](support-privacy-design.md#uncertain-create-cleanup-amendment)); `0014` makes cleanup records self-contained, `0015` adds signed erasure requests and the reporter-reference search, and `0016` the restore marker. The suppression ledger (ADR 0016) is a separate D1 with its own migrations in `worker/ledger-migrations/`. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
+[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`) and `0004` the per-call request budget (`request_rate`); `0005`–`0007` add delivery ownership and pacing, and `0012` adds `support_request.erased_at` and the `erasure`, `support_cleanup`, `offboarding` and `cleanup_audit` tables for erasure, offboarding and retention cleanup ([privacy design](support-privacy-design.md#uncertain-create-cleanup-amendment)); `0014` makes cleanup records self-contained, `0015` adds signed erasure requests and the reporter-reference search, `0016` the restore marker, and `0017` the `changed_at` columns and watermarks for incremental ledger mirroring. The suppression ledger (ADR 0016) is a separate D1 with its own migrations in `worker/ledger-migrations/`. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
 
 ### `repository_state`: rebuildable
 

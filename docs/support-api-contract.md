@@ -2,6 +2,8 @@
 
 Decision record for [issue #6](https://github.com/Quick-Release/gq-support/issues/6). It specifies the browser → WordPress REST contract and the WordPress → Worker transport adapter. [ADR 0009](adr/0009-project-repository-intake-and-reporter-scoped-projection.md) limits the surface to issue intake and a Reporter-scoped projection, and the [support security design](support-security-design.md) owns the authentication and authorization rules this contract relies on. [CONTEXT.md](../CONTEXT.md) defines the terms. This is a contract, not a claim that it is implemented.
 
+The [Report context decision](support-context-design.md) extends create with reviewed, removable default context, a server-authenticated review envelope, frozen context in the idempotent intent, and matching PHP/Worker fixtures. [#71](https://github.com/Quick-Release/gq-support/issues/71) implements it as described below and in that decision. It keeps the three REST routes and the 32 KB body cap. Rich technical details are deferred beyond the MVP.
+
 ## Routes
 
 Namespace: `gq-support/v1`. The namespace is the version, and responses carry no separate version field. Routes are registered on `rest_api_init`, always, including on an unconfigured installation.
@@ -41,9 +43,13 @@ Content-Type: application/json
 | `summary` | Optional. One line, 1–120 characters after trimming. |
 | `description` | Required. 1–10,000 characters after trimming. |
 | `supersedes_id` | Optional public request identity, only when replacing a failed own request. It must belong to the same Slot and Reporter. |
-| anything else | Rejected (`additionalProperties: false`). There is no category, context, or attachment field in v1. Environment context is added server-side (#14). |
+| `context` | Optional, only with `context_review`: `{"schema": 1, "default": {…}}` holding the reviewed values the Reporter kept, among `wp_version`, `support_plugin_version` and `originating_screen` ([context design](support-context-design.md#implementation-of-the-minimal-context-71)). Unknown keys or sections and malformed values are rejected. |
+| `context_review` | Required with `context`: the review envelope the context preview issued for this Submission ID. WordPress verifies it and never forwards it. |
+| anything else | Rejected (`additionalProperties: false`). There is no category or attachment field in v1. Environment is added by the service from the Repository mapping. |
 
-The whole request body is capped at 32 KB. Limits live in one constants file per side, and a shared fixture asserts they agree.
+The whole request body, including any context and envelope, is capped at 32 KB. Limits live in one constants file per side, and shared fixtures assert they agree.
+
+The context preview is the authenticated, read-only `admin-ajax.php` action `gq_support_context`, not a REST route. It answers `private, no-store` with the default context and its envelope, checks the same session, nonce, membership and capability as the routes, and never calls the service.
 
 The Submission ID is a reference, not authority. The Worker scopes it to (installation, Reporter subject), so the same UUID from another Reporter is a different key.
 
@@ -107,10 +113,11 @@ Every error is a `WP_Error` whose `data` is `{ status, correlation_id, retryable
 | 413 | `gq_support_payload_too_large` | Body over 32 KB | Inline error |
 | 404 | `gq_support_not_found` | Unknown or out-of-scope request | "Not found" |
 | 409 | `gq_support_idempotency_conflict` | Same key, different body | "Not sent", new key on retry |
+| 412 | `gq_support_context_expired` | Create: the review envelope expired and the service holds no intent for this Submission ID | The panel reviews the context again for the same Submission ID; if an earlier send is uncertain, "Check My requests" |
 | 426 | `gq_support_plugin_outdated` | Worker no longer supports this plugin version | "Support needs a plugin update" |
 | 429 | `gq_support_rate_limited` + `Retry-After` | Per-subject or per-installation limit | "Too many requests, try again later" |
 | 503 | `gq_support_not_configured` | No connection, or the Worker rejected the installation credential | "Support is unavailable"; operator sees detail on the setup page |
-| 503 | `gq_support_disabled` | Local support fail-safe enabled; no service call | "Support is temporarily disabled" + independent contact; `retryable: false` |
+| 503 | `gq_support_disabled` | `GQ_SUPPORT_DISABLED` is set in `wp-config.php`; checked after authorization, before any service call | "Support is temporarily disabled" + independent contact; `retryable: false` |
 | 503 | `gq_support_not_accepted` | Create: the Worker could not durably record | "Not sent" + Try again (same key) |
 | 503 | `gq_support_unavailable` | Read: Worker down, timed out, or ambiguous | "Couldn't load. Refresh to try again." |
 | 504 | `gq_support_outcome_unknown` | Create: timeout or ambiguous response | "Checking…" |
@@ -142,13 +149,14 @@ Every `gq-support/v1` response sends `Cache-Control: private, no-store` explicit
 | Forwarded identity | The attested Reporter subject and, for `scope=site`, a freshly attested view-site grant. There is no WordPress nonce, cookie, email, username, or numeric user ID, and no browser-supplied installation, Client, or repository. |
 | When calls happen | Only inside a `gq-support/v1` route callback. Never during page rendering, activation, or cron. |
 
-WordPress → Worker payloads carry the same field names and limits as the browser contract, plus the attested identity and the server-side context from #14.
+WordPress → Worker payloads carry the same field names and limits as the browser contract, plus the attested identity, as compact unescaped JSON. Report context travels without its review envelope; an expired envelope adds `reconcile_only: true`, which only returns an already accepted intent (or 412) and never accepts one. The service caps a create carrying context at 32 KB.
 
 ## Contract tests
 
 Shared JSON fixtures in `contract/fixtures/` are the drift guard. There is no generated shared schema, because the two hops are different shapes and WordPress REST supports only a subset of JSON Schema. PHPUnit and the Worker test suite both run every fixture.
 
 - Valid and invalid create payloads, covering each limit boundary, unknown fields, a missing or malformed `submission_id`, and multi-line summaries.
+- Valid and invalid Report context, with its canonical serialization (`context.json`).
 - Resource and list responses for each `delivery`/`status` combination.
 - Version mismatch (old plugin → 426) and every error code in the catalogue.
 
@@ -170,6 +178,6 @@ The service request attests `reporter_subject` and `scope` (`mine` or `site`). C
 
 Each service resource also returns `installation_id` and `reporter_subject` as server-only ownership metadata. WordPress verifies both for own reads and creates, and the installation for explicitly granted site reads, before stripping the metadata and returning the public resource fields plus `own`. Lists check every item. Unknown and mismatched resources produce the same 404. This is defense in depth: the Worker must independently authorize before returning any resource. Its route implementation and verifier belong to the service work; these WordPress integration tests stub that external boundary.
 
-The deferred widget uses the read-only native `admin-ajax.php?action=gq_support_session` operation to check the session on open, focus, visibility changes, and explicit submission. An opaque binding ties the tab to the original account, login session and site. Only a matching cookie session with its current grant receives a fresh REST nonce. A changed session clears tab-memory draft text; lost grants or a failed check pause the form and preserve the draft with a copy affordance. No background polling, persistent browser draft storage, automatic write replay, or extra support REST route is introduced. The report form sends one in-memory Submission ID per intent and reconciles ambiguous responses with the same frozen body. It stops automatic reconciliation while closed, after three attempts, or after a session failure; explicit retries after a failed delivery or body conflict use a new key. Full request-list and detail presentation belong to the projection workflow (#26).
+The deferred widget uses the read-only native `admin-ajax.php?action=gq_support_session` operation to check the session on open, focus, visibility changes, and explicit submission. Focus and visibility changes start at most one check per 5 seconds. An opaque binding ties the tab to the original account, login session and site. Only a matching cookie session with its current grant receives a fresh REST nonce. A changed session clears tab-memory draft text; lost grants or a failed check pause the form and preserve the draft with a copy affordance. No background polling, persistent browser draft storage, automatic write replay, or extra support REST route is introduced. The report form sends one in-memory Submission ID per intent and reconciles ambiguous responses with the same frozen body. It stops automatic reconciliation while closed, after three attempts, or after a refused session check or any rejected check (an unreachable session check is charged as an attempt); explicit retries after a failed delivery, or after a body conflict with no earlier ambiguous attempt, use a new key. Leaving the page unmounts the widget, so its private state never survives into a back/forward cache restoration. Full request-list and detail presentation belong to the projection workflow (#26).
 
 Uninstall clears the current site's plugin-owned Reporter metadata as well as its tracked grants and options. The existing bounded multisite uninstall policy remains: a network-wide purge is a separate operator operation, rather than a synchronous loop over every site.

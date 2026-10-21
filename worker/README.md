@@ -83,18 +83,22 @@ pnpm operator status-reconcile <ISO-outage-start> <opaque-actor> --stage <stage>
 pnpm operator status-repair <ISO-window-start> <ISO-window-end> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
-`status-health` reports the due refresh backlog, each repository's last sweep and
-active suspensions. `status-reconcile` makes every mapped or tracked repository's
-next sweep list from the outage start. `status-repair` refuses until the backlog
-is drained and every sweep is current, and acknowledges the suspensions it records.
+`status-health` reports the due refresh backlog, each repository's last sweep,
+active suspensions and whether the open-request pass is running.
+`status-reconcile` makes every mapped or tracked repository's next sweep list
+from the outage start, and restarts the open-request pass so deleted and
+transferred issues are re-read too. `status-repair` refuses until the backlog is
+drained, the pass is complete and every sweep is current, and acknowledges the
+suspensions it records.
 
 ### Suppression ledger and restores
 
 `SupportLedger` is a second D1 per stage that a restore of `SupportDB` never
 rewinds (ADR 0016, `src/ledger.ts`). It keeps the current image of every
-suppression, erasure, cleanup record, offboarding and repository suspension,
-without report text. Erasure and offboarding write it first; each minute's
-cleanup pass mirrors the rest. Commands that suppress or record an erasure need
+suppression, erasure, cleanup record, offboarding, repository suspension and
+runtime key revocation, without report text. Erasure, offboarding and a site's
+self-revocation write it first; each minute's cleanup pass mirrors rows changed
+since its last pass (every writer sets `changed_at`), and once a day every row. Commands that suppress or record an erasure need
 `--ledger-database-id <ledger-database-id>` (the stack outputs it):
 
 ```sh
@@ -110,10 +114,9 @@ pnpm operator restore-recorded <opaque-actor> time-travel-restore --stage <stage
 
 Each Worker then answers `503` and skips its sweeps until it has replayed the
 ledger: suppressions, erasures and cleanup records come back, restored rows
-under cleanup lose their text, suspensions are reapplied (never lifted) and
-every request that is not delivered becomes `outcome-unknown`, reconciled by
-its marker. Runtime key rotation/self-revocation history remains rollout work
-in #20.
+under cleanup lose their text, suspensions and key revocations are reapplied
+(never lifted) and every request that is not delivered becomes
+`outcome-unknown`, reconciled by its marker.
 
 ## HTTP behavior
 

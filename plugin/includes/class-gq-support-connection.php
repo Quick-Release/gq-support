@@ -26,6 +26,9 @@ final class GQ_Support_Connection {
 	 * @return array<string, mixed>|WP_Error The redacted status, or why it failed.
 	 */
 	public static function enroll( string $code ) {
+		if ( GQ_Support_Fail_Safe::disabled() ) {
+			return self::disabled();
+		}
 		$code = strtoupper( (string) preg_replace( '/[^A-Za-z0-9]/', '', $code ) );
 		if ( '' === $code ) {
 			return new WP_Error( 'gq_support_code_not_valid', __( 'Enter the Enrollment code GETQUICK gave you.', 'gq-support' ) );
@@ -83,6 +86,9 @@ final class GQ_Support_Connection {
 	 * @return array<string, mixed>|WP_Error The redacted status, or why the test could not run.
 	 */
 	public static function test() {
+		if ( GQ_Support_Fail_Safe::disabled() ) {
+			return self::disabled();
+		}
 		$state = GQ_Support_State::get();
 		if ( GQ_Support_State::holds_credential( $state ) && GQ_Support_State::key_id_mismatch( $state ) ) {
 			return new WP_Error( 'gq_support_key_id_mismatch', __( 'GQ_SUPPORT_KEY_ID does not match the enrolled key. Update wp-config.php with the enrolled key ID.', 'gq-support' ) );
@@ -127,6 +133,10 @@ final class GQ_Support_Connection {
 	 * @return array<string, mixed>|WP_Error The redacted status, or why the site cannot disconnect itself.
 	 */
 	public static function disconnect() {
+		// Disconnecting deletes the key; while the service cannot be told, that would leave it unrevoked.
+		if ( GQ_Support_Fail_Safe::disabled() ) {
+			return self::disabled();
+		}
 		if ( GQ_Support_Signing_Key::managed() ) {
 			return new WP_Error( 'gq_support_managed', __( 'This connection is managed by server configuration.', 'gq-support' ) );
 		}
@@ -173,6 +183,13 @@ final class GQ_Support_Connection {
 			return null;
 		}
 		return new GQ_Support_Signer( $secret, $key_id, $state['installation_id'] );
+	}
+
+	/**
+	 * `GQ_SUPPORT_DISABLED` is set: nothing is sent and nothing local changes.
+	 */
+	private static function disabled(): WP_Error {
+		return new WP_Error( 'gq_support_disabled', __( 'Support is temporarily disabled by GQ_SUPPORT_DISABLED in wp-config.php. Nothing was sent to the support service.', 'gq-support' ) );
 	}
 
 	/**

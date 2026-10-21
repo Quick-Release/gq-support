@@ -58,6 +58,13 @@ The WordPress projection of Support requests associated with the authenticated R
 The Summary and Description exactly as the Reporter sent them. It is what the Reporter sees, even after developers retitle or edit the GitHub issue.
 _Avoid_: Issue body, when the GitHub-side text is not meant
 
+**Report context**:
+The disclosed, approved technical facts accompanying a Support request, separate from Submitted text and installation attribution. A Reporter can remove optional context before submitting it.
+
+**Technical details**:
+The optional additional Report context collected only when the Reporter explicitly requests it and reviews the selected values before submission.
+_Avoid_: Full Site Health report, automatic diagnostics
+
 **Support status**:
 Whether a Support request's GitHub issue is open or closed. GitHub is authoritative for this status; what the Reporter sees is the service's last observation of it. An issue deleted or transferred out of the Project repository shows as closed, and an Operator is alerted. Delivery outcome is separate.
 

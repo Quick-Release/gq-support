@@ -61,6 +61,13 @@ async function openPanel(page: Page) {
   await expect(page.getByRole('button', { name: 'Send report' })).toBeEnabled();
 }
 
+/** Return to the tab once the five seconds within which a return does not recheck the session have passed. */
+async function returnToTab(page: Page) {
+  await page.clock.install();
+  await page.clock.runFor(5_100);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+}
+
 const requestsPanel = (page: Page) => page.getByRole('tabpanel', { name: 'My requests' });
 const showRequests = (page: Page) => page.getByRole('tab', { name: 'My requests' }).click();
 
@@ -271,7 +278,7 @@ test('a Support manager reads the installation scope only while explicitly grant
 
     // A revoked grant drops the installation-wide projection at the next session check.
     grantSite(false);
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await returnToTab(page);
     await expect(requestsPanel(page).getByRole('combobox', { name: 'Show' })).toHaveCount(0);
     await expect(requestsPanel(page).getByText('Another Reporter request')).toHaveCount(0);
     expect(reads.slice(2).map(query => query.get('scope'))).not.toContain('site');
@@ -288,7 +295,7 @@ test('a changed session clears the last-known projection', async ({ page }) => {
   await expect(requestsPanel(page).getByRole('button', { name: /Private request/ })).toBeVisible();
   await page.context().clearCookies();
   await page.request.post(`${site}/wp-login.php`, { form: { log: 'editor', pwd: 'editor' } });
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await returnToTab(page);
   await expect(requestsPanel(page).getByText('Private request')).toHaveCount(0);
   await expect(requestsPanel(page).getByRole('button', { name: 'Refresh' })).toBeDisabled();
 });

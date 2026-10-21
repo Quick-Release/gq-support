@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubTarget } from "./github-gateway.ts";
-import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress, type ResidualCopy } from "./support-issues.ts";
+import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress } from "./support-issues.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { imageOf, ledgerStore, mirrorToLedger, removal, type LedgerEntry } from "./ledger.ts";
 import { DAY, MUTATION_INTERVAL_MS } from "./delivery-store.ts";
@@ -25,7 +25,6 @@ const reconcileAt = (since: number, count: number) => since + ([60_000, 300_000,
 export type Statement = readonly [sql: string, parameters: readonly (string | number | null)[]];
 type CleanupState = "draining" | "reconciling" | "redacting" | "unresolved" | "resolved" | "excepted";
 type Outcome = "purged" | "redacted" | "lost" | "found";
-type Residual = ResidualCopy | "multiple_matches";
 
 const encoder = new TextEncoder();
 /**
@@ -36,12 +35,26 @@ export const digestKey = async (secret: string): Promise<CryptoKey> => crypto.su
   { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: encoder.encode("gq-support title digest v1") },
   await crypto.subtle.importKey("raw", encoder.encode(secret), "HKDF", false, ["deriveKey"]),
   { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"]);
-/** Keyed by the intent too, so equal titles of different requests never compare equal. */
+const hmac = async (key: CryptoKey, text: string) =>
+  Array.from(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(text))), (byte) => byte.toString(16).padStart(2, "0")).join("");
+/** Names the key without revealing it, so a digest made before a rotation is recognised as unverifiable. */
+const keyIdOf = async (key: CryptoKey) => (await hmac(key, "gq-support title digest key id")).slice(0, 16);
+/**
+ * `<key id>.<HMAC>`, keyed by the intent too, so equal titles of different
+ * requests never compare equal.
+ */
 export const titleDigest = async (key: CryptoKey, intentId: string, title: string) =>
-  Array.from(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify([intentId, title])))),
-    (byte) => byte.toString(16).padStart(2, "0")).join("");
+  `${await keyIdOf(key)}.${await hmac(key, JSON.stringify([intentId, title]))}`;
+/**
+ * Whether a title is the one the digest was made from, or null when that can
+ * no longer be checked: no digest, no key, or a digest from a rotated key.
+ */
+export const derivedTitleCheck = async (key: CryptoKey | null, intentId: string, digest: string | null) =>
+  key && digest?.startsWith(`${await keyIdOf(key)}.`)
+    ? async (title: string) => await titleDigest(key, intentId, title) === digest : null;
 
-const SUPPRESS = `INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('request', ?, 'erasure') ON CONFLICT DO NOTHING`;
+// Every write to a mirrored table sets `changed_at`, so the ledger mirror can read only what changed (src/ledger.ts).
+const SUPPRESS = `INSERT INTO delivery_suppression (scope, reference, reason, changed_at) VALUES ('request', ?, 'erasure', ?) ON CONFLICT DO NOTHING`;
 
 /**
  * Deletes a request's rows once its cleanup row holds everything the cleanup
@@ -79,13 +92,13 @@ export interface ErasureTarget {
  */
 export const erasureStatements = (erasureId: string, slot: string, subject: string, reference: string,
   targets: readonly ErasureTarget[], now: number, immediate: boolean): Statement[] => [
-  ...targets.map(({ requestId }): Statement => [SUPPRESS, [requestId]]),
+  ...targets.map(({ requestId }): Statement => [SUPPRESS, [requestId, now]]),
   // The reference search also finds issues whose request rows are already gone.
-  [`INSERT INTO erasure (id, slot, recorded_at, reporter_reference, search_state, search_next_at)
-    VALUES (?, ?, ?, ?, 'pending', ?) ON CONFLICT DO NOTHING`, [erasureId, slot, now, reference, now]],
+  [`INSERT INTO erasure (id, slot, recorded_at, reporter_reference, search_state, search_next_at, changed_at)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING`, [erasureId, slot, now, reference, now, now]],
   ...targets.map(({ requestId, titleDigest }): Statement => [`INSERT INTO support_cleanup
-    (request_id, slot, purpose, erasure_id, recorded_at, title_digest, state, next_attempt_at)
-    VALUES (?, ?, 'erasure', ?, ?, ?, 'draining', ?) ON CONFLICT DO NOTHING`, [requestId, slot, erasureId, now, titleDigest, now]]),
+    (request_id, slot, purpose, erasure_id, recorded_at, title_digest, state, next_attempt_at, changed_at)
+    VALUES (?, ?, 'erasure', ?, ?, ?, 'draining', ?, ?) ON CONFLICT DO NOTHING`, [requestId, slot, erasureId, now, titleDigest, now, now]]),
   // An active attempt already holds its own copy, so the text goes at once.
   ...(immediate ? [[`UPDATE support_request SET ${BLANK}, erased_at = ?
     WHERE slot = ? AND reporter_subject = ? AND erased_at IS NULL
@@ -110,8 +123,9 @@ export const OPEN_ERASURE = `SELECT id FROM erasure WHERE slot = ? AND reporter_
  * and covers any request accepted since. Like the fixed SQL in storage.ts,
  * its subqueries cannot pass the storageFor checker, so every statement binds
  * the verified Slot the caller supplies by hand. Without a key, no digest is
- * kept and every redacted title needs review. The ledger is written first,
- * so a failed main write leaves at most an extra suppression.
+ * kept and every redacted title needs review. The ledger is written first:
+ * after a failed main write it already suppresses the requests, and a later
+ * restore carries the erasure out.
  */
 export const recordErasure = async (db: QueryDatabase, slot: string, subject: string, now: number, key: CryptoKey | null,
   ledger: QueryDatabase | null): Promise<string> => {
@@ -196,8 +210,8 @@ const cleanupStore = (db: QueryDatabase) => {
   const run = (statements: readonly Statement[]) => db.batch(statements.map(([sql, parameters]) => db.prepare(sql).bind(...parameters)));
   const queue = (purpose: string, rows: readonly { id: string; slot: string }[], now: number) => rows.length === 0 ? Promise.resolve() :
     run(rows.flatMap(({ id, slot }): Statement[] => [
-      [`INSERT INTO support_cleanup (request_id, slot, purpose, recorded_at, state, next_attempt_at)
-        VALUES (?, ?, ?, ?, 'draining', ?) ON CONFLICT DO NOTHING`, [id, slot, purpose, now, now]],
+      [`INSERT INTO support_cleanup (request_id, slot, purpose, recorded_at, state, next_attempt_at, changed_at)
+        VALUES (?, ?, ?, ?, 'draining', ?, ?) ON CONFLICT DO NOTHING`, [id, slot, purpose, now, now, now]],
       ...blankStatements(id, now),
     ])).then(() => undefined);
   return {
@@ -213,10 +227,10 @@ const cleanupStore = (db: QueryDatabase) => {
           title_digest: string | null; title: string; erased_at: number | null; intent_id: string | null }>()).results;
       const statements: Statement[] = [];
       for (const row of rows) {
-        if (row.purpose === "erasure") statements.push([SUPPRESS, [row.request_id]]);
+        if (row.purpose === "erasure") statements.push([SUPPRESS, [row.request_id, now]]);
         if (row.state === "draining" && row.purpose === "erasure" && row.title_digest === null && row.erased_at === null && key && row.intent_id) {
-          statements.push([`UPDATE support_cleanup SET title_digest = ? WHERE request_id = ? AND state = 'draining' AND title_digest IS NULL`,
-            [await titleDigest(key, row.intent_id, row.title), row.request_id]]);
+          statements.push([`UPDATE support_cleanup SET title_digest = ?, changed_at = ? WHERE request_id = ? AND state = 'draining' AND title_digest IS NULL`,
+            [await titleDigest(key, row.intent_id, row.title), now, row.request_id]]);
         }
         statements.push(...blankStatements(row.request_id, now), ...purgeStatements(row.request_id));
       }
@@ -255,12 +269,12 @@ const cleanupStore = (db: QueryDatabase) => {
       await run([
         [`UPDATE support_cleanup SET state = ?, outcome = ?, next_attempt_at = ?, window_started_at = ?, resolved_at = ?,
           title_digest = CASE WHEN ? THEN NULL ELSE title_digest END, intent_id = ?, github_installation_id = ?,
-          repository_id = ?, attempt_started_at = ?, attempt_ended_at = ?, issues_json = ?
+          repository_id = ?, attempt_started_at = ?, attempt_ended_at = ?, issues_json = ?, changed_at = ?
           WHERE request_id = ? AND state = 'draining' AND NOT EXISTS (SELECT 1 FROM delivery_intent WHERE request_id = ?
             AND (generation IS NOT ? OR state IS NOT ? OR (owner IS NOT NULL AND lease_expires_at > ?)))`,
           [change.state, change.outcome ?? null, change.next, now, change.state === "resolved" ? now : null, ended(change.state) ? 1 : 0,
             row.intent_id, row.github_installation_id, row.repository_id, row.attempt_started_at, row.drain_until ?? row.attempt_started_at,
-            change.issues ? JSON.stringify(change.issues) : null,
+            change.issues ? JSON.stringify(change.issues) : null, now,
             row.request_id, row.request_id, row.generation, row.state, now]],
         ...purgeStatements(row.request_id),
       ]);
@@ -277,8 +291,9 @@ const cleanupStore = (db: QueryDatabase) => {
     },
     /** The next due time doubles as a lease; the owner fences every later write. */
     async claim(record: CleanupRecord, owner: string, now: number) {
-      const result = await db.prepare(`UPDATE support_cleanup SET owner = ?, next_attempt_at = ?
-        WHERE request_id = ? AND state = ? AND next_attempt_at = ?`).bind(owner, now + LEASE_MS, record.request_id, record.state, record.next_attempt_at).run();
+      const result = await db.prepare(`UPDATE support_cleanup SET owner = ?, next_attempt_at = ?, changed_at = ?
+        WHERE request_id = ? AND state = ? AND next_attempt_at = ?`)
+        .bind(owner, now + LEASE_MS, now, record.request_id, record.state, record.next_attempt_at).run();
       return result.meta.changes === 1;
     },
     /** Paces a redaction PATCH like any other mutation of the shared installation. */
@@ -305,33 +320,34 @@ const cleanupStore = (db: QueryDatabase) => {
             provider_cooldown_until = MAX(provider_cooldown_until, excluded.provider_cooldown_until)`,
           [record.github_installation_id, change.providerUntil, change.providerUntil]] as Statement] : []),
         [`UPDATE support_cleanup SET state = ?, next_attempt_at = ?, outcome = ?, residual = ?, last_error_class = ?,
-          reconciliation_json = ?, reconciliation_count = ?, issues_json = ?, resolved_at = ?, owner = NULL,
+          reconciliation_json = ?, reconciliation_count = ?, issues_json = ?, resolved_at = ?, owner = NULL, changed_at = ?,
           title_digest = CASE WHEN ? THEN NULL ELSE title_digest END WHERE request_id = ? AND owner = ?`,
           [change.state, change.next, change.outcome === undefined ? record.outcome : change.outcome,
             merged(record.residual, change.residual ?? []).join(","), change.error ?? null, change.progress ?? null,
             change.count ?? record.reconciliation_count, change.issues ? JSON.stringify(change.issues) : record.issues_json,
-            change.state === "resolved" ? now : null, ended(change.state) ? 1 : 0, record.request_id, owner]],
+            change.state === "resolved" ? now : null, now, ended(change.state) ? 1 : 0, record.request_id, owner]],
       ]);
     },
     /**
-     * Resolved erasure tombstones go 45 days after resolution, but one that an
-     * Operator still has to review stays until its erasure is closed.
+     * Resolved erasure tombstones go 45 days after resolution. One that an
+     * Operator still has to review is resolved by its erasure's close, and an
+     * erasure by its close or, if completed, by the end of its search.
      * Unresolved cleanup is never compacted. Other purposes have the Slot
      * suppression or no ledger entry at all, so their rows go at once.
      */
     async compact(now: number, ledger: QueryDatabase | null) {
       const cutoff = now - TOMBSTONE_MS;
-      const expiredAs = (c: string) => `${c}.state IN ('resolved', 'excepted') AND (${c}.purpose != 'erasure' OR (${c}.resolved_at <= ?
-        AND ((${c}.state = 'resolved' AND ${c}.residual = '') OR EXISTS (SELECT 1 FROM erasure e WHERE e.id = ${c}.erasure_id AND e.closed_at IS NOT NULL))))`;
+      const expiredAs = (c: string) => `${c}.state IN ('resolved', 'excepted') AND (${c}.purpose != 'erasure' OR (${c}.resolved_at <= ?1
+        AND ((${c}.state = 'resolved' AND ${c}.residual = '') OR EXISTS (SELECT 1 FROM erasure e WHERE e.id = ${c}.erasure_id AND e.closed_at <= ?1))))`;
       const expired = expiredAs("support_cleanup");
       // Its last records may go in this same pass.
-      const finished = `recorded_at <= ? AND (closed_at IS NOT NULL OR search_state = 'done')
+      const finished = `(closed_at <= ?1 OR (closed_at IS NULL AND search_state = 'done' AND search_ended_at <= ?1))
         AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.erasure_id = erasure.id AND NOT (${expiredAs("c")}))`;
       if (ledger) {
         // Removals are recorded first: a lost main delete is mirrored back in, a lost ledger write is not.
         const records = (await db.prepare(`SELECT request_id, purpose FROM support_cleanup WHERE ${expired}`).bind(cutoff)
           .all<{ request_id: string; purpose: string }>()).results;
-        const erasures = (await db.prepare(`SELECT id FROM erasure WHERE ${finished}`).bind(cutoff, cutoff).all<{ id: string }>()).results;
+        const erasures = (await db.prepare(`SELECT id FROM erasure WHERE ${finished}`).bind(cutoff).all<{ id: string }>()).results;
         await ledgerStore(ledger).record([
           ...records.map((record) => removal("cleanup", record.request_id)),
           ...records.filter((record) => record.purpose === "erasure").map((record) => removal("suppression", `request:${record.request_id}`)),
@@ -342,7 +358,7 @@ const cleanupStore = (db: QueryDatabase) => {
         [`DELETE FROM delivery_suppression WHERE scope = 'request' AND reason = 'erasure'
           AND reference IN (SELECT request_id FROM support_cleanup WHERE purpose = 'erasure' AND ${expired})`, [cutoff]],
         [`DELETE FROM support_cleanup WHERE ${expired}`, [cutoff]],
-        [`DELETE FROM erasure WHERE ${finished}`, [cutoff, cutoff]],
+        [`DELETE FROM erasure WHERE ${finished}`, [cutoff]],
       ]);
     },
     async searches(now: number) {
@@ -351,8 +367,9 @@ const cleanupStore = (db: QueryDatabase) => {
         .bind(now).all<PendingSearch>()).results;
     },
     /** Retries, or records the search's end. A changed schedule means another pass took it. */
-    async searched(search: PendingSearch, state: "pending" | "done" | "incomplete" | "failed", next: number | null) {
-      await run([[`UPDATE erasure SET search_state = ?, search_next_at = ? WHERE id = ? AND search_state = 'pending'`, [state, next, search.id]]]);
+    async searched(search: PendingSearch, state: "pending" | "done" | "incomplete" | "failed", next: number | null, now: number) {
+      await run([[`UPDATE erasure SET search_state = ?, search_next_at = ?, search_ended_at = ?, changed_at = ?
+        WHERE id = ? AND search_state = 'pending'`, [state, next, state === "pending" ? null : now, now, search.id]]]);
     },
     /**
      * Adds found issues to the erasure. A new one is keyed by its intent, the
@@ -365,20 +382,20 @@ const cleanupStore = (db: QueryDatabase) => {
       await run([
         ...found.flatMap(({ intentId, issue, createdAt }): Statement[] => [
           ...(offboarded ? [] : [[`UPDATE support_cleanup SET purpose = 'erasure', erasure_id = COALESCE(erasure_id, ?), state = 'redacting',
-            next_attempt_at = ?, window_started_at = ?, window_until = NULL, issues_json = ?, resolved_at = NULL
+            next_attempt_at = ?, window_started_at = ?, window_until = NULL, issues_json = ?, resolved_at = NULL, changed_at = ?
             WHERE intent_id = ? AND slot = ? AND state = 'unresolved'`,
-            [search.id, now, now, JSON.stringify([issue]), intentId, search.slot]] as Statement]),
+            [search.id, now, now, JSON.stringify([issue]), now, intentId, search.slot]] as Statement]),
           [`INSERT INTO support_cleanup (request_id, slot, purpose, erasure_id, recorded_at, state, next_attempt_at, window_started_at,
-              intent_id, github_installation_id, repository_id, attempt_started_at, attempt_ended_at, issues_json, outcome, residual, resolved_at)
-            SELECT ?, ?, 'erasure', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+              intent_id, github_installation_id, repository_id, attempt_started_at, attempt_ended_at, issues_json, outcome, residual, resolved_at, changed_at)
+            SELECT ?, ?, 'erasure', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM support_cleanup WHERE intent_id = ?) AND NOT EXISTS (SELECT 1 FROM delivery_intent WHERE id = ?)
             ON CONFLICT DO NOTHING`,
             [intentId, search.slot, search.id, now, offboarded ? "resolved" : "redacting", offboarded ? null : now, now, intentId,
               mapping.githubInstallationId, mapping.repositoryId, createdAt, createdAt, JSON.stringify(offboarded ? [] : [issue]),
-              offboarded ? "found" : null, offboarded ? "client_issue" : "", offboarded ? now : null, intentId, intentId]],
+              offboarded ? "found" : null, offboarded ? "client_issue" : "", offboarded ? now : null, now, intentId, intentId]],
         ]),
-        [`UPDATE erasure SET search_state = ?, search_next_at = NULL WHERE id = ? AND search_state = 'pending'`,
-          [incomplete ? "incomplete" : "done", search.id]],
+        [`UPDATE erasure SET search_state = ?, search_next_at = NULL, search_ended_at = ?, changed_at = ? WHERE id = ? AND search_state = 'pending'`,
+          [incomplete ? "incomplete" : "done", now, now, search.id]],
       ]);
     },
     async offboarded(slot: string) {
@@ -459,8 +476,7 @@ const redactRecord = (record: CleanupRecord, target: GitHubTarget, options: Clea
   now: () => number, retry: (at: number) => number) => Effect.gen(function* () {
   const [issue, ...rest] = issuesOf(record);
   if (!issue) return { state: "unresolved", next: null, error: "MissingIdentity" } satisfies Transition;
-  const key = options.digestKey, digest = record.title_digest;
-  const isDerivedTitle = key && digest ? async (title: string) => await titleDigest(key, record.intent_id!, title) === digest : null;
+  const isDerivedTitle = yield* Effect.promise(() => derivedTitleCheck(options.digestKey, record.intent_id!, record.title_digest));
   const result = yield* Effect.result(supportIssues.redact(target, record.intent_id!, issue, isDerivedTitle, authorize));
   if (Result.isSuccess(result)) {
     const done = result.success;
@@ -517,14 +533,14 @@ const processRecord = (record: CleanupRecord, store: Store, options: CleanupOpti
 const searchErasure = (search: PendingSearch, store: Store, options: CleanupOptions, now: () => number) => Effect.gen(function* () {
   const mapping = mappingFor(options.mappings, search.slot);
   const reference = search.reporter_reference;
-  if (!mapping?.githubInstallationId || !reference) return yield* io(() => store.searched(search, "failed", null));
+  if (!mapping?.githubInstallationId || !reference) return yield* io(() => store.searched(search, "failed", null, now()));
   const target = { installationId: mapping.githubInstallationId, repositoryId: mapping.repositoryId };
   const gateway = yield* GitHubGateway;
   const result = yield* Effect.result(gateway.searchIssues(target, `in:body "${reference}" author:app/${options.botLogin.replace(/\[bot\]$/, "")}`));
   if (Result.isFailure(result)) {
     const error = result.failure;
-    if (now() >= search.recorded_at + DAY) return yield* io(() => store.searched(search, "failed", null));
-    return yield* io(() => store.searched(search, "pending", Math.max(now() + SEARCH_RETRY_MS, error._tag === "RateLimited" ? error.until : 0)));
+    if (now() >= search.recorded_at + DAY) return yield* io(() => store.searched(search, "failed", null, now()));
+    return yield* io(() => store.searched(search, "pending", Math.max(now() + SEARCH_RETRY_MS, error._tag === "RateLimited" ? error.until : 0), now()));
   }
   const found = result.success.issues.flatMap((issue): FoundIssue[] => {
     const intentId = attributedIntent(issue, reference, options.botLogin);

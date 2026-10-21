@@ -20,3 +20,13 @@ minimumReleaseAgeExclude:
   - workerd@1.20260916.1
   - wrangler@4.133.0
   - '@cloudflare/workers-types@5.20260916.1'
+# Lift transitive dependencies whose parents pin a version with a high advisory to the first
+# patched release on the same line (scripts/ci/dependency-audit.mjs). Drop an entry once every
+# parent allows a patched version; `pnpm audit` then finds nothing to lift.
+overrides:
+  '@hono/node-server@<1.19.10': ^1.19.10 # GHSA-wc8c-qw6v-h7f6, via alchemy > @prisma/dev
+  'hono@<4.12.25': ^4.12.25 # GHSA-q5qw-h33p-qvwr, GHSA-88fw-hqm2-52qc, via alchemy
+  'lodash@<4.18.1': ^4.18.1 # GHSA-r5fr-rjxr-66jc, via alchemy > @prisma/dev > chevrotain
+  'serialize-javascript@<7.0.3': ^7.0.3 # GHSA-5c6j-r48x-rmvq, via @wordpress/scripts > copy-webpack-plugin
+  'sharp@<0.35.5': ^0.35.5 # GHSA-wq5f-xc86-pv6w, via miniflare
+  'undici@>=7.0.0 <7.29.1': ^7.29.1 # GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3, via miniflare

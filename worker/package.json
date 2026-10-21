@@ -8,6 +8,7 @@
     "deploy": "alchemy deploy",
     "destroy": "node scripts/destroy.ts",
     "operator": "node scripts/operator.ts",
+    "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "load-test": "vitest run --config vitest.load.config.ts"

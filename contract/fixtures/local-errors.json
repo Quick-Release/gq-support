@@ -18,5 +18,11 @@
     "scenario": "not connected",
     "status": 503,
     "code": "gq_support_not_configured"
+  },
+  {
+    "scenario": "disabled",
+    "status": 503,
+    "code": "gq_support_disabled",
+    "retryable": false
   }
 ]

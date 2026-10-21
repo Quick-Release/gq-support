@@ -1,5 +1,6 @@
 import { sha256 } from "./signature.ts";
 import type { Quota, SlotStorage } from "./storage.ts";
+import { CONTEXT_LIMITS, canonicalContext, storedContext, utf8Bytes } from "./report-context.ts";
 
 /**
  * The verified installation's authority. It comes only from the signing key
@@ -59,6 +60,7 @@ export const notFound = () => error("gq_support_not_found", 404);
 export const PURGED_TEXT = `summary = '', description = '', title = '', reporter_subject = '', submission_id = id, body_digest = ''`;
 
 // PHP's trim(), which WordPress applies before forwarding, not JavaScript's wider one.
+// eslint-disable-next-line no-control-regex -- NUL and vertical tab are exactly PHP's set.
 const trim = (text: string) => text.replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, "");
 const characters = (text: string) => [...text].length;
 
@@ -92,11 +94,15 @@ interface Row {
   created_at: number;
   status: string | null;
   state: string;
+  /** Delivery-only Report context, read by the privacy export alone. */
+  context_json?: string | null;
 }
 
-const COLUMNS = `SELECT r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
-  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
+const FIELDS = `r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
+  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state`;
+const FROM = `FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
   WHERE r.slot = ?1 AND i.slot = ?1 AND r.erased_at IS NULL`;
+const COLUMNS = `SELECT ${FIELDS} ${FROM}`;
 
 const resource = (row: Row, caller: Caller) => ({
   id: row.id,
@@ -124,6 +130,10 @@ interface CreateInput {
   summary: string | null;
   description: string;
   supersedes_id: string | null;
+  /** The canonical reviewed Report context, or null for a context-free intent. */
+  context: string | null;
+  /** WordPress's review envelope expired: only an already accepted intent may be returned. */
+  reconcile_only: boolean;
 }
 
 const parseCreate = (body: string): CreateInput | null => {
@@ -132,20 +142,34 @@ const parseCreate = (body: string): CreateInput | null => {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const fields = data as Record<string, unknown>;
   // Scope comes from the key: a named Slot, Client, repository or installation is rejected.
-  if (Object.keys(fields).some((field) => !["submission_id", "summary", "description", "reporter_subject", "scope", "supersedes_id"].includes(field))) return null;
+  if (Object.keys(fields).some((field) => !["submission_id", "summary", "description", "reporter_subject", "scope", "supersedes_id",
+    "context", "reconcile_only"].includes(field))) return null;
   const { submission_id: submissionId, reporter_subject: subject, scope, description, summary } = fields;
   if (typeof submissionId !== "string" || !UUID4.test(submissionId) || typeof subject !== "string" || !UUID4.test(subject) ||
     scope !== "mine" || typeof description !== "string") return null;
   const supersedes = fields.supersedes_id;
   if (supersedes !== undefined && (typeof supersedes !== "string" || !new RegExp(`^${SUPPORT_REQUEST_ID}$`).test(supersedes))) return null;
+  const context = fields.context === undefined ? null : canonicalContext(fields.context);
+  if ((fields.context !== undefined && context === null) || (fields.reconcile_only !== undefined && fields.reconcile_only !== true)) return null;
   const text = trim(description);
   if (text === "" || characters(text) > DESCRIPTION_CHARACTERS) return null;
-  if (summary === undefined) return { submission_id: submissionId, reporter_subject: subject, summary: null, description: text, supersedes_id: supersedes ?? null };
+  const input = { submission_id: submissionId, reporter_subject: subject, description: text, supersedes_id: supersedes ?? null,
+    context, reconcile_only: fields.reconcile_only === true };
+  if (summary === undefined) return { ...input, summary: null };
   if (typeof summary !== "string") return null;
   const line = trim(summary);
   if (line === "" || characters(line) > SUMMARY_CHARACTERS || /[\r\n]/.test(line)) return null;
-  return { submission_id: submissionId, reporter_subject: subject, summary: line, description: text, supersedes_id: supersedes ?? null };
+  return { ...input, summary: line };
 };
+
+/**
+ * The immutable intent fingerprint. A context-free intent keeps the original
+ * fingerprint of its Submitted text, so intents accepted before Report context
+ * existed still reconcile. A review envelope's signature and expiry never
+ * take part: WordPress verifies the envelope and does not forward it.
+ */
+const fingerprint = (input: CreateInput) =>
+  sha256(JSON.stringify(input.context === null ? [input.summary, input.description] : [input.summary, input.description, input.context]));
 
 const findBySubmission = (storage: SlotStorage, input: CreateInput) =>
   storage.first<Row>(`${COLUMNS} AND r.reporter_subject = ?2 AND r.submission_id = ?3`, input.reporter_subject, input.submission_id);
@@ -172,9 +196,12 @@ const quotaWait = async (storage: SlotStorage, subject: string, now: number): Pr
 const create = async (storage: SlotStorage, caller: Caller, body: string, now: number): Promise<Response> => {
   const input = parseCreate(body);
   if (!input) return invalid();
+  if (input.context !== null && utf8Bytes(body) > CONTEXT_LIMITS.createBodyBytes) {
+    return error("request_too_large", 413);
+  }
   const limited = await throttle(storage, input.reporter_subject, now);
   if (limited) return limited;
-  const digest = await sha256(JSON.stringify([input.summary, input.description]));
+  const digest = await fingerprint(input);
   const replay = (row: Row) => row.body_digest === digest && row.supersedes_id === input.supersedes_id ? known(row, caller) : error("gq_support_idempotency_conflict", 409);
   const id = `req_${ulid(now)}`;
   const accepted: Row = {
@@ -189,6 +216,8 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
   try {
     const existing = await findBySubmission(storage, input);
     if (existing) return replay(existing);
+    // An expired review envelope never authorizes a new acceptance.
+    if (input.reconcile_only) return error("gq_support_context_expired", 412);
     if (caller.suspended) return error("gq_support_not_configured", 403);
     if (input.supersedes_id !== null && !await canSupersede()) return notFound();
     await storage.batch([
@@ -203,10 +232,10 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
       id, accepted.reporter_subject, accepted.submission_id, digest, accepted.summary, accepted.description, accepted.title,
       now, caller.installationId, caller.repositoryId, input.supersedes_id),
       storage.statement(`INSERT INTO delivery_intent (slot, id, request_id, kind, seq, state, next_attempt_at,
-        github_installation_id, environment, client_origin_label, default_developer, retry_deadline)
-        VALUES (?1, ?2, ?3, 'create', 0, 'pending', ?4, ?5, ?6, ?7, ?8, ?9)`, `int_${ulid(now)}`, id, now,
+        github_installation_id, environment, client_origin_label, default_developer, retry_deadline, context_json)
+        VALUES (?1, ?2, ?3, 'create', 0, 'pending', ?4, ?5, ?6, ?7, ?8, ?9, ?10)`, `int_${ulid(now)}`, id, now,
         caller.delivery?.githubInstallationId ?? null, caller.delivery?.environment ?? null,
-        caller.delivery?.clientOriginLabel ?? null, caller.delivery?.defaultDeveloper ?? null, now + DAY),
+        caller.delivery?.clientOriginLabel ?? null, caller.delivery?.defaultDeveloper ?? null, now + DAY, input.context),
       storage.statement("DELETE FROM intake_debit WHERE slot = ?1 AND debited_at <= ?2", now - DAY),
     ]);
   } catch {
@@ -322,8 +351,9 @@ const EXPORT_PAGE = 50;
 
 /**
  * `GET /v1/export`: the attested Reporter's own requests in this Slot, oldest
- * first, including superseded ones. Only what the Reporter submitted and its
- * outcome: no repository, issue, digest, Submission ID or installation.
+ * first, including superseded ones. Only what the Reporter submitted, any
+ * Report context the service still holds, and its outcome: no repository,
+ * issue, digest, Submission ID or installation.
  */
 export const handleExport = async (storage: SlotStorage, url: URL, body: string, now: number): Promise<Response> => {
   const params = queryOf(url, ["reporter_subject", "cursor"], ["reporter_subject"]);
@@ -334,12 +364,14 @@ export const handleExport = async (storage: SlotStorage, url: URL, body: string,
   if (!after) return invalid();
   const limited = await throttle(storage, subject, now);
   if (limited) return limited;
-  const rows = await storage.all<Row>(`${COLUMNS} AND r.reporter_subject = ?2 AND (r.created_at, r.id) > (?3, ?4)
+  // Only the export reads the delivery-only context the service still holds.
+  const rows = await storage.all<Row>(`SELECT ${FIELDS}, i.context_json ${FROM} AND r.reporter_subject = ?2 AND (r.created_at, r.id) > (?3, ?4)
     ORDER BY r.created_at, r.id LIMIT ?5`, subject, ...after, EXPORT_PAGE + 1);
   const items = rows.slice(0, EXPORT_PAGE);
   return json({
     items: items.map((row) => ({ id: row.id, summary: row.summary === "" ? null : row.summary, description: row.description,
-      created_at: new Date(row.created_at).toISOString(), delivery: DELIVERY[row.state], status: row.state === "delivered" ? row.status : null })),
+      created_at: new Date(row.created_at).toISOString(), delivery: DELIVERY[row.state], status: row.state === "delivered" ? row.status : null,
+      context: storedContext(row.context_json ?? null) })),
     next_cursor: rows.length > items.length ? encodeCursor(items[items.length - 1]!) : null,
   }, 200);
 };

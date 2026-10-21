@@ -1,0 +1,152 @@
+name: Compatibility
+
+# Runtime cells beyond the pull-request matrix (.github/runtime-matrix.json). Nightly: the
+# scheduled cells (previous WordPress minor, MySQL/MariaDB, persistent object cache, subdomain
+# multisite, Firefox, WebKit) plus nonblocking canaries (WordPress nightly, PHP 8.5, floating
+# latest releases) and the pin discovery report. Before a release, release-plugin.yml calls it
+# with the pull-request and scheduled cells, which must all pass. Canaries never block: promoting
+# one means pinning it in a reviewed change to the runtime matrix.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      tiers:
+        description: Space-separated tiers to run (pr, scheduled, canary)
+        default: scheduled canary
+        type: string
+  workflow_call:
+    inputs:
+      tiers:
+        description: Space-separated tiers to run (pr, scheduled, canary)
+        default: pr scheduled
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan compatibility cells
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tiers: ${{ steps.plan.outputs.tiers }}
+      pr: ${{ steps.plan.outputs.pr }}
+      scheduled: ${{ steps.plan.outputs.scheduled }}
+      canary: ${{ steps.plan.outputs.canary }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      - name: Runtime policy and cells
+        id: plan
+        env:
+          # A scheduled run has no inputs.
+          TIERS: ${{ inputs.tiers || 'scheduled canary' }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/runtime-matrix.mjs policy
+          tiers='[]'
+          for tier in $TIERS; do
+            cells=$(node scripts/ci/runtime-matrix.mjs cells "$tier")
+            echo "$tier=$cells" >> "$GITHUB_OUTPUT"
+            tiers=$(jq -c --arg tier "$tier" '. + [$tier]' <<<"$tiers")
+          done
+          echo "tiers=$tiers" >> "$GITHUB_OUTPUT"
+
+  pr:
+    name: ${{ matrix.cell.name }}
+    needs: plan
+    if: contains(needs.plan.outputs.tiers, '"pr"')
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.plan.outputs.pr) }}
+    uses: ./.github/workflows/wordpress-lane.yml
+    with:
+      cell: ${{ toJSON(matrix.cell) }}
+
+  scheduled:
+    name: ${{ matrix.cell.name }}
+    needs: plan
+    if: contains(needs.plan.outputs.tiers, '"scheduled"')
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.plan.outputs.scheduled) }}
+    uses: ./.github/workflows/wordpress-lane.yml
+    with:
+      cell: ${{ toJSON(matrix.cell) }}
+
+  canary:
+    name: ${{ matrix.cell.name }}
+    needs: plan
+    if: contains(needs.plan.outputs.tiers, '"canary"')
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.plan.outputs.canary) }}
+    uses: ./.github/workflows/wordpress-lane.yml
+    with:
+      cell: ${{ toJSON(matrix.cell) }}
+
+  # Floating discovery: a failure means a pin is behind upstream; update the runtime matrix in a reviewed PR.
+  discovery:
+    name: Upstream releases versus pins
+    needs: plan
+    if: contains(needs.plan.outputs.tiers, '"canary"')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - run: node scripts/ci/runtime-matrix.mjs discover
+
+  # The blocking verdict for a release. Canary and discovery results are deliberately not inputs.
+  result:
+    name: Compatibility result
+    if: always()
+    needs: [plan, pr, scheduled]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      - name: Collect runtime reports
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: runtime-*
+          path: runtime-results
+          merge-multiple: true
+
+      - name: Resolved runtime matrix
+        continue-on-error: true
+        run: node scripts/ci/runtime-matrix.mjs resolved runtime-results
+
+      - name: Keep the resolved runtime matrix
+        continue-on-error: true
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: resolved-compatibility-matrix
+          path: runtime-results/resolved-matrix.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Verdict
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          AFFECTED: ${{ needs.plan.outputs.tiers }}
+          JOBS: '{"plan":"always","pr":"pr","scheduled":"scheduled"}'
+          TITLE: Compatibility result
+        run: node scripts/ci/required-validation.mjs
