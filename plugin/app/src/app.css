@@ -4,13 +4,13 @@
 .gq-support-close { background: transparent; border: 0; color: #1d2327; cursor: pointer; font-size: 26px; min-width: 44px; min-height: 44px; }
 .gq-support-tabs { display: flex; gap: 8px; margin: 16px 0; border-bottom: 1px solid #8c8f94; }
 .gq-support-tab { background: transparent; border: 0; padding: 8px; color: #1d2327; cursor: pointer; }
-.gq-support-tab[aria-selected="true"] { border-bottom: 3px solid var(--wp-admin-theme-color, #135e96); font-weight: 700; }
+.gq-support-tab[aria-selected="true"] { border-bottom: 3px solid var(--gq-support-accent, #135e96); font-weight: 700; }
 .gq-support-label { display: block; margin: 12px 0 4px; font-weight: 600; }
 .gq-support-field { box-sizing: border-box; display: block; width: 100%; padding: 8px; color: #1d2327; background: #fff; border: 1px solid #8c8f94; }
 .gq-support-description { min-height: 120px; resize: vertical; }
-.gq-support-close:focus-visible, .gq-support-tab:focus-visible, .gq-support-field:focus-visible, .gq-support-submit:focus-visible, .gq-support-link:focus-visible, .gq-support-refresh:focus-visible, .gq-support-item-toggle:focus-visible, .gq-support-scope select:focus-visible { outline: 3px solid var(--wp-admin-theme-color, #135e96); outline-offset: 2px; }
+.gq-support-close:focus-visible, .gq-support-tab:focus-visible, .gq-support-field:focus-visible, .gq-support-submit:focus-visible, .gq-support-link:focus-visible, .gq-support-refresh:focus-visible, .gq-support-item-toggle:focus-visible, .gq-support-scope select:focus-visible { outline: 3px solid var(--gq-support-accent, #135e96); outline-offset: 2px; }
 .gq-support-submit { margin-top: 16px; min-height: 44px; background: #1d2327; color: #fff; border: 0; padding: 8px 16px; cursor: pointer; }
-.gq-support-link { background: transparent; border: 0; padding: 0; color: var(--wp-admin-theme-color, #135e96); text-decoration: underline; cursor: pointer; }
+.gq-support-link { background: transparent; border: 0; padding: 0; color: var(--gq-support-accent, #135e96); text-decoration: underline; cursor: pointer; }
 .gq-support-error { color: #8a2424; font-weight: 600; }
 .gq-support-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 .gq-support-refresh { min-height: 32px; background: #fff; color: #1d2327; border: 1px solid #8c8f94; padding: 4px 12px; cursor: pointer; margin-inline-start: auto; }
@@ -27,6 +27,6 @@
 .gq-support-context { margin: 12px 0 0; padding: 0; border: 0; min-width: 0; }
 .gq-support-context-list { list-style: none; margin: 0 0 8px; padding: 0; }
 .gq-support-context-list li { margin: 4px 0; overflow-wrap: anywhere; }
-.gq-support-context-list input:focus-visible { outline: 3px solid var(--wp-admin-theme-color, #135e96); outline-offset: 2px; }
+.gq-support-context-list input:focus-visible { outline: 3px solid var(--gq-support-accent, #135e96); outline-offset: 2px; }
 /* Fixed to the viewport so the sheet spans the layout width, excluding any scrollbar. */
 @media (max-width: 782px) { .gq-support-panel { position: fixed; inset-inline: 0; width: auto; max-height: calc(100dvh - 64px); bottom: 64px; border-radius: 8px 8px 0 0; } }

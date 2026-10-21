@@ -204,8 +204,10 @@ test('a send lost offline, or acknowledged and lost, reconciles under one key', 
   const urls: string[] = [];
   page.on('request', (request) => urls.push(request.url()));
   const { creates } = await stubCreates(page, (attempt, payload) => attempt < 3 ? { status: 0, abort: true } : { status: 202, body: receipt(payload, 'accepted-pending') });
-  await open(page, 'Report text 4821');
-  await page.getByRole('textbox', { name: 'Summary (optional)' }).fill('Summary 4821');
+  // Non-hex letters, so a random hex token in a URL (the session hash, a nonce) can never match it.
+  const marker = 'qzx4821';
+  await open(page, `Report text ${marker}`);
+  await page.getByRole('textbox', { name: 'Summary (optional)' }).fill(`Summary ${marker}`);
   await page.clock.install();
   await send(page);
   await expect(message(page)).toHaveText('Checking…');
@@ -218,11 +220,11 @@ test('a send lost offline, or acknowledged and lost, reconciles under one key', 
   expect(creates[1]).toEqual(creates[0]);
   expect(creates[2]).toEqual(creates[0]);
   // The frozen intent: the text, and the Report context reviewed for its Submission ID.
-  expect(creates[0]).toEqual({ summary: 'Summary 4821', description: 'Report text 4821', submission_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+  expect(creates[0]).toEqual({ summary: `Summary ${marker}`, description: `Report text ${marker}`, submission_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
     context: { schema: 1, default: expect.objectContaining({ originating_screen: 'dashboard' }) }, context_review: expect.stringMatching(/^v1\./) });
   // Report text travels only in request bodies, and nothing is kept in browser storage.
-  expect(urls.filter((url) => decodeURIComponent(url).includes('4821'))).toEqual([]);
-  expect(await page.evaluate(() => [Object.values(localStorage), Object.values(sessionStorage), document.cookie].flat().join(' '))).not.toContain('4821');
+  expect(urls.filter((url) => decodeURIComponent(url).includes(marker))).toEqual([]);
+  expect(await page.evaluate(() => [Object.values(localStorage), Object.values(sessionStorage), document.cookie].flat().join(' '))).not.toContain(marker);
 });
 
 test('a conflict after an uncertain send never recreates the report under a new key', async ({ page }) => {
