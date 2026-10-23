@@ -113,6 +113,32 @@ it("erasure before dispatch suppresses the create and completes after purging", 
   expect(posts()).toHaveLength(0);
 });
 
+it("a pending status change is suppressed with its request, drains with it and is purged by the erasure", async () => {
+  const request = await accept();
+  await sweep();
+  advance(60_000);
+  const changed = await installation.send("POST", `/v1/requests/${request.id}/status`, JSON.stringify({
+    change_id: crypto.randomUUID(), status: "closed", reporter_subject: subject, scope: "mine" }));
+  expect(changed.status).toBe(202);
+  // A claimed status change's live lease holds the capture until it drains.
+  await db().prepare("UPDATE delivery_intent SET owner = 'other', lease_expires_at = ? WHERE seq = 1").bind(now + 60_000).run();
+  const erasure = await erase();
+  await cleanup();
+  expect(await cleanupRow(request.id)).toMatchObject({ state: "draining" });
+  await db().prepare("UPDATE delivery_intent SET owner = NULL, lease_expires_at = NULL WHERE seq = 1").run();
+  await sweep();
+  await cleanup();
+  advance(10_000);
+  await cleanup();
+  expectRedacted(github.issues[0]!, "Support request (erased)");
+  // The redaction's PATCH only: the suppressed close was never sent.
+  expect(patches().map((request) => Object.keys(request.body as object).sort())).toEqual([["body", "title"]]);
+  expect(github.issues[0]!.state).toBe("open");
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ counts: { redacted: 1, pending: 0 } });
+  await expectMinimal(request.id);
+  expect((await db().prepare("SELECT COUNT(*) AS n FROM intake_debit WHERE subject LIKE ?").bind(`%${subject}`).first<{ n: number }>())!.n).toBe(0);
+});
+
 it("an authorized create drains, then its issue is redacted and retitled", async () => {
   const request = await accept();
   let erasure = "";

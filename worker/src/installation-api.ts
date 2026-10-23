@@ -106,7 +106,8 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     const enrollment = request.method === "POST" && url.pathname === "/v1/enroll" && !url.search;
     const installation = ["GET", "DELETE"].includes(request.method) && url.pathname === "/v1/installation" && !url.search;
     const create = request.method === "POST" && url.pathname === "/v1/requests";
-    const requests = create || (request.method === "GET" && /^\/v1\/requests(?:\/[^/]+)?$/.test(url.pathname));
+    const statusChange = request.method === "POST" && /^\/v1\/requests\/[^/]+\/status$/.test(url.pathname);
+    const requests = create || statusChange || (request.method === "GET" && /^\/v1\/requests(?:\/[^/]+)?$/.test(url.pathname));
     const erasures = (request.method === "POST" && url.pathname === "/v1/erasures") ||
       (request.method === "GET" && /^\/v1\/erasures\/[^/]+$/.test(url.pathname));
     const exported = request.method === "GET" && url.pathname === "/v1/export";

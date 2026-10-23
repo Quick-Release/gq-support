@@ -120,8 +120,8 @@ it("never recreates after a complete negative reconciliation or its automatic wi
 it("concurrent wake-ups permit one create and preserve dependent sequence order", async () => {
   const request = await accept();
   const db = stage.databases.shared;
-  await db.prepare(`INSERT INTO delivery_intent (id, slot, request_id, kind, seq, state, next_attempt_at, retry_deadline)
-    VALUES ('int_DEPENDENT', ?, ?, 'create', 1, 'pending', ?, ?)`).bind(mapping.slot, request.id, now, now + 86_400_000).run();
+  await db.prepare(`INSERT INTO delivery_intent (id, slot, request_id, kind, seq, state, next_attempt_at, retry_deadline, change_id)
+    VALUES ('int_DEPENDENT', ?, ?, 'close', 1, 'pending', ?, ?, ?)`).bind(mapping.slot, request.id, now, now + 86_400_000, crypto.randomUUID()).run();
   await Promise.all(Array.from({ length: 8 }, () => sweep()));
   expect(github.issues).toHaveLength(1);
   expect(await read(request.id)).toMatchObject({ delivery: 'delivered' });

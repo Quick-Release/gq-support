@@ -16,7 +16,7 @@ const OTHER_REPORTER = "22222222-2222-4222-8222-222222222222";
 const SUBMISSION = "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11";
 const submissionId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const CONTEXT = { schema: 1, default: { wp_version: "6.5.5", support_plugin_version: "0.1.8", originating_screen: "post-editor" } };
-const PUBLIC_FIELDS = ["id", "submission_id", "title", "summary", "description", "created_at", "delivery", "status"];
+const PUBLIC_FIELDS = ["id", "submission_id", "title", "summary", "description", "created_at", "delivery", "status", "status_change"];
 
 let stage: Awaited<ReturnType<typeof localStage<"shared">>>;
 let db: D1Database;

@@ -234,10 +234,13 @@ export const makeFakeGitHub = () => {
       if (!issue) return message(404, "Not Found");
       if (issue.movedTo) return new Response(null, { status: 301, headers: { location: issue.movedTo } });
       if (issue.deleted) return message(410, "This issue was deleted");
-      const body = request.body as { title?: string; body?: string };
+      const body = request.body as { title?: string; body?: string; state?: string };
       if (body.title === "") return json({ message: "Validation Failed", errors: [{ resource: "Issue", code: "missing_field", field: "title" }] }, 422);
+      if (body.state !== undefined && body.state !== "open" && body.state !== "closed") {
+        return json({ message: "Validation Failed", errors: [{ resource: "Issue", code: "invalid", field: "state" }] }, 422);
+      }
       Object.assign(issue, body.title === undefined ? {} : { title: body.title }, body.body === undefined ? {} : { body: body.body },
-        { updated_at: iso(now) });
+        body.state === undefined ? {} : { state: body.state }, { updated_at: iso(now) });
       return json(issueJson(issue));
     }
     if (one && request.method === "GET") {

@@ -34,6 +34,14 @@ export const REPORTER_QUOTAS: readonly Quota[] = [{ windowMs: TEN_MINUTES, limit
 export const SLOT_QUOTAS: readonly Quota[] = [{ windowMs: TEN_MINUTES, limit: 20 }, { windowMs: DAY, limit: 100 }];
 /** The subject of the Slot's own budget, as opposed to a Reporter's. */
 const SLOT_BUDGET = "";
+/**
+ * Status changes (ADR 0020) spend their own budgets, so toggling a request
+ * cannot exhaust report intake, nor intake block a close. Starting limits.
+ */
+export const STATUS_REPORTER_QUOTAS: readonly Quota[] = [{ windowMs: TEN_MINUTES, limit: 10 }, { windowMs: DAY, limit: 30 }];
+export const STATUS_SLOT_QUOTAS: readonly Quota[] = [{ windowMs: TEN_MINUTES, limit: 30 }, { windowMs: DAY, limit: 100 }];
+/** Prefixes a status budget's subject; erasure removes the Reporter's with their intake debits. */
+export const STATUS_BUDGET = "status:";
 // Fixed ten-minute budgets for every call, so same-key lookups and reads stay
 // bounded. Chosen for #32, not by a design decision: revisit after load testing.
 export const REPORTER_REQUESTS = 120;
@@ -94,15 +102,29 @@ interface Row {
   created_at: number;
   status: string | null;
   state: string;
+  tracking: string;
+  /** The latest status change's seq, or 0: the change_* fields then describe the create. */
+  change_seq: number;
+  change_kind: string;
+  change_state: string;
+  change_id: string | null;
   /** Delivery-only Report context, read by the privacy export alone. */
   context_json?: string | null;
 }
 
 const FIELDS = `r.id, r.reporter_subject, r.submission_id, r.body_digest, r.summary, r.description, r.title,
-  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state`;
+  r.created_at, r.status, r.supersedes_id, r.superseded_at, i.state, r.tracking, r.change_seq,
+  c.kind AS change_kind, c.state AS change_state, c.change_id`;
+// `c` is the latest status change, or the create again when there is none, so no row is lost to a missing join.
 const FROM = `FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
-  WHERE r.slot = ?1 AND i.slot = ?1 AND r.erased_at IS NULL`;
+  JOIN delivery_intent c ON c.request_id = r.id AND c.seq = r.change_seq
+  WHERE r.slot = ?1 AND i.slot = ?1 AND c.slot = ?1 AND r.erased_at IS NULL`;
 const COLUMNS = `SELECT ${FIELDS} ${FROM}`;
+
+const STATUS_KINDS = { closed: "close", open: "reopen" } as const;
+type StatusChange = { readonly change_id: string; readonly status: "open" | "closed"; readonly delivery: string };
+const statusChange = (kind: string, state: string, changeId: string | null): StatusChange =>
+  ({ change_id: changeId!, status: kind === "close" ? "closed" : "open", delivery: DELIVERY[state]! });
 
 const resource = (row: Row, caller: Caller) => ({
   id: row.id,
@@ -113,6 +135,8 @@ const resource = (row: Row, caller: Caller) => ({
   created_at: new Date(row.created_at).toISOString(),
   delivery: DELIVERY[row.state],
   status: row.state === "delivered" ? row.status : null,
+  // The latest close or reopen and its own delivery outcome, never a Support status of its own (ADR 0020).
+  status_change: row.change_seq > 0 ? statusChange(row.change_kind, row.change_state, row.change_id) : null,
   // Server-only ownership metadata; WordPress verifies and strips it. The
   // installation is the verified caller, so history survives re-enrollment (ADR 0014).
   installation_id: caller.installationId,
@@ -175,9 +199,9 @@ const findBySubmission = (storage: SlotStorage, input: CreateInput) =>
   storage.first<Row>(`${COLUMNS} AND r.reporter_subject = ?2 AND r.submission_id = ?3`, input.reporter_subject, input.submission_id);
 
 /** Milliseconds until every exceeded quota has room again: 0 when none is exceeded. */
-const quotaWait = async (storage: SlotStorage, subject: string, now: number): Promise<number> => {
+const quotaWait = async (storage: SlotStorage, budgets: readonly (readonly [string, readonly Quota[]])[], now: number): Promise<number> => {
   let wait = 0;
-  for (const [key, quotas] of [[subject, REPORTER_QUOTAS], [SLOT_BUDGET, SLOT_QUOTAS]] as const) {
+  for (const [key, quotas] of budgets) {
     const limit = Math.max(...quotas.map((quota) => quota.limit));
     const debits = await storage.all<{ debited_at: number }>(`SELECT debited_at FROM intake_debit
       WHERE slot = ?1 AND subject = ?2 AND debited_at > ?3 ORDER BY debited_at DESC LIMIT ?4`, key, now - DAY, limit);
@@ -208,6 +232,7 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
     id, reporter_subject: input.reporter_subject, submission_id: input.submission_id, body_digest: digest,
     summary: input.summary ?? "", description: input.description, title: titleFor(input.summary, input.description),
     created_at: now, status: null, state: "pending", supersedes_id: input.supersedes_id, superseded_at: null,
+    tracking: "active", change_seq: 0, change_kind: "create", change_state: "pending", change_id: null,
   };
   const canSupersede = async () => {
     const predecessor = await storage.first<Row>(`${COLUMNS} AND r.id = ?2 AND r.reporter_subject = ?3`, input.supersedes_id, input.reporter_subject);
@@ -248,7 +273,7 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
     }
     // A full quota fails the debit's NOT NULL constraint; recount rather than parse the error.
     let wait = 0;
-    try { wait = await quotaWait(storage, input.reporter_subject, now); } catch { /* not accepted either way */ }
+    try { wait = await quotaWait(storage, [[input.reporter_subject, REPORTER_QUOTAS], [SLOT_BUDGET, SLOT_QUOTAS]], now); } catch { /* not accepted either way */ }
     return wait > 0
       ? error("gq_support_rate_limited", 429, { "Retry-After": String(Math.ceil(wait / 1000)) })
       : error("gq_support_not_accepted", 503);
@@ -347,6 +372,92 @@ const read = async (storage: SlotStorage, caller: Caller, url: URL, id: string, 
   return json(resource(row, caller), 200);
 };
 
+interface ChangeInput {
+  readonly change_id: string;
+  readonly status: "open" | "closed";
+  readonly subject: string;
+  readonly site: boolean;
+}
+
+/** Exactly the browser's two fields and the attested identity WordPress adds. */
+const parseChange = (body: string): ChangeInput | null => {
+  let data: unknown;
+  try { data = JSON.parse(body); } catch { return null; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const fields = data as Record<string, unknown>;
+  const keys = ["change_id", "status", "reporter_subject", "scope"];
+  if (Object.keys(fields).length !== keys.length || !keys.every((key) => key in fields)) return null;
+  const { change_id: changeId, status, reporter_subject: subject, scope } = fields;
+  return typeof changeId === "string" && UUID4.test(changeId) && (status === "open" || status === "closed") &&
+    typeof subject === "string" && UUID4.test(subject) && (scope === "mine" || scope === "site")
+    ? { change_id: changeId, status, subject, site: scope === "site" } : null;
+};
+
+/** A change is answered with the change it names: 200 once delivered, otherwise 202. */
+const changed = (row: Row, caller: Caller, change: StatusChange) =>
+  json({ ...resource(row, caller), status_change: change }, change.delivery === "delivered" ? 200 : 202);
+
+/**
+ * `POST /v1/requests/{id}/status`: one Reporter close or reopen (ADR 0020),
+ * idempotent per request and Change ID. It is accepted only after the create
+ * was delivered and every earlier change resolved, so intents stay in order.
+ * The Support status itself stays GitHub's.
+ */
+const changeStatus = async (storage: SlotStorage, caller: Caller, id: string, body: string, now: number): Promise<Response> => {
+  const input = parseChange(body);
+  if (!input) return invalid();
+  const limited = await throttle(storage, input.subject, now);
+  if (limited) return limited;
+  if (!new RegExp(`^${SUPPORT_REQUEST_ID}$`).test(id)) return notFound();
+  const current = async () => {
+    const row = await storage.first<Row>(`${COLUMNS} AND r.id = ?2`, id);
+    // Unknown and out-of-scope requests look the same; a site grant covers this installation only.
+    return row && (input.site || row.reporter_subject === input.subject) ? row : null;
+  };
+  const named = () => storage.first<{ kind: string; state: string; change_id: string }>(`SELECT kind, state, change_id FROM delivery_intent
+    WHERE slot = ?1 AND request_id = ?2 AND change_id = ?3`, id, input.change_id);
+  const replay = (row: Row, intent: { kind: string; state: string; change_id: string }) => intent.kind === STATUS_KINDS[input.status]
+    ? changed(row, caller, statusChange(intent.kind, intent.state, intent.change_id)) : error("gq_support_idempotency_conflict", 409);
+  const row = await current();
+  if (!row) return notFound();
+  const existing = await named();
+  if (existing) return replay(row, existing);
+  if (caller.suspended) return error("gq_support_not_configured", 403);
+  if (row.state !== "delivered" || row.status === null || row.tracking !== "active") return error("gq_support_change_not_allowed", 409);
+  if (row.change_seq > 0 && !["delivered", "failed"].includes(row.change_state)) return error("gq_support_change_pending", 409);
+  const seq = row.change_seq + 1;
+  const kind = STATUS_KINDS[input.status];
+  const budgets = [[STATUS_BUDGET + input.subject, STATUS_REPORTER_QUOTAS], [STATUS_BUDGET, STATUS_SLOT_QUOTAS]] as const;
+  try {
+    await storage.batch([
+      ...budgets.map(([key, quotas]) => storage.debitIntake(key, now, quotas)),
+      // Moves only from the value read above: a concurrent change makes it change nothing.
+      storage.statement("UPDATE support_request SET change_seq = ?2 WHERE slot = ?1 AND id = ?3 AND change_seq = ?4", seq, id, row.change_seq),
+      // Keep this INSERT immediately after that UPDATE: changes() fences a lost race by failing state's NOT NULL constraint.
+      storage.statement(`INSERT INTO delivery_intent (slot, id, request_id, kind, seq, state, next_attempt_at,
+        github_installation_id, environment, client_origin_label, default_developer, retry_deadline, change_id)
+        VALUES (?1, ?2, ?3, ?4, ?5, CASE WHEN changes() = 1 THEN 'pending' END, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
+      `int_${ulid(now)}`, id, kind, seq, now, caller.delivery?.githubInstallationId ?? null, caller.delivery?.environment ?? null,
+      caller.delivery?.clientOriginLabel ?? null, caller.delivery?.defaultDeveloper ?? null, now + DAY, input.change_id),
+      storage.statement("DELETE FROM intake_debit WHERE slot = ?1 AND debited_at <= ?2", now - DAY),
+    ]);
+  } catch {
+    // The commit may have happened, or another change won: only a primary read can tell.
+    try {
+      const intent = await named();
+      const latest = await current();
+      if (intent && latest) return replay(latest, intent);
+      if (latest && latest.change_seq !== row.change_seq) return error("gq_support_change_pending", 409);
+      const wait = await quotaWait(storage, budgets, now);
+      if (wait > 0) return error("gq_support_rate_limited", 429, { "Retry-After": String(Math.ceil(wait / 1000)) });
+    } catch {
+      return error("gq_support_outcome_unknown", 504);
+    }
+    return error("gq_support_not_accepted", 503);
+  }
+  return changed(row, caller, { change_id: input.change_id, status: input.status, delivery: "accepted-pending" });
+};
+
 const EXPORT_PAGE = 50;
 
 /**
@@ -376,10 +487,17 @@ export const handleExport = async (storage: SlotStorage, url: URL, body: string,
   }, 200);
 };
 
-/** `POST /v1/requests`, `GET /v1/requests` and `GET /v1/requests/{id}`, after authentication. */
+/**
+ * `POST /v1/requests`, `GET /v1/requests`, `GET /v1/requests/{id}` and
+ * `POST /v1/requests/{id}/status`, after authentication.
+ */
 export const handleSupportRequests = (request: Request, url: URL, body: string, storage: SlotStorage, caller: Caller, now: number): Promise<Response> => {
-  // Scope comes from the key: a create names nothing in its query either.
-  if (request.method === "POST") return url.search ? Promise.resolve(invalid()) : create(storage, caller, body, now);
+  // Scope comes from the key: a write names nothing in its query either.
+  if (request.method === "POST") {
+    if (url.search) return Promise.resolve(invalid());
+    const changing = /^\/v1\/requests\/([^/]+)\/status$/.exec(url.pathname)?.[1];
+    return changing === undefined ? create(storage, caller, body, now) : changeStatus(storage, caller, changing, body, now);
+  }
   if (body !== "") return Promise.resolve(invalid());
   const id = /^\/v1\/requests\/([^/]+)$/.exec(url.pathname)?.[1];
   return id === undefined ? list(storage, caller, url, now) : read(storage, caller, url, id, now);

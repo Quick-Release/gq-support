@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import { sha256 } from "./signature.ts";
-import { GitHubGateway, OutcomeUnknown, ValidationRejected, type GitHubIssue, type GitHubTarget, type ReadIssueError } from "./github-gateway.ts";
+import { GitHubGateway, OutcomeUnknown, ProviderUnavailable, ValidationRejected, type GitHubIssue, type GitHubTarget,
+  type ReadIssueError } from "./github-gateway.ts";
 import { contextSection } from "./report-context.ts";
 
 /** Trusted, pinned delivery inputs. Never construct these from Reporter request fields. */
@@ -141,6 +142,23 @@ export const supportIssues = {
     if (after._tag !== "Fresh" || !sameIdentity(after.issue, identity)) return { _tag: "NeedsReview" } as const;
     return { _tag: after.issue.labels.includes(intent.clientOriginLabel) && after.issue.assignees.includes(intent.defaultDeveloper)
       ? "Repaired" : "RepairPending" } as const;
+  }),
+
+  /**
+   * One status change on the delivered issue (ADR 0020). Caller owns
+   * authorization, fencing and the reconciliation of an OutcomeUnknown.
+   */
+  changeStatus: (target: GitHubTarget, identity: IssueIdentity, state: "open" | "closed", authorize?: Effect.Effect<void, OutcomeUnknown>) =>
+    Effect.gen(function* () {
+      const gateway = yield* GitHubGateway;
+      const issue = yield* gateway.setIssueState(target, identity.number, state, authorize);
+      return sameIdentity(issue, identity) ? issue : yield* Effect.fail(new OutcomeUnknown());
+    }),
+  /** The delivered issue as GitHub has it now: a status change's read-only reconciliation. */
+  observe: (target: GitHubTarget, identity: IssueIdentity) => Effect.gen(function* () {
+    const gateway = yield* GitHubGateway;
+    const read = yield* gateway.readIssue(target, identity.number);
+    return read._tag === "Fresh" && sameIdentity(read.issue, identity) ? read.issue : yield* Effect.fail(new ProviderUnavailable({ status: null }));
   }),
 
   /**

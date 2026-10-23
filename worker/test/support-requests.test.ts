@@ -21,7 +21,7 @@ const REPORTER_1 = "11111111-1111-4111-8111-111111111111";
 const REPORTER_2 = "22222222-2222-4222-8222-222222222222";
 const SUBMISSION = "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11";
 const submissionId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const PUBLIC_FIELDS = ["id", "submission_id", "title", "summary", "description", "created_at", "delivery", "status"];
+const PUBLIC_FIELDS = ["id", "submission_id", "title", "summary", "description", "created_at", "delivery", "status", "status_change"];
 
 let stage: Awaited<ReturnType<typeof localStage<"shared">>>;
 let db: D1Database;
@@ -77,7 +77,7 @@ describe("accepting a Support request", () => {
     expect(resource).toEqual({
       id: expect.stringMatching(/^req_[0-9A-HJKMNP-TV-Z]{26}$/), submission_id: SUBMISSION, title: "Checkout broken",
       summary: "Checkout broken", description: "Checkout does nothing", created_at: expect.any(String),
-      delivery: "accepted-pending", status: null, installation_id: "installation-a", reporter_subject: REPORTER_1,
+      delivery: "accepted-pending", status: null, status_change: null, installation_id: "installation-a", reporter_subject: REPORTER_1,
     });
     expect(new Date(resource.created_at as string).toISOString()).toBe(resource.created_at);
     const intent = await db.prepare("SELECT slot, kind, seq, state FROM delivery_intent").all();
