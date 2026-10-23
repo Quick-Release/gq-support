@@ -299,11 +299,61 @@ final class GQ_Support_REST {
 			return self::error( 'gq_support_outcome_unknown', 504, $retry_key );
 		}
 
+		// Notify only after the complete response, ownership and create correlation are validated.
+		foreach ( ( ! $create && ! $request['id'] ) ? $body['items'] : array( $body ) as $observed ) {
+			self::observe( $observed, $create );
+		}
+
 		$response = new WP_REST_Response( $body, $result['status'] );
 		if ( 201 === $result['status'] ) {
 			$response->header( 'Location', rest_url( 'gq-support/v1/requests/' . rawurlencode( $body['id'] ) ) );
 		}
 		return $response;
+	}
+
+	/**
+	 * Confirmed observations during explicit operations only. Terminal outcomes
+	 * confirm a transition out of pending; independent observations may repeat.
+	 * No local event ledger, background subscription or exactly-once guarantee.
+	 *
+	 * @param array{id: string, delivery: string} $observed Validated public resource.
+	 * @param bool                                $create   Successful create/replay.
+	 */
+	private static function observe( array $observed, bool $create ): void {
+		$id      = $observed['id'];
+		$outcome = $observed['delivery'];
+		if ( ! preg_match( '/^req_[0-9A-HJKMNP-TV-Z]{26}\z/', $id ) ) {
+			return;
+		}
+		if ( $create && in_array( $outcome, array( 'accepted-pending', 'delivered', 'failed' ), true ) ) {
+			try {
+				/**
+				 * A create or replay confirmed durable acceptance.
+				 *
+				 * @since 0.1.10
+				 * @param string $id      Public opaque Support request ID, never the Submission ID.
+				 * @param string $outcome Allowlisted confirmed delivery outcome.
+				 */
+				do_action( 'gq_support_report_accepted', $id, $outcome );
+			} catch ( Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- Preserve the confirmed result; WordPress hook state may remain unclean.
+				// Observer failures cannot undo acceptance; never log exception details.
+			}
+		}
+		if ( in_array( $outcome, array( 'delivered', 'failed' ), true ) ) {
+			try {
+				/**
+				 * An explicit support operation confirmed a terminal delivery transition.
+				 * Repeated observations can repeat this notification; callbacks must be idempotent.
+				 *
+				 * @since 0.1.10
+				 * @param string $id      Public opaque Support request ID.
+				 * @param string $outcome Delivered or failed; never an ambiguous outcome.
+				 */
+				do_action( 'gq_support_report_delivery_changed', $id, $outcome );
+			} catch ( Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- A callback cannot change the confirmed result.
+				// Keep the confirmed result, without exposing callback output or raw errors.
+			}
+		}
 	}
 
 	/**

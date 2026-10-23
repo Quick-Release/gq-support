@@ -71,15 +71,17 @@ foreach ( $gq_support_contacts as list( $gq_support_url, $gq_support_label, $gq_
 $gq_support_assert( null === GQ_Support_Fail_Safe::help() && ! GQ_Support_Fail_Safe::help_configured(), 'No contact is invented when none is configured.' );
 $gq_support_assert( ! GQ_Support_Fail_Safe::disabled(), 'Support is enabled unless GQ_SUPPORT_DISABLED is set.' );
 
-$gq_support_user           = wp_insert_user(
+$gq_support_user              = wp_insert_user(
 	array(
 		'user_login' => 'disabled-reporter-' . wp_generate_uuid4(),
 		'user_pass'  => wp_generate_password(),
+		'user_email' => 'disabled-reporter-' . wp_generate_uuid4() . '@example.test',
 		'role'       => 'subscriber',
 	)
 );
-$gq_support_original_state = GQ_Support_State::get();
-$gq_support_original_key   = get_option( GQ_Support_Signing_Key::OPTION );
+$gq_support_original_state    = GQ_Support_State::get();
+$gq_support_original_key      = get_option( GQ_Support_Signing_Key::OPTION );
+$gq_support_original_erasures = get_option( GQ_Support_Privacy::ERASURES_OPTION );
 try {
 	$gq_support_assert( is_array( $gq_support_fixture ) && 503 === $gq_support_fixture['status'] && 'gq_support_disabled' === $gq_support_fixture['code'], 'The shared fixture lists the fail-safe error.' );
 	$gq_support_assert( is_int( $gq_support_user ), 'Create Reporter.' );
@@ -155,13 +157,84 @@ try {
 	}
 	$gq_support_assert( GQ_Support_State::get() === $gq_support_state && get_option( GQ_Support_Signing_Key::OPTION ) === $gq_support_key, 'The fail-safe must not revoke, rotate or forget the Installation credential.' );
 
-	// Privacy calls fail like an unreachable service: never a claimed export or erasure.
+	$gq_support_assert( array() === $gq_support_seen, 'Disabled setup operations must not contact the service.' );
+
+	// Privacy tools remain available, using the same signed transport while the widget is off.
+	global $wpdb;
+	$gq_support_subject = wp_generate_uuid4();
+	add_user_meta( $gq_support_user, $wpdb->get_blog_prefix() . 'gq_support_reporter_' . GQ_Support_State::get()['installation_id'], $gq_support_subject, true );
+	$gq_support_email = get_userdata( $gq_support_user )->user_email;
+	remove_filter( 'pre_http_request', $gq_support_stub );
+	$gq_support_privacy_stub = static function ( $preempt, array $args, string $url ) use ( &$gq_support_seen ) {
+		$gq_support_seen[] = array( $url, $args );
+		return array(
+			'response' => array( 'code' => 'POST' === $args['method'] ? 202 : 200 ),
+			'headers'  => array(),
+			'body'     => wp_json_encode(
+				array(
+					'items'       => array(
+						array(
+							'id'      => 'req_01J8Z6Q4M1ZC7X000000000000',
+							'summary' => 'Private export',
+						),
+					),
+					'next_cursor' => null,
+					'id'          => 'era_01J8Z6Q4M1ZC7X000000000000',
+					'state'       => 'completed',
+					'counts'      => array( 'purged' => 1 ),
+				),
+			),
+		);
+	};
+	add_filter( 'pre_http_request', $gq_support_privacy_stub, 10, 3 );
+	$gq_support_exporters = apply_filters( 'wp_privacy_personal_data_exporters', array() ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core privacy filter.
+	$gq_support_erasers   = apply_filters( 'wp_privacy_personal_data_erasers', array() ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core privacy filter.
+	$gq_support_exported  = $gq_support_exporters['gq-support']['callback']( $gq_support_email, 1 );
+	$gq_support_assert( ! is_wp_error( $gq_support_exported ) && true === $gq_support_exported['done'] && str_contains( wp_json_encode( $gq_support_exported['data'] ), 'Private export' ), 'Disabled support still exports Submitted text.' );
+	$gq_support_erased = $gq_support_erasers['gq-support']['callback']( $gq_support_email, 1 );
+	$gq_support_assert( ! is_wp_error( $gq_support_erased ) && true === $gq_support_erased['items_removed'] && false === $gq_support_erased['items_retained'], 'Disabled support still reports a completed erasure.' );
+	$gq_support_assert( 2 === count( $gq_support_seen ), 'Both privacy callbacks reach the Worker.' );
+	foreach ( $gq_support_seen as list( $gq_support_url, $gq_support_args ) ) {
+		$gq_support_assert( ! empty( $gq_support_args['headers']['GQ-Support-Signature'] ), 'Disabled privacy calls remain signed.' );
+	}
+
+	// A real transport failure still schedules the deleted-user retry, which can reach the Worker.
+	remove_filter( 'pre_http_request', $gq_support_privacy_stub );
+	add_filter( 'pre_http_request', $gq_support_stub, 10, 3 );
+	require_once ABSPATH . 'wp-admin/includes/user.php';
+	wp_delete_user( $gq_support_user );
+	$gq_support_user       = 0;
+	$gq_support_retry_args = array( $gq_support_subject, get_current_blog_id() );
+	$gq_support_assert( false !== wp_next_scheduled( GQ_Support_Privacy::RETRY_HOOK, $gq_support_retry_args ), 'A failed disabled erasure schedules its retry.' );
+	remove_filter( 'pre_http_request', $gq_support_stub );
+	add_filter( 'pre_http_request', $gq_support_privacy_stub, 10, 3 );
+	$gq_support_seen = array();
+	do_action( GQ_Support_Privacy::RETRY_HOOK, ...$gq_support_retry_args );
+	$gq_support_assert( 1 === count( $gq_support_seen ) && array( 'reporter_subject' => $gq_support_subject ) === json_decode( $gq_support_seen[0][1]['body'], true ), 'The retry sends the deleted Reporter subject while support is disabled.' );
+	$gq_support_assert( 'completed' === GQ_Support_Privacy::erasures()['era_01J8Z6Q4M1ZC7X000000000000']['state'], 'The retry records the Worker result.' );
+	remove_filter( 'pre_http_request', $gq_support_privacy_stub );
+	add_filter( 'pre_http_request', $gq_support_stub, 10, 3 );
+	$gq_support_seen = array();
+
+	// Setup erasure refresh remains disabled.
+
 	update_option( GQ_Support_Privacy::ERASURES_OPTION, array( 'era_01J8Z6Q4M1ZC7X000000000000' => array( 'state' => 'in_progress' ) ), false );
 	$gq_support_assert( false === GQ_Support_Privacy::refresh_erasures(), 'An erasure refresh must not claim an answer.' );
 	delete_option( GQ_Support_Privacy::ERASURES_OPTION );
 	$gq_support_assert( array() === $gq_support_seen, 'Disabled setup and privacy operations must not contact the service.' );
 } finally {
 	remove_filter( 'pre_http_request', $gq_support_stub );
+	if ( isset( $gq_support_privacy_stub ) ) {
+		remove_filter( 'pre_http_request', $gq_support_privacy_stub );
+	}
+	if ( isset( $gq_support_retry_args ) ) {
+		wp_clear_scheduled_hook( GQ_Support_Privacy::RETRY_HOOK, $gq_support_retry_args );
+	}
+	if ( false === $gq_support_original_erasures ) {
+		delete_option( GQ_Support_Privacy::ERASURES_OPTION );
+	} else {
+		update_option( GQ_Support_Privacy::ERASURES_OPTION, $gq_support_original_erasures, false );
+	}
 	update_option( GQ_Support_State::OPTION, $gq_support_original_state, false );
 	if ( false === $gq_support_original_key ) {
 		GQ_Support_Signing_Key::delete();
@@ -170,7 +243,7 @@ try {
 	}
 	wp_set_current_user( 0 );
 	unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
-	if ( is_int( $gq_support_user ) ) {
+	if ( is_int( $gq_support_user ) && $gq_support_user > 0 ) {
 		require_once ABSPATH . 'wp-admin/includes/user.php';
 		wp_delete_user( $gq_support_user );
 	}
