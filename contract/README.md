@@ -1,6 +1,6 @@
 # Support v1 contract fixtures
 
-These JSON cases belong to both implementations of [the API contract](../docs/support-api-contract.md). They contain no credentials or customer data. The WordPress PHPUnit suite reads every case, and the Worker suite reads `context.json`, `create.json`, `resources.json` and `signing.json` rather than copying expected values.
+These JSON cases belong to both implementations of [the API contract](../docs/support-api-contract.md). They contain no credentials or customer data. The WordPress PHPUnit suite reads every case, and the Worker suite reads `context.json`, `create.json`, `resources.json`, `signing.json` and `status-change.json` rather than copying expected values.
 
 - `context.json`: the Report context schema ([context design](../docs/support-context-design.md)) and its shared limits. Each case is a submitted context and, when valid, its canonical serialization; an invalid one has no `canonical`. Both sides normalize every case, and both create routes accept the valid ones and reject the rest. WordPress also attaches a review envelope for the case; it never forwards one.
 
@@ -8,6 +8,7 @@ These JSON cases belong to both implementations of [the API contract](../docs/su
 - `list.json`: pagination, cursor, and scope boundaries.
 - `local-errors.json`: browser session, grant, connection and local fail-safe (`GQ_SUPPORT_DISABLED`) failures at WordPress. `integration/fail-safe.php` runs the fail-safe case in its own process, because the constant cannot be undefined.
 - `resources.json`: public resource, whether its delivery/status pair is valid, and the create HTTP status. Valid cases are exercised as a resource, a list item, and a create acknowledgment. The WordPress test adapter adds its own trusted ownership metadata before forwarding the response, and WordPress adds `own` to what it returns; the fixtures hold the Worker's shape, without `own`.
+- `status-change.json`: browser close/reopen payloads (`payloads`) and the `status_change` resource field (`changes`), each valid or not. WordPress forwards only valid payloads, with the attested identity, and returns only a valid field; the Worker accepts the valid payloads once the create is delivered. ADR 0020.
 - `signing.json`: a test-only Ed25519 key and signed requests with their exact canonical string, `Content-Digest` and signature. PHPUnit re-signs each case with `GQ_Support_Signer`; the Worker verifies each one and rejects every single-field mutation. The key signs nothing else.
 - `errors.json`: upstream HTTP status, create/read browser error codes, and browser status (read-time 504 maps to 503). Worker authentication failures intentionally become 503, distinct from browser authentication failures tested in `integration/access.php`.
 

@@ -12,12 +12,13 @@ Namespace: `gq-support/v1`. The namespace is the version, and responses carry no
 |---|---|---|
 | `POST /requests` | `gq_support_submit_requests` | Create one Support request (idempotent per Submission ID) |
 | `GET /requests?scope=mine` | `gq_support_submit_requests` | List own requests (default scope) |
-| `GET /requests?scope=site` | `gq_support_view_site_requests` | List every request from this installation, read-only |
+| `GET /requests?scope=site` | `gq_support_view_site_requests` | List every request from this installation; the same grant closes or reopens them (ADR 0020) |
 | `GET /requests/{id}` | own: submit; other's: view-site | Read one request |
+| `POST /requests/{id}/status` | own: submit; other's: view-site | Close or reopen one delivered request (idempotent per Change ID; [ADR 0020](adr/0020-reporter-status-changes-are-ordered-intents.md)) |
 
 WordPress privacy tools reach the Worker without a REST route: the personal data exporter and eraser, and the deleted-user hook, call signed `GET /v1/export`, `POST /v1/erasures` and `GET /v1/erasures/{id}` directly ([privacy design](support-privacy-design.md#worker-contract)).
 
-Every other path returns 404. There are no receipt, message, state, reply, close/reopen, or attachment routes. Delivery outcome is a field on the request resource. Adding any of these routes needs a new decision (ADR 0009).
+Every other path returns 404. There are no receipt, message, reply, or attachment routes. Delivery outcome is a field on the request resource. Adding any of these routes needs a new decision (ADR 0009); close/reopen was added by [ADR 0020](adr/0020-reporter-status-changes-are-ordered-intents.md) (#28).
 
 Every route has a `permission_callback` that checks the cookie session, the `wp_rest` nonce, current site membership, and the capability. Object access is checked again at the Worker for the installation plus either the attested Reporter subject or a freshly attested view-site grant. An unknown request, and a request outside the caller's scope, both return **404**, so the response never reveals that the request exists. `scope=site` never means cross-installation.
 
@@ -65,6 +66,7 @@ The Submission ID is a reference, not authority. The Worker scopes it to (instal
   "created_at": "2026-09-28T10:00:00Z",
   "delivery": "delivered",
   "status": "open",
+  "status_change": null,
   "own": true
 }
 ```
@@ -73,6 +75,7 @@ The Submission ID is a reference, not authority. The Worker scopes it to (instal
 - `title` is `summary`, or the description's first line cut at a word boundary to about 80 characters.
 - `delivery` is one of `accepted-pending`, `delivered`, `failed`, or `outcome-unknown`. `locally-unsent` is a browser-only state and never goes over the wire.
 - `status` is `open` or `closed` once `delivered`, and `null` before that. GitHub is authoritative (ADR 0003).
+- `status_change` is the latest close or reopen, or `null` when there has been none: `{ "change_id": "<UUIDv4>", "status": "open|closed", "delivery": "accepted-pending|delivered|failed|outcome-unknown" }`. Its `delivery` is the change's own outcome and never replaces `status`, which stays GitHub's. An older service that sends no `status_change` is read as `null`.
 - `own` is `true` when the request belongs to the current Reporter. WordPress sets it after verifying the service's ownership metadata (below); the Worker never sends it, and any value it sends is discarded. It identifies no Reporter. The widget marks own requests only in `scope=site`, where a Support manager sees other Reporters' requests too.
 - Timestamps are UTC ISO 8601. The browser formats them in the site timezone.
 - Text is plain and is escaped when rendered. There are no comments, labels, assignees, or repository fields.
@@ -101,6 +104,31 @@ Rules:
 - [The delivery decision](support-delivery-design.md) selects durable intake: new requests return `202` immediately after the atomic D1 acceptance. Delivery happens in background; a same-key replay returns `201` if already delivered and `202` for other recorded outcomes, with the current `delivery` field. A known resource with `delivery: outcome-unknown` is distinct from an ambiguous transport response (`504`).
 - A valid `outcome-unknown` resource ends acceptance reconciliation: show "Delivery needs review" and use manual GET refresh for that resource. Never offer a new creation intent for it. A later rejection of a reconciliation attempt (including 409) does not prove an earlier uncertain attempt failed. Preserve the original key and frozen payload and require safe reconciliation or Operator review before any replacement; the ordinary new-key conflict rule above applies only once prior ambiguity is resolved. See the [outage and draft-recovery decision](research/outage-draft-recovery.md) for navigation loss, authentication boundaries and recovery tests.
 
+### Status change
+
+```http
+POST /wp-json/gq-support/v1/requests/req_01J8Z6Q4M1ZC7/status
+X-WP-Nonce: <wp_rest nonce>
+Content-Type: application/json
+
+{ "change_id": "7d2c6f1e-3b4a-4c5d-8e9f-0a1b2c3d4e5f", "status": "closed" }
+```
+
+The body is exactly a browser-generated UUIDv4 `change_id`, new for each action and reused only to check an uncertain one again, and the requested `status`, `open` or `closed`. Anything else is rejected with 400 (`status-change.json`). WordPress forwards it to the signed `POST /v1/requests/{id}/status` with the attested `reporter_subject` and a `scope` of `site` when a fresh view-site grant is present, otherwise `mine`. The Worker scopes the Change ID to the request.
+
+| Outcome | Response | Reporter sees |
+|---|---|---|
+| Newly accepted | `202`, the resource with `status_change.delivery: accepted-pending`; `status` unchanged | "Close requested. Delivery is pending." beside the GitHub badge |
+| Same Change ID and status again | The resource with that change: `200` once delivered, otherwise `202` | per its `delivery` |
+| Same Change ID, other status | `409 gq_support_idempotency_conflict` | Try again, with a new key |
+| Create not yet delivered, or issue lost | `409 gq_support_change_not_allowed` | "can't be changed yet" |
+| An earlier change is pending or unknown | `409 gq_support_change_pending` | "still being delivered. Refresh to see it." |
+| Unknown or out-of-scope request | `404 gq_support_not_found` | "no longer available" |
+| Worker could not record it | `503 gq_support_not_accepted` (retryable) | Check again with the **same** key |
+| Timeout or unparseable/ambiguous reply | `504 gq_support_outcome_unknown`, echoing `change_id` | "We couldn't confirm this status change." + Check again with the same key |
+
+A reply counts only if it names the sent Change ID and status, with `200` exactly when that change is delivered. The widget offers Close or Reopen only on a delivered request whose latest change is delivered or failed. It never resends on its own, and never after reauthentication. Delivery, reconciliation before any resend, ordering and quotas are in [ADR 0020](adr/0020-reporter-status-changes-are-ordered-intents.md).
+
 ## Error catalogue
 
 Every error is a `WP_Error` whose `data` is `{ status, correlation_id, retryable }`. Errors never include the upstream body, the Worker URL, exception text, credentials, or report content.
@@ -113,14 +141,16 @@ Every error is a `WP_Error` whose `data` is `{ status, correlation_id, retryable
 | 413 | `gq_support_payload_too_large` | Body over 32 KB | Inline error |
 | 404 | `gq_support_not_found` | Unknown or out-of-scope request | "Not found" |
 | 409 | `gq_support_idempotency_conflict` | Same key, different body | "Not sent", new key on retry |
+| 409 | `gq_support_change_not_allowed` | Status change: the create is not delivered, or its issue was lost | "This request's status can't be changed yet." |
+| 409 | `gq_support_change_pending` | Status change: an earlier change is unresolved | "An earlier status change … is still being delivered." |
 | 412 | `gq_support_context_expired` | Create: the review envelope expired and the service holds no intent for this Submission ID | The panel reviews the context again for the same Submission ID; if an earlier send is uncertain, "Check My requests" |
 | 426 | `gq_support_plugin_outdated` | Worker no longer supports this plugin version | "Support needs a plugin update" |
 | 429 | `gq_support_rate_limited` + `Retry-After` | Per-subject or per-installation limit | "Too many requests, try again later" |
 | 503 | `gq_support_not_configured` | No connection, or the Worker rejected the installation credential | "Support is unavailable"; operator sees detail on the setup page |
 | 503 | `gq_support_disabled` | `GQ_SUPPORT_DISABLED` is set in `wp-config.php`; checked after authorization, before any service call | "Support is temporarily disabled" + independent contact; `retryable: false` |
-| 503 | `gq_support_not_accepted` | Create: the Worker could not durably record | "Not sent" + Try again (same key) |
+| 503 | `gq_support_not_accepted` | Create or status change: the Worker could not durably record | "Not sent" + Try again (same key) |
 | 503 | `gq_support_unavailable` | Read: Worker down, timed out, or ambiguous | "Couldn't load. Refresh to try again." |
-| 504 | `gq_support_outcome_unknown` | Create: timeout or ambiguous response | "Checking…" |
+| 504 | `gq_support_outcome_unknown` | Create or status change: timeout or ambiguous response | "Checking…" |
 | 500 | `gq_support_internal` | Anything else | Generic error with correlation ID |
 
 - A Worker authentication or signature failure is **never** returned to the browser as 401/403. That would look like an expired session and send the Reporter into a reload loop. It maps to `503 gq_support_not_configured`.
@@ -141,7 +171,7 @@ Every `gq-support/v1` response sends `Cache-Control: private, no-store` explicit
 | Function | `wp_safe_remote_request()` (`reject_unsafe_urls`) |
 | Redirects | `redirection => 0`. A 3xx is treated as an ambiguous response. |
 | TLS | `sslverify => true` |
-| Timeouts | 8 s for create, 5 s for reads. The browser's `apiFetch` timeout is about 15 s. |
+| Timeouts | 8 s for create and status changes, 5 s for reads. The browser's `apiFetch` timeout is about 15 s. |
 | Response size | `limit_response_size` 64 KB. An oversized or unparseable response is ambiguous. |
 | Worker path | `/v1/...`. The path version changes only on a breaking change, and `/v2` then runs alongside `/v1` until the fleet has migrated. |
 | Version header | `GQ-Support-Plugin-Version`. Within v1 the Worker makes only additive changes and accepts every supported plugin version. Older plugins get 426. |

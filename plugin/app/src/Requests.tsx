@@ -3,7 +3,7 @@
 import { createElement, useEffect, useState } from "@wordpress/element";
 import { __ } from "@wordpress/i18n";
 import { speak } from "@wordpress/a11y";
-import type { Scope, SupportRequest, useRequests } from "./useRequests";
+import type { Action, Scope, SupportRequest, useRequests } from "./useRequests";
 
 type Props = {
   requests: ReturnType<typeof useRequests>;
@@ -22,6 +22,30 @@ const badge = (item: SupportRequest) => item.delivery === "delivered"
 
 const hint = (item: SupportRequest) => item.delivery === "accepted-pending" ? __("Delivery is pending", "gq-support")
   : item.delivery === "outcome-unknown" ? __("Our team is checking whether this report arrived. Refresh to see its status.", "gq-support") : "";
+
+/**
+ * A close or reopen's own delivery, beside the GitHub-backed badge (ADR 0020).
+ * A delivered change needs no words: the badge already shows GitHub's status.
+ */
+const changeHint = (item: SupportRequest) => {
+  const change = item.status_change;
+  if (!change) return "";
+  const close = change.status === "closed";
+  if (change.delivery === "accepted-pending") return close ? __("Close requested. Delivery is pending.", "gq-support") : __("Reopen requested. Delivery is pending.", "gq-support");
+  if (change.delivery === "outcome-unknown") {
+    return close ? __("Our team is checking whether your close request arrived. Refresh to see its status.", "gq-support")
+      : __("Our team is checking whether your reopen request arrived. Refresh to see its status.", "gq-support");
+  }
+  if (change.delivery === "failed" && change.status !== item.status) {
+    return close ? __("Your close request couldn't be confirmed. You can try again.", "gq-support")
+      : __("Your reopen request couldn't be confirmed. You can try again.", "gq-support");
+  }
+  return "";
+};
+
+/** Close or reopen is offered once delivered, while no earlier change or uncertain action is outstanding. */
+const canChange = (item: SupportRequest, action: Action | undefined) => item.delivery === "delivered" && !action
+  && (!item.status_change || item.status_change.delivery === "delivered" || item.status_change.delivery === "failed");
 
 // The site timezone, when the browser knows it; the browser's own otherwise.
 const formatDate = (iso: string) => {
@@ -68,6 +92,7 @@ export function Requests({ requests, site, disabled, onNewReport }: Props) {
         <ul className="gq-support-list">
           {items.map((item) => {
             const open = expanded === item.id;
+            const action = requests.actions[item.id];
             const details = `gq-support-request-${item.id}`;
             return (
               <li key={item.id} className="gq-support-item">
@@ -80,6 +105,16 @@ export function Requests({ requests, site, disabled, onNewReport }: Props) {
                   {hint(item) && <p className="gq-support-hint">{hint(item)}</p>}
                   <p className="gq-support-item-text">{item.description}</p>
                   <p className="gq-support-hint">{formatDate(item.created_at)}</p>
+                  {changeHint(item) && <p className="gq-support-hint">{changeHint(item)}</p>}
+                  {action && <p className={action.phase === "sending" ? "gq-support-hint" : "gq-support-error"}>{action.message}</p>}
+                  {(canChange(item, action) || action?.phase === "error") && (
+                    <button type="button" className="gq-support-change" disabled={disabled} onClick={() => { void requests.changeStatus(item, item.status === "closed" ? "open" : "closed"); }}>
+                      {item.status === "closed" ? __("Reopen request", "gq-support") : __("Close request", "gq-support")}
+                    </button>
+                  )}
+                  {action?.phase === "uncertain" && (
+                    <button type="button" className="gq-support-change" disabled={disabled} onClick={() => { void requests.changeStatus(item, action.status); }}>{__("Check again", "gq-support")}</button>
+                  )}
                 </div>
               </li>
             );

@@ -20,9 +20,11 @@ export const recoverDelivery = async (args: readonly string[], options: Operator
   const id = crypto.randomUUID();
   const parameters = [slot!, intent!, mapping.githubInstallationId, mapping.repositoryId, mapping.environment,
     mapping.clientOriginLabel, mapping.defaultDeveloper, now] as const;
+  // Resume is for creates only: a failed status change resumed out of turn could undo a later one (ADR 0020).
+  // A reconcile only reads, so it may also unblock a status change left for review.
   const eligible = `i.slot = ? AND i.id = ? AND i.github_installation_id = ? AND r.repository_id = ?
     AND i.environment = ? AND i.client_origin_label = ? AND i.default_developer = ?
-    AND ${reconcile ? "i.state = 'outcome_unknown' AND i.attempt_started_at IS NOT NULL" : "i.state = 'failed'"} AND i.owner IS NULL AND (i.drain_until IS NULL OR i.drain_until <= ?)
+    AND ${reconcile ? "i.state = 'outcome_unknown' AND i.attempt_started_at IS NOT NULL" : "i.state = 'failed' AND i.kind = 'create'"} AND i.owner IS NULL AND (i.drain_until IS NULL OR i.drain_until <= ?)
     AND ${reconcile ? '1 = 1' : "i.last_error_class NOT IN ('OutcomeUnknown', 'AbandonedAttempt', 'UnpinnedLegacyIntent')"}
     AND r.superseded_at IS NULL AND r.erased_at IS NULL
     AND EXISTS (SELECT 1 FROM delivery_control WHERE id = 1 AND enabled = 1)

@@ -8,7 +8,7 @@ import { DAY, MUTATION_INTERVAL_MS } from "./delivery-store.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
 import type { OperatorOptions } from "./operator.ts";
 import type { QueryDatabase } from "./storage.ts";
-import { PURGED_TEXT as BLANK, ulid } from "./support-requests.ts";
+import { PURGED_TEXT as BLANK, STATUS_BUDGET, ulid } from "./support-requests.ts";
 
 /** Never-confirmed-delivered text, and closed delivered requests after their last observed close. */
 export const RETENTION_MS = 365 * DAY;
@@ -106,7 +106,7 @@ export const erasureStatements = (erasureId: string, slot: string, subject: stri
   // Any erasure's rows, so a rerun after an interrupted sequence still clears them.
   [`UPDATE delivery_intent SET context_json = NULL WHERE slot = ? AND context_json IS NOT NULL
     AND EXISTS (SELECT 1 FROM support_cleanup c WHERE c.request_id = delivery_intent.request_id AND c.purpose = 'erasure')`, [slot]],
-  [`DELETE FROM intake_debit WHERE slot = ? AND subject = ?`, [slot, subject]],
+  [`DELETE FROM intake_debit WHERE slot = ? AND subject IN (?, ?)`, [slot, subject, STATUS_BUDGET + subject]],
   [`DELETE FROM request_rate WHERE slot = ? AND subject = ?`, [slot, subject]],
 ];
 
@@ -259,7 +259,10 @@ const cleanupStore = (db: QueryDatabase) => {
           r.repository_id, i.attempt_started_at, i.drain_until, r.issue_id, r.issue_number, r.issue_node_id
         FROM support_cleanup c LEFT JOIN support_request r ON r.id = c.request_id
         LEFT JOIN delivery_intent i ON i.request_id = c.request_id AND i.seq = 0
-        WHERE c.state = 'draining' AND (i.id IS NULL OR i.owner IS NULL OR i.lease_expires_at <= ?)
+        WHERE c.state = 'draining' AND (i.id IS NULL OR i.owner IS NULL OR i.lease_expires_at <= ?1)
+          -- A status change's PATCH carries no report text, but its attempt drains like the create's.
+          AND NOT EXISTS (SELECT 1 FROM delivery_intent s WHERE s.request_id = c.request_id AND s.seq > 0
+            AND s.owner IS NOT NULL AND s.lease_expires_at > ?1)
           AND (c.purpose = 'retention' OR EXISTS (SELECT 1 FROM delivery_suppression s
             WHERE (s.scope = 'request' AND s.reference = c.request_id) OR (s.scope = 'slot' AND s.reference = c.slot)))
         LIMIT 50`).bind(now).all<DrainedRequest>()).results;
@@ -271,7 +274,7 @@ const cleanupStore = (db: QueryDatabase) => {
           title_digest = CASE WHEN ? THEN NULL ELSE title_digest END, intent_id = ?, github_installation_id = ?,
           repository_id = ?, attempt_started_at = ?, attempt_ended_at = ?, issues_json = ?, changed_at = ?
           WHERE request_id = ? AND state = 'draining' AND NOT EXISTS (SELECT 1 FROM delivery_intent WHERE request_id = ?
-            AND (generation IS NOT ? OR state IS NOT ? OR (owner IS NOT NULL AND lease_expires_at > ?)))`,
+            AND ((seq = 0 AND (generation IS NOT ? OR state IS NOT ?)) OR (owner IS NOT NULL AND lease_expires_at > ?)))`,
           [change.state, change.outcome ?? null, change.next, now, change.state === "resolved" ? now : null, ended(change.state) ? 1 : 0,
             row.intent_id, row.github_installation_id, row.repository_id, row.attempt_started_at, row.drain_until ?? row.attempt_started_at,
             change.issues ? JSON.stringify(change.issues) : null, now,

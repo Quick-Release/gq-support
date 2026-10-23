@@ -110,6 +110,8 @@ export type CreateIssueError =
 export type VerifyRepositoryError = GatewayError | RepositoryNotPrivate | RepositoryArchived;
 export type ReadIssueError = GatewayError | IssueMoved | IssueGone;
 export type RepairIssueError = ReadIssueError | ValidationRejected | RepositoryNotPrivate | RepositoryArchived;
+/** Every failure except OutcomeUnknown proves the state was not changed. */
+export type SetIssueStateError = RepairIssueError | OutcomeUnknown;
 
 export interface NewIssue {
   readonly title: string;
@@ -251,6 +253,12 @@ export class GitHubGateway extends Context.Service<GitHubGateway, {
    * same PATCH can be repeated, so a missing response is ProviderUnavailable.
    */
   readonly updateIssue: (target: GitHubTarget, number: number, change: IssueChange, authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<GitHubIssue, RepairIssueError | OutcomeUnknown>;
+  /**
+   * Opens or closes an issue: a Reporter's status change (ADR 0020). One
+   * PATCH, never retried here. Without a complete answer the change may have
+   * applied, so it is OutcomeUnknown: read the issue before any resend.
+   */
+  readonly setIssueState: (target: GitHubTarget, number: number, state: "open" | "closed", authorize?: Effect.Effect<void, OutcomeUnknown>) => Effect.Effect<GitHubIssue, SetIssueStateError>;
   /**
    * The first page of issues in the target repository matching `terms`
    * (GitHub search syntax, without a `repo:` qualifier). Search is eventually
@@ -532,6 +540,34 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       return yield* Effect.fail(failure(status, headers, body, now));
     });
 
+  const setIssueState = (target: GitHubTarget, number: number, state: "open" | "closed", authorize?: Effect.Effect<void, OutcomeUnknown>) =>
+    Effect.gen(function* () {
+      yield* verifyRepository(target);
+      const { status, headers, body, now } = yield* call(target, (repository) =>
+        HttpClientRequest.patch(`${repository}/issues/${number}`).pipe(HttpClientRequest.bodyJsonUnsafe({ state })),
+        authorize).pipe(Effect.catchTag("NoResponse", () => Effect.fail(new OutcomeUnknown())));
+      if (status === 200) {
+        const updated = issueFrom(body);
+        return updated && updated.number === number && updated.state === state ? updated : yield* Effect.fail(new OutcomeUnknown());
+      }
+      const limited = rateLimit(status, headers, body, now);
+      if (limited) return yield* Effect.fail(limited);
+      // A transferred issue answers a mutation with 301 and is not changed; the redirect is never followed.
+      if (status === 301) {
+        const location = headers.location ?? "";
+        return yield* Effect.fail(location.startsWith(`${API}/`) ? new IssueMoved({ location }) : new OutcomeUnknown());
+      }
+      if (status === 400 || status === 422) return yield* Effect.fail(new ValidationRejected({ status, fields: ["state"] }));
+      if (status === 410) return yield* Effect.fail(new IssueGone());
+      if (status === 404) return yield* repository(target).pipe(Effect.andThen(Effect.fail(new IssueGone())));
+      if (status === 403 && isRecord(body) && typeof body.message === "string" && /archived/i.test(body.message)) {
+        return yield* Effect.fail(new RepositoryArchived());
+      }
+      // These statuses prove nothing changed; anything else might have.
+      if (status === 401 || status === 403) return yield* Effect.fail(failure(status, headers, body, now));
+      return yield* Effect.fail(new OutcomeUnknown());
+    });
+
   const searchIssues = (target: GitHubTarget, terms: string) => idempotentCall(target, (repository) =>
     HttpClientRequest.get(`${API}/search/issues`).pipe(HttpClientRequest.setUrlParams({
       q: `repo:${repository.slice(`${API}/repos/`.length)} is:issue ${terms}`, per_page: String(PER_PAGE),
@@ -574,6 +610,7 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       repair(target, number, "assignees", assignees, authorize)),
     listIssuesSince: logged("listIssuesSince", listIssuesSince),
     updateIssue: logged("updateIssue", updateIssue),
+    setIssueState: logged("setIssueState", setIssueState),
     searchIssues: logged("searchIssues", searchIssues),
   };
 });

@@ -83,7 +83,7 @@ Decided in #13.
 
 - **Views.** One panel with two tabs. **New report** is the default. **My requests** lists items that expand in place to show the full text and status. There is no separate detail view. After a successful submit, the panel switches to My requests with the new item at the top.
 - **Form.** A required **Description** and an optional one-line **Summary**. The placeholder asks "What happened, and what did you expect?". There is no bug/feedback/question picker in the MVP; developers classify in GitHub. Environment context is added server-side; the fields are decided in #14.
-- **Status is read-only.** Reporters cannot close or reopen requests in the MVP. Status reflects what developers do in GitHub.
+- **Close and reopen** ([ADR 0020](adr/0020-reporter-status-changes-are-ordered-intents.md), #28). An expanded delivered request offers **Close request** or **Reopen request**, for the Reporter's own requests and for a Support manager's installation scope. The badge keeps showing GitHub's status. The change's own delivery appears beside it: "Close requested. Delivery is pending.", a check while its outcome is unknown, or "couldn't be confirmed" once failed, since a failed change may also have been overridden in GitHub. No further action is offered until that change resolves. An uncertain send offers **Check again** with the same Change ID. GitHub stays authoritative: a Developer's change in GitHub shows after refresh, even over a delivered Reporter change.
 - **Honest status wording.** Each list item shows one badge (table below). The launcher is hidden from Reporters on an unconfigured installation; operators see the notice on the setup page.
 
 | State | Reporter sees |
@@ -108,6 +108,5 @@ Decided in #13.
 The Developer assignee (one default per WordPress project) and the connection lifecycle are decided in [support onboarding design](support-onboarding-design.md).
 
 
-- Reporter close/reopen (#28) is a post-MVP slice after ordered mutations (ADR 0006).
 - Privacy/retention of report text in the operational service while delivery is pending or being reconciled.
 - Any future client-visible response channel. Adding comments to the WordPress projection would require a new decision; repository comments remain internal by default.

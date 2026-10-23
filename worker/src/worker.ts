@@ -116,7 +116,9 @@ export default Cloudflare.Worker(
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
           }, { digestKey: key, ledger });
-        if (request.method === "POST" && new URL(request.url, "https://support.invalid").pathname === "/v1/requests" && response.status === 202) {
+        // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
+        if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
+          response.status === 202) {
           yield* context.waitUntil(deliver);
         }
         return HttpServerResponse.fromWeb(response);
