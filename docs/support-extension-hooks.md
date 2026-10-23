@@ -1,7 +1,8 @@
 # Native Support extensions
 
-Introduced after 0.1.9 (`@since unreleased`). These hooks add no diagnostic
-fields or background work. WordPress 6.5 and PHP 8.0 remain supported.
+Planned for 0.1.10 (`@since 0.1.10`), the next patch after the current 0.1.9
+release. This documents hook introduction without changing the release version.
+These hooks add no diagnostic fields or background work. WordPress 6.5 and PHP 8.0 remain supported.
 
 ## Review-time context
 
@@ -43,13 +44,15 @@ Delivery outcome. Neither receives the Submission ID, signing nonce, Reporter
 subject, report text/context, repository, credential, provider detail or raw error.
 
 - `gq_support_report_accepted($request_id, $delivery_outcome)` runs after a
-  validated create/replay response confirms `accepted-pending` or `delivered`.
+  validated create/replay response confirms `accepted-pending`, `delivered` or `failed`. A failed replay
+  still proves the intent was durably accepted (ADR 0003); acceptance is not a delivery
+  success signal.
   Transport errors, malformed or mismatched responses, and ambiguous outcomes
   never signal acceptance. A read does not emit this action.
 - `gq_support_report_delivery_changed($request_id, $delivery_outcome)` runs when
   an explicit create, read or list confirms `delivered` or `failed`: a terminal
-  transition out of pending. Direct delivery on create emits acceptance first,
-  then delivery-changed. An entire list is validated before any observers run.
+  transition out of pending. A delivered create or failed create replay emits
+  acceptance first, then delivery-changed. An entire list is validated before any observers run.
   Pending and outcome-unknown observations do not signal a delivery transition.
 
 These are observations, not an event stream. Reading the same terminal request
@@ -63,6 +66,15 @@ observer failure does not prevent the delivery action or change the confirmed
 HTTP result. WordPress stops the remaining callbacks on that action if one throws;
 other callbacks on that invocation are not guaranteed to run. Callback values and
 exception messages are not logged by the plugin.
+
+Catching an exception preserves only the plugin result or context omission path;
+it does not fully isolate callback execution. WordPress does not unwind its
+current-filter stack or `WP_Hook` nesting bookkeeping when a callback throws.
+Consequently `current_filter()`, `doing_filter()` / `doing_action()` and later
+nested dispatch in the same PHP request can retain stale hook state. The plugin
+does not repair WordPress internals. Extension callbacks must catch their own
+exceptions before returning to WordPress to keep hook bookkeeping balanced.
+This limitation applies to both the context filter and the lifecycle actions.
 
 ## Callback responsibilities and Site Health
 

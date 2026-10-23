@@ -454,6 +454,7 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 		};
 		add_action( 'gq_support_report_accepted', $observer, 10, 2 );
 		add_action( 'gq_support_report_delivery_changed', $observer, 10, 2 );
+		self::assertFalse( doing_action( 'gq_support_report_accepted' ) );
 		try {
 			$body = array(
 				'submission_id' => self::SUBMISSION,
@@ -461,6 +462,8 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 			);
 			self::assertSame( 202, $this->create( $body )->get_status() );
 			self::assertSame( array( array( 'gq_support_report_accepted', array( $this->reply['id'], 'accepted-pending' ) ) ), $events );
+			// Catching preserves the result, but WordPress does not unwind a throwing hook.
+			self::assertTrue( doing_action( 'gq_support_report_accepted' ) );
 			// Accepted replay may notify again; no exactly-once promise.
 			self::assertSame( 202, $this->create( $body )->get_status() );
 			self::assertCount( 2, $events );
@@ -480,6 +483,29 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 			remove_action( 'gq_support_report_accepted', $observer );
 			remove_action( 'gq_support_report_delivery_changed', $observer );
 		}
+	}
+
+	/** A failed same-key replay confirms prior durable acceptance before terminal delivery. */
+	public function test_failed_create_replay_emits_acceptance_before_delivery(): void {
+		$this->reply['id'] = 'req_01J8Z6Q4M1ZC7X000000000000';
+		$body              = array(
+			'submission_id' => self::SUBMISSION,
+			'description'   => 'Private description',
+		);
+		self::assertSame( 202, $this->create( $body )->get_status() );
+		$this->hooks             = array();
+		$this->reply['delivery'] = 'failed';
+		$this->reply['status']   = null;
+		$response                = $this->create( $body );
+		self::assertSame( 202, $response->get_status() );
+		self::assertSame( 'failed', $response->get_data()['delivery'] );
+		self::assertSame(
+			array(
+				wp_json_encode( array( 'gq_support_report_accepted', $this->reply['id'], 'failed' ) ),
+				wp_json_encode( array( 'gq_support_report_delivery_changed', $this->reply['id'], 'failed' ) ),
+			),
+			$this->hooks
+		);
 	}
 
 	/** Refresh/list observes confirmed terminal delivery only, after validating the entire result. */

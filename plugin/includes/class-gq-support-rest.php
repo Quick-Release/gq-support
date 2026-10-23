@@ -278,17 +278,17 @@ final class GQ_Support_REST {
 		if ( ! preg_match( '/^req_[0-9A-HJKMNP-TV-Z]{26}\z/', $id ) ) {
 			return;
 		}
-		if ( $create && in_array( $outcome, array( 'accepted-pending', 'delivered' ), true ) ) {
+		if ( $create && in_array( $outcome, array( 'accepted-pending', 'delivered', 'failed' ), true ) ) {
 			try {
 				/**
 				 * A create or replay confirmed durable acceptance.
 				 *
-				 * @since unreleased
+				 * @since 0.1.10
 				 * @param string $id      Public opaque Support request ID, never the Submission ID.
 				 * @param string $outcome Allowlisted confirmed delivery outcome.
 				 */
 				do_action( 'gq_support_report_accepted', $id, $outcome );
-			} catch ( Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- Deliberately isolate privileged observers; no safe recovery or raw logging.
+			} catch ( Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- Preserve the confirmed result; WordPress hook state may remain unclean.
 				// Observer failures cannot undo acceptance; never log exception details.
 			}
 		}
@@ -298,7 +298,7 @@ final class GQ_Support_REST {
 				 * An explicit support operation confirmed a terminal delivery transition.
 				 * Repeated observations can repeat this notification; callbacks must be idempotent.
 				 *
-				 * @since unreleased
+				 * @since 0.1.10
 				 * @param string $id      Public opaque Support request ID.
 				 * @param string $outcome Delivered or failed; never an ambiguous outcome.
 				 */

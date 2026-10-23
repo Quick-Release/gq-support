@@ -151,7 +151,7 @@ final class GQ_Support_Report_Context {
 			 * Installed PHP is privileged: callbacks must use bounded local reads.
 			 * Values are validated again below; no technical phase is enabled.
 			 *
-			 * @since unreleased
+			 * @since 0.1.10
 			 * @param array $candidate  Schema and default context fields.
 			 * @param array $collection Phase and optional coarse originating screen only.
 			 */
