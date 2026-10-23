@@ -52,6 +52,7 @@ final class GQ_Support_Plugin {
 		add_action( 'admin_notices', array( __CLASS__, 'render_disabled_notice' ) );
 		add_action( 'admin_print_footer_scripts', array( __CLASS__, 'render_deferred_assets' ), 20 );
 		self::register_privacy();
+		add_filter( 'debug_information', array( GQ_Support_Site_Health::class, 'information' ) );
 
 		if ( is_admin() ) {
 			GQ_Support_Setup_Page::register();

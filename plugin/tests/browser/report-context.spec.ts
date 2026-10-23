@@ -1,5 +1,7 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { forgetLogIn, logIn, site, wp } from '../performance/test-site.cjs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { forgetLogIn, logIn, site, testSite, wp } from '../performance/test-site.cjs';
 
 // Report context in the panel (docs/support-context-design.md, acceptance cases 1, 2, 6, 7 and 9).
 // The WordPress preview is real; only the support REST routes are stubbed.
@@ -272,4 +274,45 @@ test('a closed panel asks for no context, and reopening asks again only after a 
   await launcher.click();
   await expect(page.getByRole('checkbox', { name: /^WordPress version/ })).toBeVisible();
   expect(asked).toHaveLength(1);
+});
+
+
+test('native callback output is validated before the rendered preview, and never collected while closed', async ({ page }) => {
+  const directory = join(testSite, 'wp-content', 'mu-plugins');
+  const fixture = join(directory, 'gq-support-context-extension-test.php');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(fixture, `<?php
+add_filter('gq_support_report_context', static function($candidate, $collection) {
+    header('X-GQ-Context-Collected: 1');
+    $candidate['default']['wp_version'] = '6.5+extension';
+    $candidate['default']['support_plugin_version'] = '0.1<img src=x onerror=alert(1)>';
+    $candidate['default']['customer'] = 'Private customer';
+    $candidate['technical'] = array('php_version' => '8.0');
+    return $candidate;
+}, 10, 2);
+`);
+  try {
+    const asked = previews(page);
+    const submissions = await intercept(page);
+    await logIn(page);
+    const response = await page.goto(`${site}/wp-admin/index.php`);
+    await page.waitForLoadState('networkidle');
+    expect(response?.headers()['x-gq-context-collected']).toBeUndefined();
+    expect(asked).toHaveLength(0);
+    const collected = page.waitForResponse(response => isPreview(response.request()));
+    await page.getByRole('button', { name: /^Support/ }).click();
+    expect((await collected).headers()['x-gq-context-collected']).toBe('1');
+    await expect(page.getByRole('checkbox', { name: 'WordPress version: 6.5+extension' })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: /^Support plugin version/ })).toHaveCount(0);
+    await expect(page.locator('#gq-support-panel')).not.toContainText('Private customer');
+    await expect(page.locator('#gq-support-panel img')).toHaveCount(0);
+    await expect(page.locator('#gq-support-panel')).toContainText('Some information could not be collected');
+    await page.getByRole('textbox', { name: 'Description' }).fill('A private report');
+    await page.getByRole('checkbox', { name: 'WordPress version: 6.5+extension' }).uncheck();
+    await page.getByRole('button', { name: 'Send report' }).click();
+    await expect(message(page)).toContainText('Received');
+    expect(submissions[0]!.context).toEqual({ schema: 1, default: { originating_screen: 'dashboard' } });
+  } finally {
+    rmSync(fixture, { force: true });
+  }
 });
