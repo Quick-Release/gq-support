@@ -273,6 +273,9 @@ jobs:
     uses: ./.github/workflows/wordpress-lane.yml
     with:
       cell: ${{ toJSON(matrix.cell) }}
+    # Only a name here: the value comes from the lane job's gq-design-sandbox environment.
+    secrets:
+      COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
 
   # Manual runs only (workflow_dispatch `simulate`): prove `Required validation` fails on each case.
   simulation:

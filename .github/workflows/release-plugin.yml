@@ -138,6 +138,8 @@ jobs:
     uses: ./.github/workflows/compatibility.yml
     with:
       tiers: pr scheduled
+    secrets:
+      COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
 
   publish:
     name: Publish Composer package

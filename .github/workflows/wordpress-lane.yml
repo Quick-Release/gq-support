@@ -18,6 +18,12 @@ on:
         description: Name of an artifact holding gq-support.zip and its manifest (scripts/ci/release-package.mjs)
         default: ""
         type: string
+    # Callers pass it by name; it exists only in gq-design-sandbox, so only this job's environment
+    # gives it a value. Without the name it would resolve empty here.
+    secrets:
+      COMPOSER_AUTH:
+        description: GETQUICK registry login for a cell that pins `gqDesign` (scripts/ci/install-gq-design.sh)
+        required: false
 
 permissions:
   contents: read

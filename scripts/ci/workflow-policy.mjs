@@ -3,7 +3,8 @@
 // - third-party actions are pinned to a full commit SHA, with the reviewed release in a comment;
 // - no `pull_request_target`, and no job of a workflow that runs on pull requests gets a write token;
 // - pull-request code (a pull-request workflow, or a reusable one it calls) reads a secret only in a
-//   job bound to an environment, which scopes the secret to that job; forks never receive it;
+//   job bound to an environment, which scopes the secret to that job, or passes it by name to a local
+//   reusable workflow, which is checked the same way; never `secrets: inherit`; forks receive none;
 // - artifacts are uploaded only through ./.github/actions/upload-scanned-artifact, which
 //   secret-scans them first, from an allowlisted path and with an explicit `retention-days`.
 // A line-based check: these files keep one key per line, which is all it needs.
@@ -65,11 +66,19 @@ export function checkWorkflow(path, text, { pullRequestCode = false } = {}) {
     if ([line, ...children(lines, index)].some(grantsWrite)) report(index, `job \`${owner[index]}\` asks for a write token in a workflow that runs on pull requests`);
   });
   const jobsStart = lines.findIndex((line) => line.startsWith('jobs:'));
-  const environments = new Set(lines.flatMap((line, index) => (index > jobsStart && /^ {4}environment:\s*\S/.test(line) ? [owner[index]] : [])));
+  const jobsWith = (pattern) => new Set(lines.flatMap((line, index) => (index > jobsStart && pattern.test(line) ? [owner[index]] : [])));
+  const environments = jobsWith(/^ {4}environment:\s*\S/);
+  // An environment secret reaches a reusable workflow's job only when the caller passes its name.
+  const callers = jobsWith(/^ {4}uses:\s*\.\/\.github\/workflows\//);
   lines.forEach((line, index) => {
-    if (index <= jobsStart || environments.has(owner[index])) return;
-    if (!/\bsecrets\.(?!GITHUB_TOKEN\b)|\bsecrets:\s*inherit\b/.test(line.replace(/#.*/, ''))) return;
-    report(index, `job \`${owner[index]}\` reads a secret in pull-request code without an \`environment\` that scopes it to the job`);
+    if (index <= jobsStart) return;
+    const code = line.replace(/#.*/, '');
+    const inherits = /\bsecrets:\s*inherit\b/.test(code);
+    if (!inherits && !/\bsecrets\.(?!GITHUB_TOKEN\b)/.test(code)) return;
+    if (!inherits && (environments.has(owner[index]) || callers.has(owner[index]))) return;
+    report(index, inherits
+      ? `job \`${owner[index]}\` passes every secret with \`secrets: inherit\` in pull-request code: pass each by name`
+      : `job \`${owner[index]}\` reads a secret in pull-request code without an \`environment\` that scopes it to the job`);
   });
   return problems;
 }

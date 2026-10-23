@@ -86,3 +86,9 @@ test('pull-request code reads a secret only in a job bound to an environment', (
   assert.deepEqual(checkWorkflow('.github/workflows/lane.yml', lane('')), []);
   assert.match(check(workflow({ steps: '      - run: deploy\n        env:\n          TOKEN: ${{ secrets.TOKEN }}' })).join('\n'), /`test` reads a secret/);
 });
+
+test('pull-request code may pass a secret by name to a reusable workflow, which binds the environment', () => {
+  const caller = (secrets) => `name: CI\n\non:\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  cells:\n    uses: ./.github/workflows/lane.yml\n    with:\n      cell: x\n${secrets}`;
+  assert.deepEqual(check(caller('    secrets:\n      TOKEN: ${{ secrets.TOKEN }}\n')), []);
+  assert.match(check(caller('    secrets: inherit\n')).join('\n'), /`cells` .*secret/);
+});
