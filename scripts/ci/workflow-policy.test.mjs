@@ -76,3 +76,13 @@ test('the scanning upload action itself may use upload-artifact', () => {
   const action = `name: Upload\nruns:\n  using: composite\n  steps:\n    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n`;
   assert.deepEqual(checkWorkflow('.github/actions/upload-scanned-artifact/action.yml', action), []);
 });
+
+test('pull-request code reads a secret only in a job bound to an environment', () => {
+  const lane = (environment) => `name: Lane\n\non:\n  workflow_call:\n\npermissions:\n  contents: read\n\njobs:\n  cell:\n    runs-on: ubuntu-latest\n${environment}    steps:\n      - run: install\n        env:\n          TOKEN: \${{ secrets.TOKEN }}\n`;
+  const pullRequests = { pullRequestCode: true };
+  assert.match(checkWorkflow('.github/workflows/lane.yml', lane(''), pullRequests).join('\n'), /`cell` reads a secret .*environment/);
+  assert.deepEqual(checkWorkflow('.github/workflows/lane.yml', lane("    environment: ${{ inputs.real && 'sandbox' || '' }}\n"), pullRequests), []);
+  // A reusable workflow no pull-request workflow calls, like a release-only one, may.
+  assert.deepEqual(checkWorkflow('.github/workflows/lane.yml', lane('')), []);
+  assert.match(check(workflow({ steps: '      - run: deploy\n        env:\n          TOKEN: ${{ secrets.TOKEN }}' })).join('\n'), /`test` reads a secret/);
+});

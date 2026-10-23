@@ -2,7 +2,8 @@
 /**
  * Prints the disposable site's actual runtime as JSON, so each CI matrix cell proves the PHP,
  * WordPress, database, topology and WordPress-provided React it ran (scripts/ci/runtime-matrix.mjs verify).
- * Also resolves the built app's extracted script dependencies against this WordPress's registered handles.
+ * Also resolves the built app's extracted script dependencies against this WordPress's registered handles,
+ * and reports which GETQUICK Design ran: the fixture's "test" or a real release with its classes loaded.
  *
  * @package GQ_Support
  */
@@ -56,6 +57,10 @@ WP_CLI::line(
 			'objectCache'      => (bool) wp_using_ext_object_cache(),
 			'react'            => $gq_support_scripts->registered['react']->ver ?? null,
 			'woocommerce'      => $gq_support_woocommerce,
+			'design'           => array(
+				'version' => defined( 'GETQUICK_DESIGN_VERSION' ) ? GETQUICK_DESIGN_VERSION : null,
+				'classes' => class_exists( 'GetQuick\\Design\\Plugin' ),
+			),
 			'plugin'           => GQ_SUPPORT_PLUGIN_DIR,
 			'assets'           => $gq_support_assets,
 		)

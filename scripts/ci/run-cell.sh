@@ -3,7 +3,9 @@
 # CI does: lifecycle integration, recorded and verified runtime, browser suite, multisite, Plugin Check.
 # Needs a fresh site (WordPress and database versions are fixed when the site is created), a built
 # app and, for browser cells, the cell's Playwright engine. The object-cache cell also needs the
-# ddev-redis add-on in .ddev. Runtime reports land in runtime-results/.
+# ddev-redis add-on in .ddev, and a cell pinning a real GETQUICK Design release needs the registry
+# login in COMPOSER_AUTH unless scripts/ci/install-gq-design.sh already installed it. Runtime
+# reports land in runtime-results/.
 # GQ_SUPPORT_PLUGIN_ZIP (repository-relative) runs the cell on a release ZIP installed by WordPress
 # instead of the plugin/ checkout, adding its uninstall and previous-release upgrade (package.sh).
 #   scripts/ci/run-cell.sh minimum
@@ -28,7 +30,7 @@ record() {
 
 echo "::group::Lifecycle integration: $CELL_NAME"
 WP_VERSION=$CELL_WORDPRESS GQ_SUPPORT_PHP_VERSION=$CELL_PHP GQ_SUPPORT_DATABASE=$CELL_DATABASE \
-  GQ_SUPPORT_REDIS_CACHE_VERSION=$CELL_REDIS_CACHE bash plugin/tests/integration/run.sh
+  GQ_SUPPORT_REDIS_CACHE_VERSION=$CELL_REDIS_CACHE GQ_SUPPORT_DESIGN_VERSION=$CELL_GQ_DESIGN bash plugin/tests/integration/run.sh
 woocommerce=()
 [[ "$CELL_WOOCOMMERCE" == latest ]] || woocommerce=(--version="$CELL_WOOCOMMERCE")
 if [[ -n "$CELL_WOOCOMMERCE" ]]; then wp plugin install woocommerce "${woocommerce[@]}" --force; fi

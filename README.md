@@ -144,11 +144,23 @@ pnpm deploy:worker
 - The root toolchain, `scripts/ci/`, the runtime matrix and the CI workflows run every suite.
 - A path no rule classifies runs every suite.
 
-Supported runtimes live in `.github/runtime-matrix.json`: WordPress 6.5 and PHP 8.0 minimums, PHP up to 8.4, `Tested up to` 7.1. Each cell pins exact WordPress, PHP, WooCommerce and Plugin Check versions and, at the oldest and current endpoints, the React that WordPress registers. Pull requests run WordPress 6.5.0 on PHP 8.0 and 7.1.3 on PHP 8.4, each single site then multisite, plus the counter gate at both endpoints, 6.5.13 on PHP 8.2 and integration on PHP 8.1–8.3. Every cell records its actual runtime in a `runtime-<cell>` artifact and fails if that differs from the cell; `Required validation` joins them into `resolved-runtime-matrix`.
+Supported runtimes live in `.github/runtime-matrix.json`: WordPress 6.5 and PHP 8.0 minimums, PHP up to 8.4, `Tested up to` 7.1. Each cell pins exact WordPress, PHP, WooCommerce and Plugin Check versions and, at the oldest and current endpoints, the React that WordPress registers. Pull requests run WordPress 6.5.0 on PHP 8.0 and 7.1.3 on PHP 8.4, each single site then multisite, plus the counter gate at both endpoints, 6.5.13 on PHP 8.2, integration on PHP 8.1–8.3 and the real GETQUICK Design cell. Every cell records its actual runtime in a `runtime-<cell>` artifact and fails if that differs from the cell; `Required validation` joins them into `resolved-runtime-matrix`.
 
 `.github/workflows/compatibility.yml` runs nightly cells: the previous WordPress minor, MySQL 8.0 and MariaDB 10.11, a persistent object cache, subdomain multisite, Firefox and WebKit. It also runs nonblocking canaries (WordPress nightly, PHP 8.5, floating latest releases) and a discovery job that fails when upstream releases overtake a pin. A failed canary or discovery job turns the nightly run red so it gets noticed, but `Compatibility result` ignores it. A release runs every pull-request and nightly cell before publishing; canaries never block.
 
-Every cell uses the one-line GETQUICK Design fixture that `run.sh` writes. No CI cell yet installs the real private `gq-design` release; that needs a protected sandbox with registry credentials.
+#### Real GETQUICK Design cell
+
+Every cell but one uses the one-line GETQUICK Design fixture that `run.sh` writes. The `real-design` pull-request cell (WordPress 7.1.3, PHP 8.4, the Chromium acceptance suite) instead installs the GETQUICK Design release its `gqDesign` field pins. `scripts/ci/install-gq-design.sh` installs it like a Bedrock site does: Composer from the private registry through `https://proxy.composer.getquick.io`, then the Composer autoloader as a must-use plugin. The cell's runtime report fails unless that release ran with its classes loaded. `runtime-matrix.mjs policy` fails when no pull-request browser cell pins an exact release. To move the pin, change `gqDesign` in a reviewed PR; the release must exist in the registry.
+
+The registry login is the `COMPOSER_AUTH` secret of the `gq-design-sandbox` GitHub environment. It is a read-only proxy login of its own, revocable without touching any site. Only the cell's install step reads it; the cell itself runs without it. `scripts/ci/workflow-policy.mjs` fails when pull-request code reads a secret in a job without an environment. Pull requests from forks never receive the secret, so their `real-design` cell fails and `Required validation` fails with it: to validate a fork's change, a maintainer pushes its branch to this repository. Every branch pushed to this repository can read the login, which is the accepted cost of a required cell: it grants read access to the registry's packages and nothing else. This is the one exception to the research's credential-free pull-request tests (`docs/research/ci-compatibility-and-security-tests.md`), decided in #85.
+
+To provision or rotate the login, run in a `getquick-registry` checkout:
+
+1. `pnpm registry client add gq-support-ci --project <a Sigillo project for this CI login>`. This stores the login as `COMPOSER_AUTH` in that project.
+2. Create the `gq-support` environment `gq-design-sandbox` with no deployment branch rule: pull-request runs need it, and forks receive none of its secrets anyway.
+3. Copy that `COMPOSER_AUTH` value into the environment's `COMPOSER_AUTH` secret. Don't add it as a repository secret.
+
+To run the cell locally, export the same `COMPOSER_AUTH` and run `scripts/ci/run-cell.sh real-design`.
 
 - To update a pin or widen support, change `.github/runtime-matrix.json` and the plugin headers in one reviewed PR. `node scripts/ci/runtime-matrix.mjs policy` fails when the headers, Composer, PHPCS or PHPStan ranges differ from the cells that execute them. Widening the PHPStan range is not enough on its own: a pull-request cell must run that PHP version.
 - To run one cell locally, use `scripts/ci/run-cell.sh <cell-id>` on a fresh site, because WordPress and database versions are fixed when the site is created. Set `GQ_SUPPORT_TEST_URL` when the DDEV project has another name. Run the CI script tests with `pnpm test:ci`.

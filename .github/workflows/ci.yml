@@ -260,7 +260,8 @@ jobs:
 
   wordpress:
     # The pull-request cells of .github/runtime-matrix.json: WordPress 6.5.0 on PHP 8.0 and the
-    # current endpoint, single site then multisite, plus PHP 8.1–8.3 integration.
+    # current endpoint, single site then multisite, PHP 8.1–8.3 integration, and the real
+    # GETQUICK Design release in the gq-design-sandbox environment (wordpress-lane.yml).
     name: ${{ matrix.cell.name }}
     needs: plan
     if: contains(needs.plan.outputs.suites, '"wordpress"')

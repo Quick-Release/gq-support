@@ -2,9 +2,11 @@ name: WordPress runtime cell
 
 # One cell of .github/runtime-matrix.json on a fresh DDEV site: scripts/ci/run-cell.sh runs the
 # lifecycle integration, records and verifies the actual runtime, then the cell's browser suite,
-# multisite and Plugin Check. ci.yml calls it for pull-request cells; compatibility.yml for
-# nightly, pre-release and canary cells; release-plugin.yml with `package`, to run the cell on the
-# release candidate ZIP installed by WordPress instead of the checkout.
+# multisite and Plugin Check. A cell pinning `gqDesign` first installs that real GETQUICK Design
+# release from the private registry, with the login of the gq-design-sandbox environment. ci.yml
+# calls it for pull-request cells; compatibility.yml for nightly, pre-release and canary cells;
+# release-plugin.yml with `package`, to run the cell on the release candidate ZIP installed by
+# WordPress instead of the checkout.
 on:
   workflow_call:
     inputs:
@@ -24,6 +26,10 @@ jobs:
   cell:
     name: DDEV
     runs-on: ubuntu-latest
+    # The one environment with a secret: the GETQUICK registry login of a cell that pins a real
+    # GETQUICK Design release (`gqDesign`). Every other cell runs the fixture outside it. Pull
+    # requests from forks never receive the secret, so their real-release cell fails, closed.
+    environment: ${{ fromJSON(inputs.cell).gqDesign && 'gq-design-sandbox' || '' }}
     # A hung site or browser fails the cell instead of holding the required check open.
     timeout-minutes: 45
     steps:
@@ -79,6 +85,14 @@ jobs:
         env:
           DDEV_REDIS: ${{ fromJSON(inputs.cell).tools['ddev-redis'] }}
         run: ddev add-on get ddev/ddev-redis --version "$DDEV_REDIS"
+
+      # The login reaches only this step; the cell runs without it (scripts/ci/install-gq-design.sh).
+      - name: Install the real GETQUICK Design
+        if: fromJSON(inputs.cell).gqDesign
+        env:
+          COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
+          GQ_DESIGN: ${{ fromJSON(inputs.cell).gqDesign }}
+        run: scripts/ci/install-gq-design.sh "$GQ_DESIGN"
 
       - name: Run the cell
         env:
