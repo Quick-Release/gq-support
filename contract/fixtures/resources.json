@@ -9,7 +9,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "accepted-pending",
-      "status": null
+      "status": null,
+      "status_change": null
     },
     "valid": true,
     "create_status": 202
@@ -24,7 +25,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "accepted-pending",
-      "status": "open"
+      "status": "open",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -39,7 +41,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "accepted-pending",
-      "status": "closed"
+      "status": "closed",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -54,7 +57,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "accepted-pending",
-      "status": "invalid"
+      "status": "invalid",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -69,7 +73,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "delivered",
-      "status": null
+      "status": null,
+      "status_change": null
     },
     "valid": false,
     "create_status": 201
@@ -84,7 +89,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "delivered",
-      "status": "open"
+      "status": "open",
+      "status_change": null
     },
     "valid": true,
     "create_status": 201
@@ -99,7 +105,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "delivered",
-      "status": "closed"
+      "status": "closed",
+      "status_change": null
     },
     "valid": true,
     "create_status": 201
@@ -114,7 +121,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "delivered",
-      "status": "invalid"
+      "status": "invalid",
+      "status_change": null
     },
     "valid": false,
     "create_status": 201
@@ -129,7 +137,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "failed",
-      "status": null
+      "status": null,
+      "status_change": null
     },
     "valid": true,
     "create_status": 202
@@ -144,7 +153,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "failed",
-      "status": "open"
+      "status": "open",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -159,7 +169,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "failed",
-      "status": "closed"
+      "status": "closed",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -174,7 +185,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "failed",
-      "status": "invalid"
+      "status": "invalid",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -189,7 +201,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "outcome-unknown",
-      "status": null
+      "status": null,
+      "status_change": null
     },
     "valid": true,
     "create_status": 202
@@ -204,7 +217,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "outcome-unknown",
-      "status": "open"
+      "status": "open",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -219,7 +233,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "outcome-unknown",
-      "status": "closed"
+      "status": "closed",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -234,7 +249,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "outcome-unknown",
-      "status": "invalid"
+      "status": "invalid",
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
@@ -249,7 +265,8 @@
       "description": "Report",
       "created_at": "2026-09-28T10:00:00Z",
       "delivery": "invalid",
-      "status": null
+      "status": null,
+      "status_change": null
     },
     "valid": false,
     "create_status": 202
