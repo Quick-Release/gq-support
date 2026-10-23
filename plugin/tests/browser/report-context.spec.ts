@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { forgetLogIn, logIn, site, testSite, wp } from '../performance/test-site.cjs';
+import { forgetLogIn, logIn, site, sync, testSite, wp } from '../performance/test-site.cjs';
 
 // Report context in the panel (docs/support-context-design.md, acceptance cases 1, 2, 6, 7 and 9).
 // The WordPress preview is real; only the support REST routes are stubbed.
@@ -291,6 +291,7 @@ add_filter('gq_support_report_context', static function($candidate, $collection)
     return $candidate;
 }, 10, 2);
 `);
+  sync();
   try {
     const asked = previews(page);
     const submissions = await intercept(page);
@@ -314,5 +315,6 @@ add_filter('gq_support_report_context', static function($candidate, $collection)
     expect(submissions[0]!.context).toEqual({ schema: 1, default: { originating_screen: 'dashboard' } });
   } finally {
     rmSync(fixture, { force: true });
+    sync();
   }
 });
