@@ -68,6 +68,13 @@ _Avoid_: Full Site Health report, automatic diagnostics
 **Support status**:
 Whether a Support request's GitHub issue is open or closed. GitHub is authoritative for this status; what the Reporter sees is the service's last observation of it. An issue deleted or transferred out of the Project repository shows as closed, and an Operator is alerted. Delivery outcome is separate.
 
+**Status change**:
+A Reporter's or Support manager's request to close or reopen a delivered Support request. It is delivered to GitHub like a create, in order after it, and has its own delivery outcome. It never becomes a Support status of its own: the status is whatever GitHub then reports.
+_Avoid_: Status update, when GitHub's own change is meant
+
+**Change ID**:
+The browser's identity for one Status change, reused only to check an uncertain one again, so the service records it at most once. It is scoped to the Support request.
+
 **Engineering issue**:
 An issue used for internal project work in the same Project repository. It is never included in a Reporter's issue list merely because it shares a label or repository.
 
