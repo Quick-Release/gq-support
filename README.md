@@ -64,8 +64,8 @@ Pushing a `v*` tag sends a `plugin_updated` repository dispatch to
 as `client_payload.ref`. This starts its **Deploy Registry** workflow without
 waiting for the hourly build. Dispatch failures fail the notification job.
 
-The release workflow runs on `plugin-v*` tags. After its performance gates and
-package publishing succeed, its final job dispatches with the resulting `v*`
+The release workflow runs on `plugin-v*` tags. After its installed-package gates
+and package publishing succeed, its final job dispatches with the resulting `v*`
 package tag. This explicit call is necessary because the release workflow
 pushes that tag with `GITHUB_TOKEN`, which does not trigger push workflows.
 Branches, pull requests, and manual release runs do not send a dispatch.
@@ -162,6 +162,32 @@ While the `Protect main` ruleset still requires `Asset size gate`, `PHP result` 
 4. Make `Required validation` the ruleset's only required status check.
 5. Delete the `php-result` and `worker-result` jobs.
 
+### Release candidate and installed-package gates
+
+`.github/workflows/release-plugin.yml` builds the plugin once from the frozen lockfiles, assembles it once and packs it into `gq-support.zip` with `scripts/ci/release-package.mjs`. Packing verifies the archive and refuses it unless all of the following hold:
+
+- The archive has one `gq-support/` root and no absolute paths, traversal entries, symlinks or duplicate entries.
+- It contains exactly the expected runtime files: the main plugin file, `uninstall.php`, the readme, `composer.json`, every class the shipped PHP uses, the launcher, the built LTR and RTL assets, `index.asset.php`, and a `.mo` file and app JSON for each locale.
+- It contains no tests, sources, `node_modules`, `vendor`, tooling, logs, source maps or credential files, and the secret scan finds nothing.
+- The plugin header, `GQ_SUPPORT_VERSION` and `Stable tag` equal the requested version. The header and readme agree on `Requires at least` and `Requires PHP`.
+- `index.asset.php` depends on `wp-element` and not on `react-jsx-runtime`.
+- `composer.json` is a `wordpress-plugin` with `installer-name` `gq-support`. Its only runtime dependency is `composer/installers`, which the consuming project resolves, so the package ships no `vendor` directory.
+
+Packing records the archive's SHA-256 and a manifest with each file's digest. The artifact also keeps `provenance.json`: the commit, lockfile digests and toolchain.
+
+Two jobs use the candidate:
+
+- Read-only cells install it with WP-CLI's `wp plugin install` and nothing else. The cells run WordPress 6.5.0 on PHP 8.0 and 7.1.3 on PHP 8.4, each as acceptance and as the counter gate. Each cell checks the archive's digest first. It then checks that the installed directory is the extracted archive, file for file, and not a link to the source. After that it runs the lifecycle with GETQUICK Design absent and present, the browser suite or counters, and site-local then network activation on multisite. The stable cell also runs Plugin Check. `plugin/tests/integration/package.sh` adds these checks:
+  - A direct request to `uninstall.php` does nothing.
+  - A real uninstall removes only plugin-owned options, Administrator grants and Reporter subjects. It keeps a custom role's grant, unrelated options, user meta and scheduled events.
+  - The previous release, which is the composer tree behind the highest earlier `v*` tag, upgrades to the candidate through the package installer without an activation call. The upgrade keeps the installation identity, signing key, Reporter subjects and a deliberately revoked capability, and it makes no remote call.
+  - On multisite, a network uninstall cleans only the main site. Another site keeps its own rows until that site is deleted.
+- `publish` has the only write token. It refuses an archive whose bytes differ from the SHA-256 that the candidate job recorded as its output, then unpacks exactly the manifest's files and publishes that tree to the `composer` branch and the `v*` tag. Nothing is rebuilt between verification and publication. The commit and tag record the archive's SHA-256.
+
+To run one cell on a packed ZIP locally, use `scripts/assemble-plugin-package.sh package-dist`, then `node scripts/ci/release-package.mjs pack package-dist package-zip`, then `GQ_SUPPORT_PLUGIN_ZIP=package-zip/gq-support.zip scripts/ci/run-cell.sh <cell-id>` on a fresh site.
+
+Cells still use the GETQUICK Design fixture rather than the real private release. Release authorization stays with the rollout decision in #20.
+
 ### Lint, dependency audit and secret scan
 
 These gates feed `Required validation` like the suites above. None of them needs a credential.
@@ -171,7 +197,7 @@ These gates feed `Required validation` like the suites above. None of them needs
   - Fix an advisory by updating the dependency. When a parent pins a vulnerable version, add a scoped `overrides` entry in `pnpm-workspace.yaml` that names the advisory.
   - When no fix exists, add an entry to `.github/dependency-audit-exceptions.json`. It needs `tool`, `advisory` (any of its IDs), `package`, `via` (for pnpm, the dependency-path prefix it was judged for), `owner`, `reason` and `expires`. The expiry may be at most 120 days ahead. An exception covers nothing outside its path prefix, an expired one fails the gate, and an unused one is reported so it can be removed.
 - **Secret scan** (`pnpm scan:secrets`). `scripts/ci/gitleaks.sh` runs gitleaks 8.30.1, which is downloaded once and refused unless its SHA-256 matches the pin. Every output is redacted. Gitleaks' default rules are extended in `.gitleaks.toml` with rules for this project's secrets: the generated and constant-backed WordPress signing keys, GitHub App webhook secrets, and WordPress auth cookies and nonces. GitHub App PEMs and provider tokens are covered by the default rules.
-  - Every CI run scans every commit's changes over the full history. The size job scans the assembled package, and a release scans it again before publishing.
+  - Every CI run scans every commit's changes over the full history. The size job packs and verifies the installable ZIP, secret scan included. A release does the same at the requested version, and scans the archive again when it uploads it.
   - Workflows may upload artifacts only through `.github/actions/upload-scanned-artifact`. It scans the files with `scripts/ci/scan-artifact.sh`, including inside archives, before uploading them, and it requires `retention-days`. A failure diagnostic that contains a secret is therefore withheld and fails its job.
   - `scripts/ci/secret-scan.test.mjs` generates a canary for every rule and checks that each one is caught and that the output is redacted. It also checks that the public keys, signatures and the shared fixture in `contract/fixtures/signing.json` pass. That fixture is allowed only at that path and only with that value.
   - Content without a recognisable format, such as Submitted text, Reporter subjects or Submission IDs, is caught by canary. A test that wants to detect such a leak builds `gqcanary_` plus at least 20 random lowercase letters or digits at run time. Any scanned log, response or artifact that contains the canary then fails. The canary must not appear literally in source.

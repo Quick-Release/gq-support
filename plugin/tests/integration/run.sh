@@ -14,8 +14,15 @@ runtime_config=.ddev/config.gq-runtime.yaml
 } > "$runtime_config"
 [[ -s "$runtime_config" ]] || rm "$runtime_config"
 mkdir -p .test-site/wp-content/plugins/gq-design .test-site/wp-content/plugins
-# GQ_SUPPORT_PLUGIN_DIR installs another tree, such as the release package, in place of plugin/.
-ln -sfn "../../../${GQ_SUPPORT_PLUGIN_DIR:-plugin}" .test-site/wp-content/plugins/gq-support
+# GQ_SUPPORT_PLUGIN_DIR links another tree, such as the assembled package, in place of plugin/.
+# GQ_SUPPORT_PLUGIN_ZIP (repository-relative) installs a release ZIP instead, once WordPress is up.
+installed=.test-site/wp-content/plugins/gq-support
+if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" ]]; then
+  [[ ! -L "$installed" ]] || rm "$installed"
+else
+  [[ -L "$installed" || ! -e "$installed" ]] || rm -rf "$installed"
+  ln -sfn "../../../${GQ_SUPPORT_PLUGIN_DIR:-plugin}" "$installed"
+fi
 printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > .test-site/wp-content/plugins/gq-design/gq-design.php
 ddev start
 # A running site keeps its PHP until restarted, including after an earlier cell's override.
@@ -50,6 +57,11 @@ if [[ -n "${GQ_SUPPORT_REDIS_CACHE_VERSION:-}" ]]; then
   wp config set WP_REDIS_HOST redis
   wp plugin install redis-cache --version="$GQ_SUPPORT_REDIS_CACHE_VERSION" --activate
   wp redis enable --force
+fi
+if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" ]]; then
+  # WordPress's package installer unpacks the archive; the site then runs exactly those files.
+  wp plugin install "$GQ_SUPPORT_PLUGIN_ZIP" --force
+  node scripts/ci/release-package.mjs installed "$(dirname "$GQ_SUPPORT_PLUGIN_ZIP")" "$installed"
 fi
 if wp plugin is-active gq-support 2>/dev/null; then wp plugin deactivate gq-support; fi
 if wp plugin is-active gq-design 2>/dev/null; then wp plugin deactivate gq-design; fi

@@ -399,7 +399,8 @@ switch ( $gq_support_scenario ) {
 		$gq_support_subject_key = $wpdb->get_blog_prefix() . 'gq_support_reporter_uninstall-test';
 		update_user_meta( 1, $gq_support_subject_key, 'owned-subject' );
 		update_user_meta( 1, 'gq_support_independent_meta', 'keep' );
-		require dirname( __DIR__, 2 ) . '/uninstall.php';
+		// The running copy's uninstall.php: the installed release package, when that is under test.
+		require GQ_SUPPORT_PLUGIN_DIR . 'uninstall.php';
 		if ( '' !== get_user_meta( 1, $gq_support_subject_key, true ) || 'keep' !== get_user_meta( 1, 'gq_support_independent_meta', true ) ) {
 			$gq_support_fail( 'Uninstall did not remove exactly this site\'s Reporter mappings.' );
 		}

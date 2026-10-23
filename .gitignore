@@ -23,6 +23,7 @@ package-dist/
 .bench-base/
 benchmark-results/
 .ddev/config.gq-runtime.yaml
+package-zip/
 runtime-results/
 audit-results/
 secret-scan/

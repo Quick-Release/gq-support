@@ -12,8 +12,8 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const SCANNED_UPLOAD = './.github/actions/upload-scanned-artifact';
-// Report directories that only ever hold test and scan output.
-const UPLOAD_PATHS = new Set(['audit-results/', 'benchmark-results/', 'package-dist/', 'plugin/phpcs-report.xml', 'runtime-results/', 'runtime-results/resolved-matrix.json', 'secret-scan/', 'test-results/']);
+// Report directories that only ever hold test and scan output, and the release candidate.
+const UPLOAD_PATHS = new Set(['audit-results/', 'benchmark-results/', 'package-zip/', 'plugin/phpcs-report.xml', 'runtime-results/', 'runtime-results/resolved-matrix.json', 'secret-scan/', 'test-results/']);
 // Jobs that may write although their workflow runs on pull requests, and why.
 const WRITERS = {
   // Runs only on a manual `simulate` dispatch, to cancel its own run.

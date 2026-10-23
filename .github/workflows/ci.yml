@@ -250,12 +250,13 @@ jobs:
       - name: Size gate and its negative controls
         run: pnpm test:size
 
-      # The built assets are the only package files the history scan cannot see; a release scans
-      # the package again before it is published.
-      - name: Secret scan of the assembled package
+      # The built assets are the only package files the history scan cannot see. Packing runs the
+      # release ZIP verification, secret scan included, at the plugin header's version; a release
+      # packs and verifies again at the requested version, then tests the installed ZIP.
+      - name: Package and verify the installable ZIP
         run: |
           scripts/assemble-plugin-package.sh package-dist
-          scripts/ci/gitleaks.sh dir --verbose package-dist
+          node scripts/ci/release-package.mjs pack package-dist package-zip
 
   wordpress:
     # The pull-request cells of .github/runtime-matrix.json: WordPress 6.5.0 on PHP 8.0 and the

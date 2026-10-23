@@ -27,9 +27,12 @@ export const RULES = [
   { pattern: /^eslint\.config\.mjs$|^plugin\/app\/eslint\.config\.cjs$|^scripts\/lint-gate\.test\.mjs$/, suites: ['lint'] },
   // Shared contract fixtures and both signing implementations must agree in both languages.
   { pattern: /^contract\//, suites: ['wordpress', 'worker'] },
-  { pattern: /^plugin\/includes\/class-gq-support-sign(er|ing-key)\.php$/, suites: ['php', 'wordpress', 'worker'] },
+  { pattern: /^plugin\/includes\/class-gq-support-sign(er|ing-key)\.php$/, suites: ['php', 'size', 'wordpress', 'worker'] },
   { pattern: /^worker\/src\/signature\.ts$/, suites: ['lint', 'wordpress', 'worker'] },
   { pattern: /^worker\//, suites: ['lint', 'worker'] },
+  // Files the release package ships: the size job packs and verifies the installable ZIP.
+  { pattern: /^plugin\/(gq-support\.php|uninstall\.php|composer\.json|includes\/.*\.php)$/, suites: ['php', 'size', 'wordpress'] },
+  { pattern: /^plugin\/(readme\.txt|languages\/)/, suites: ['size', 'wordpress'] },
   { pattern: /^plugin\/.*\.php$|^plugin\/(composer\.(json|lock)|\.phpcs\.xml\.dist|phpstan\.neon\.dist)$/, suites: ['php', 'wordpress'] },
   { pattern: /^plugin\/(app|assets|tests\/performance)\//, suites: ['lint', 'size', 'wordpress'] },
   { pattern: /^plugin\/tests\/.*\.(?:[cm]?js|ts)$/, suites: ['lint', 'wordpress'] },

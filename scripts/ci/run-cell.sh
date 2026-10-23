@@ -4,7 +4,10 @@
 # Needs a fresh site (WordPress and database versions are fixed when the site is created), a built
 # app and, for browser cells, the cell's Playwright engine. The object-cache cell also needs the
 # ddev-redis add-on in .ddev. Runtime reports land in runtime-results/.
+# GQ_SUPPORT_PLUGIN_ZIP (repository-relative) runs the cell on a release ZIP installed by WordPress
+# instead of the plugin/ checkout, adding its uninstall and previous-release upgrade (package.sh).
 #   scripts/ci/run-cell.sh minimum
+#   GQ_SUPPORT_PLUGIN_ZIP=package-zip/gq-support.zip scripts/ci/run-cell.sh stable
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # An assignment keeps a failed lookup fatal; eval of a failed substitution would not be.
@@ -41,6 +44,12 @@ if [[ -n "$CELL_SUITE" ]]; then
   echo '::endgroup::'
 fi
 
+if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" ]]; then
+  echo '::group::Installed package uninstall and upgrade'
+  bash plugin/tests/integration/package.sh single
+  echo '::endgroup::'
+fi
+
 if [[ -n "$CELL_MULTISITE" ]]; then
   echo "::group::Multisite ($CELL_MULTISITE) lifecycle and cleanup"
   GQ_SUPPORT_MULTISITE=$CELL_MULTISITE bash plugin/tests/integration/multisite.sh
@@ -58,6 +67,13 @@ if [[ -n "$CELL_PLUGIN_CHECK" ]]; then
   wp plugin check gq-support \
     --exclude-directories=tests,app,vendor \
     --exclude-files=composer.json,composer.lock,phpstan.neon.dist,.phpcs.xml.dist
+  echo '::endgroup::'
+fi
+
+# Last: it deletes the installed copy.
+if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" && -n "$CELL_MULTISITE" ]]; then
+  echo '::group::Installed package network uninstall'
+  bash plugin/tests/integration/package.sh network
   echo '::endgroup::'
 fi
 echo "Cell $CELL_NAME passed."

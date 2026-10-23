@@ -3,13 +3,18 @@ name: WordPress runtime cell
 # One cell of .github/runtime-matrix.json on a fresh DDEV site: scripts/ci/run-cell.sh runs the
 # lifecycle integration, records and verifies the actual runtime, then the cell's browser suite,
 # multisite and Plugin Check. ci.yml calls it for pull-request cells; compatibility.yml for
-# nightly, pre-release and canary cells.
+# nightly, pre-release and canary cells; release-plugin.yml with `package`, to run the cell on the
+# release candidate ZIP installed by WordPress instead of the checkout.
 on:
   workflow_call:
     inputs:
       cell:
         description: One entry of `node scripts/ci/runtime-matrix.mjs cells`, as JSON
         required: true
+        type: string
+      package:
+        description: Name of an artifact holding gq-support.zip and its manifest (scripts/ci/release-package.mjs)
+        default: ""
         type: string
 
 permissions:
@@ -23,6 +28,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # A package run upgrades from the previous release's tag (plugin/tests/integration/package.sh).
+          fetch-depth: ${{ inputs.package != '' && '0' || '1' }}
 
       - uses: ddev/github-action-setup-ddev@fdf2f5c97943bae638f31df6df86f1defa6210c0 # v1.12.1
         with:
@@ -39,9 +47,26 @@ jobs:
           cache: pnpm
 
       - name: Build the Reporter app
+        if: inputs.package == ''
         run: |
           pnpm install --frozen-lockfile
           pnpm build:app
+
+      # The candidate is never rebuilt here: these are the bytes the release publishes.
+      - name: Install the test tools
+        if: inputs.package != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the release candidate
+        if: inputs.package != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.package }}
+          path: package-zip
+
+      - name: Verify the candidate's recorded digest
+        if: inputs.package != ''
+        run: node scripts/ci/release-package.mjs verify package-zip
 
       - name: Install the Playwright engine
         if: fromJSON(inputs.cell).browser
@@ -58,13 +83,14 @@ jobs:
       - name: Run the cell
         env:
           CELL_ID: ${{ fromJSON(inputs.cell).id }}
+          GQ_SUPPORT_PLUGIN_ZIP: ${{ inputs.package != '' && 'package-zip/gq-support.zip' || '' }}
         run: scripts/ci/run-cell.sh "$CELL_ID"
 
       - name: Keep the runtime report
         if: always()
         uses: ./.github/actions/upload-scanned-artifact
         with:
-          name: runtime-${{ fromJSON(inputs.cell).id }}
+          name: ${{ inputs.package != '' && 'package-' || '' }}runtime-${{ fromJSON(inputs.cell).id }}
           path: runtime-results/
           if-no-files-found: ignore
           retention-days: 30
@@ -75,7 +101,7 @@ jobs:
         if: always() && fromJSON(inputs.cell).suite
         uses: ./.github/actions/upload-scanned-artifact
         with:
-          name: playwright-results-${{ fromJSON(inputs.cell).id }}
+          name: ${{ inputs.package != '' && 'package-' || '' }}playwright-results-${{ fromJSON(inputs.cell).id }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 30
