@@ -70,7 +70,7 @@ Transport implementation must extend the strict browser and Worker create schema
 
 ## Native extension contracts
 
-Proposed PHP signatures, introduced with implementation and documented with `@since`; these hooks do not exist today:
+PHP signatures, documented with `@since`; see [Native Support extensions](support-extension-hooks.md) for the implementation, repeated-observation semantics and callback responsibilities:
 
 ```php
 $candidate = apply_filters( 'gq_support_report_context', $candidate, $collection );

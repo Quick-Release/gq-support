@@ -274,3 +274,15 @@ msgstr "Suspenso pelo serviço"
 
 msgid "Service unreachable"
 msgstr "Serviço inacessível"
+
+msgid "Copied or moved"
+msgstr "Copiado ou movido"
+
+msgid "Rejected"
+msgstr "Rejeitado"
+
+msgid "Local connection state"
+msgstr "Estado local da ligação"
+
+msgid "Local connection state only. No live service check has been performed."
+msgstr "Apenas o estado local da ligação. Não foi efetuada uma verificação do serviço em tempo real."

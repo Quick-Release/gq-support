@@ -137,21 +137,53 @@ final class GQ_Support_Report_Context {
 	 * @return array{context: Context, omitted: bool}
 	 */
 	public static function collect( string $screen ): array {
-		$candidate = array(
-			'wp_version'             => get_bloginfo( 'version' ),
-			'support_plugin_version' => GQ_SUPPORT_VERSION,
-		) + ( in_array( $screen, self::SCREENS, true ) ? array( 'originating_screen' => $screen ) : array() );
-		// The Report context filter (#72) runs here, before every value is validated again.
-		$fields = array();
-		foreach ( $candidate as $key => $value ) {
-			if ( null !== self::normalize(
-				array(
-					'schema'  => self::SCHEMA,
-					'default' => array( $key => $value ),
-				)
-			) ) {
-				$fields[ $key ] = $value;
+		$candidate  = array(
+			'schema'  => self::SCHEMA,
+			'default' => array(
+				'wp_version'             => get_bloginfo( 'version' ),
+				'support_plugin_version' => GQ_SUPPORT_VERSION,
+			) + ( in_array( $screen, self::SCREENS, true ) ? array( 'originating_screen' => $screen ) : array() ),
+		);
+		$collection = array( 'phase' => 'default' ) + ( in_array( $screen, self::SCREENS, true ) ? array( 'originating_screen' => $screen ) : array() );
+		try {
+			/**
+			 * Filter optional facts only during explicit collection, before review.
+			 * Installed PHP is privileged: callbacks must use bounded local reads.
+			 * Values are validated again below; no technical phase is enabled.
+			 *
+			 * @since 0.1.10
+			 * @param array $candidate  Schema and default context fields.
+			 * @param array $collection Phase and optional coarse originating screen only.
+			 */
+			$candidate = apply_filters( 'gq_support_report_context', $candidate, $collection );
+		} catch ( Throwable $e ) {
+			// Never log callback output or exception details. Reporting can continue without context.
+			$candidate = null;
+		}
+		$fields  = array();
+		$omitted = false;
+		if ( ! is_array( $candidate ) || self::SCHEMA !== ( $candidate['schema'] ?? null ) || ! is_array( $candidate['default'] ?? null ) ) {
+			$omitted = true;
+		} else {
+			// Discard unknown/forbidden-phase fields without allowing runtime schema registration.
+			$omitted = count( $candidate ) > 2 || count( $candidate['default'] ) > self::DEFAULT_KEYS;
+			foreach ( self::FIELDS as $key => $grammar ) {
+				if ( ! array_key_exists( $key, $candidate['default'] ) ) {
+					continue;
+				}
+				$value = $candidate['default'][ $key ];
+				if ( null !== self::normalize(
+					array(
+						'schema'  => self::SCHEMA,
+						'default' => array( $key => $value ),
+					)
+				) ) {
+					$fields[ $key ] = $value;
+				} else {
+					$omitted = true;
+				}
 			}
+			$omitted = $omitted || count( $fields ) < count( $candidate['default'] );
 		}
 		$context = self::normalize(
 			array(
@@ -164,7 +196,7 @@ final class GQ_Support_Report_Context {
 				'schema'  => self::SCHEMA,
 				'default' => array(),
 			),
-			'omitted' => null === $context || count( $fields ) < count( $candidate ),
+			'omitted' => $omitted || null === $context,
 		);
 	}
 

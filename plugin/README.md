@@ -55,3 +55,9 @@ Packagist:
 The release artifact has the plugin file at its root, so Composer installs it
 as `gq-support/gq-support.php` rather than nesting the plugin under the source
 monorepo’s `plugin/` directory.
+
+## Native extensions and Site Health
+
+See [Native Support extensions](https://github.com/Quick-Release/gq-support/blob/main/docs/support-extension-hooks.md) for the
+review-time context filter, durable-acceptance and delivery-observation actions,
+and local-only Site Health information. Technical details remain disabled.

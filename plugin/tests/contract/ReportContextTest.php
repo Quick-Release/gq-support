@@ -119,7 +119,7 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 		};
 		add_filter( 'pre_http_request', $this->stub, 10, 3 );
 		$this->observer = function () {
-			if ( str_starts_with( current_filter(), 'gq_support' ) ) {
+			if ( str_starts_with( current_filter(), 'gq_support' ) && 'gq_support_report_context' !== current_filter() ) {
 				$this->hooks[] = wp_json_encode( func_get_args() );
 			}
 		};
@@ -322,6 +322,282 @@ final class GQ_Support_Report_Context_Test extends TestCase {
 			'submission_id' => self::SUBMISSION,
 			'screen'        => 'post-editor',
 		);
+	}
+
+	/** Approved extension values are previewed before signing; removals stay removed on send. */
+	public function test_context_filter_runs_only_at_preview_with_coarse_collection_metadata(): void {
+		$calls  = array();
+		$filter = static function ( $candidate, $collection ) use ( &$calls ) {
+			$calls[]                            = array( $candidate, $collection );
+			$candidate['default']['wp_version'] = '6.5.99';
+			unset( $candidate['default']['support_plugin_version'] );
+			return $candidate;
+		};
+		add_filter( 'gq_support_report_context', $filter, 10, 2 );
+		try {
+			self::assertCount( 0, $calls );
+			$preview = $this->preview( self::preview_fields() );
+			self::assertCount( 1, $calls );
+			self::assertSame( self::editor_context(), $calls[0][0] );
+			self::assertSame(
+				array(
+					'phase'              => 'default',
+					'originating_screen' => 'post-editor',
+				),
+				$calls[0][1]
+			);
+			self::assertSame(
+				array(
+					'wp_version'         => '6.5.99',
+					'originating_screen' => 'post-editor',
+				),
+				$preview['context']['default']
+			);
+			self::assertFalse( $preview['omitted'] );
+			$selected = array(
+				'schema'  => 1,
+				'default' => array(),
+			);
+			self::assertSame( 202, $this->create( $this->reviewed( $selected, $preview['review'] ) )->get_status() );
+			self::assertCount( 1, $calls );
+			self::assertSame( '{"schema":1,"default":{}}', $this->forwarded_context() );
+		} finally {
+			remove_filter( 'gq_support_report_context', $filter );
+		}
+	}
+
+	/** Untrusted callback shapes and scalars cannot extend the fixed context schema. */
+	public function test_adversarial_context_callbacks_are_omitted_before_preview(): void {
+		$bad = array(
+			'unknown'   => array( 'customer' => 'Customer text' ),
+			'url'       => array( 'wp_version' => 'https://example.test/?_wpnonce=secret' ),
+			'html'      => array( 'wp_version' => '6.5<script>alert(1)</script>' ),
+			'text'      => array( 'support_plugin_version' => 'Customer private text' ),
+			'oversized' => array( 'wp_version' => str_repeat( '6', 257 ) ),
+			'nested'    => array( 'wp_version' => array( 'secret' ) ),
+			'object'    => array( 'wp_version' => (object) array( 'secret' ) ),
+			'utf8'      => array( 'wp_version' => '6.5' . chr( 255 ) ),
+			'phase'     => array( 'php_version' => '8.0' ),
+		);
+		foreach ( $bad as $name => $fields ) {
+			$filter = static function ( $candidate ) use ( $fields ) {
+				$candidate['default']     = $fields;
+				$candidate['technical']   = array( 'php_version' => '8.0' );
+				$candidate['environment'] = 'forged';
+				return $candidate;
+			};
+			add_filter( 'gq_support_report_context', $filter );
+			try {
+				$preview = $this->preview( self::preview_fields() );
+				self::assertSame( 'current', $preview['state'], $name );
+				self::assertSame(
+					array(
+						'schema'  => 1,
+						'default' => array(),
+					),
+					$preview['context'],
+					$name
+				);
+				self::assertTrue( $preview['omitted'], $name );
+			} finally {
+				remove_filter( 'gq_support_report_context', $filter );
+			}
+		}
+		foreach ( array(
+			null,
+			new WP_Error( 'secret', 'Customer text' ),
+			'secret',
+			array(
+				'schema'  => 99,
+				'default' => array(),
+			),
+		) as $invalid ) {
+			$filter = static fn() => $invalid;
+			add_filter( 'gq_support_report_context', $filter );
+			try {
+				$preview = $this->preview( self::preview_fields() );
+				self::assertSame( array(), $preview['context']['default'] );
+				self::assertTrue( $preview['omitted'] );
+			} finally {
+				remove_filter( 'gq_support_report_context', $filter );
+			}
+		}
+		$filter = static function () {
+			throw new Error( 'secret customer exception' );
+		};
+		add_filter( 'gq_support_report_context', $filter );
+		try {
+			$preview = $this->preview( self::preview_fields() );
+			self::assertSame( array(), $preview['context']['default'] );
+			self::assertTrue( $preview['omitted'] );
+			self::assertSame(
+				202,
+				$this->create(
+					array(
+						'submission_id' => self::SUBMISSION,
+						'description'   => 'Plain report',
+					)
+				)->get_status()
+			);
+		} finally {
+			remove_filter( 'gq_support_report_context', $filter );
+		}
+	}
+
+	/** Only validated durable acceptance notifies observers, with public identity and outcome only. */
+	public function test_durable_acceptance_observers_cannot_change_the_result(): void {
+		$this->reply['id'] = 'req_01J8Z6Q4M1ZC7X000000000000';
+		$events            = array();
+		$observer          = static function ( ...$args ) use ( &$events ) {
+			$events[] = array( current_filter(), $args );
+			throw new RuntimeException( 'secret customer exception' );
+		};
+		add_action( 'gq_support_report_accepted', $observer, 10, 2 );
+		add_action( 'gq_support_report_delivery_changed', $observer, 10, 2 );
+		self::assertFalse( doing_action( 'gq_support_report_accepted' ) );
+		try {
+			$body = array(
+				'submission_id' => self::SUBMISSION,
+				'description'   => 'Private description',
+			);
+			self::assertSame( 202, $this->create( $body )->get_status() );
+			self::assertSame( array( array( 'gq_support_report_accepted', array( $this->reply['id'], 'accepted-pending' ) ) ), $events );
+			// Catching preserves the result, but WordPress does not unwind a throwing hook.
+			self::assertTrue( doing_action( 'gq_support_report_accepted' ) );
+			// Accepted replay may notify again; no exactly-once promise.
+			self::assertSame( 202, $this->create( $body )->get_status() );
+			self::assertCount( 2, $events );
+			$this->upstream_status   = 201;
+			$this->reply['delivery'] = 'delivered';
+			$this->reply['status']   = 'open';
+			self::assertSame( 201, $this->create( $body )->get_status() );
+			self::assertSame( array( 'gq_support_report_accepted', array( $this->reply['id'], 'delivered' ) ), $events[2] );
+			self::assertSame( array( 'gq_support_report_delivery_changed', array( $this->reply['id'], 'delivered' ) ), $events[3] );
+			foreach ( array( 202, 409, 500, 503, 504 ) as $status ) {
+				$this->upstream_status = $status;
+				$this->create( $body );
+			}
+			// The 202/delivered mismatch and all errors emit nothing.
+			self::assertCount( 4, $events );
+		} finally {
+			remove_action( 'gq_support_report_accepted', $observer );
+			remove_action( 'gq_support_report_delivery_changed', $observer );
+		}
+	}
+
+	/** A failed same-key replay confirms prior durable acceptance before terminal delivery. */
+	public function test_failed_create_replay_emits_acceptance_before_delivery(): void {
+		$this->reply['id'] = 'req_01J8Z6Q4M1ZC7X000000000000';
+		$body              = array(
+			'submission_id' => self::SUBMISSION,
+			'description'   => 'Private description',
+		);
+		self::assertSame( 202, $this->create( $body )->get_status() );
+		$this->hooks             = array();
+		$this->reply['delivery'] = 'failed';
+		$this->reply['status']   = null;
+		$response                = $this->create( $body );
+		self::assertSame( 202, $response->get_status() );
+		self::assertSame( 'failed', $response->get_data()['delivery'] );
+		self::assertSame(
+			array(
+				wp_json_encode( array( 'gq_support_report_accepted', $this->reply['id'], 'failed' ) ),
+				wp_json_encode( array( 'gq_support_report_delivery_changed', $this->reply['id'], 'failed' ) ),
+			),
+			$this->hooks
+		);
+	}
+
+	/** Refresh/list observes confirmed terminal delivery only, after validating the entire result. */
+	public function test_delivery_observations_are_safe_repeatable_and_never_accept_reads(): void {
+		$this->reply['id'] = 'req_01J8Z6Q4M1ZC7X000000000000';
+		$events            = array();
+		$observer          = static function ( ...$args ) use ( &$events ) {
+			$events[] = array( current_filter(), $args );
+		};
+		add_action( 'gq_support_report_accepted', $observer, 10, 2 );
+		add_action( 'gq_support_report_delivery_changed', $observer, 10, 2 );
+		try {
+			$this->upstream_status = 200;
+			$item                  = $this->reply;
+			foreach ( array( 'accepted-pending', 'outcome-unknown', 'failed', 'delivered', 'delivered' ) as $outcome ) {
+				$this->reply             = $item;
+				$this->reply['delivery'] = $outcome;
+				$this->reply['status']   = 'delivered' === $outcome ? 'open' : null;
+				$request                 = new WP_REST_Request( 'GET', '/gq-support/v1/requests/' . $item['id'] );
+				$request->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
+				self::assertSame( 200, rest_do_request( $request )->get_status() );
+			}
+			self::assertSame(
+				array(
+					array( 'gq_support_report_delivery_changed', array( $item['id'], 'failed' ) ),
+					array( 'gq_support_report_delivery_changed', array( $item['id'], 'delivered' ) ),
+					array( 'gq_support_report_delivery_changed', array( $item['id'], 'delivered' ) ),
+				),
+				$events
+			);
+			$terminal    = $this->reply;
+			$this->reply = array(
+				'items'       => array( $terminal ),
+				'next_cursor' => null,
+			);
+			$request     = new WP_REST_Request( 'GET', '/gq-support/v1/requests' );
+			$request->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
+			self::assertSame( 200, rest_do_request( $request )->get_status() );
+			self::assertCount( 4, $events );
+			$foreign                    = $terminal;
+			$foreign['installation_id'] = 'foreign';
+			$this->reply['items'][]     = $foreign;
+			self::assertSame( 404, rest_do_request( $request )->get_status() );
+			self::assertCount( 4, $events );
+			$this->reply       = $terminal;
+			$this->reply['id'] = 'secret-customer-id';
+			$request           = new WP_REST_Request( 'GET', '/gq-support/v1/requests/secret-customer-id' );
+			$request->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
+			rest_do_request( $request );
+			self::assertCount( 4, $events );
+		} finally {
+			remove_action( 'gq_support_report_accepted', $observer );
+			remove_action( 'gq_support_report_delivery_changed', $observer );
+		}
+	}
+
+	/** Site Health exposes two allowlisted local fields and performs no collection or service I/O. */
+	public function test_site_health_is_a_local_allowlisted_snapshot(): void {
+		$collections = 0;
+		$filter      = static function ( $value ) use ( &$collections ) {
+			++$collections;
+			return $value;
+		};
+		add_filter( 'gq_support_report_context', $filter );
+		try {
+			foreach ( array( 'connected', 'not_connected', 'copied_or_moved', 'rejected', '<script>secret</script>' ) as $connection ) {
+				GQ_Support_State::update(
+					array(
+						'connection' => $connection,
+						'key_id'     => 'secret',
+						'last_test'  => array(
+							'result' => 'secret',
+							'at'     => 1,
+						),
+					)
+				);
+				$info = apply_filters( 'debug_information', array() );
+				self::assertArrayHasKey( 'gq-support', $info );
+				$section = $info['gq-support'];
+				self::assertSame( array( 'version', 'connection' ), array_keys( $section['fields'] ) );
+				self::assertSame( GQ_SUPPORT_VERSION, $section['fields']['version']['value'] );
+				foreach ( $section['fields'] as $field ) {
+					self::assertSame( esc_html( $field['value'] ), $field['value'] );
+				}
+				self::assertStringNotContainsString( 'secret', self::json( $section ) );
+				self::assertStringNotContainsString( 'https:', self::json( $section ) );
+			}
+			self::assertSame( 0, $collections );
+			self::assertCount( 0, $this->calls );
+		} finally {
+			remove_filter( 'gq_support_report_context', $filter );
+		}
 	}
 
 	/** Each side's limits are the shared ones. */
