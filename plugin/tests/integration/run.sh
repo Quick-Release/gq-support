@@ -2,6 +2,8 @@
 # Run from the repository root; creates an isolated disposable DDEV WordPress site.
 # A CI matrix cell (.github/runtime-matrix.json) selects its runtime with WP_VERSION,
 # GQ_SUPPORT_PHP_VERSION (8.0) and GQ_SUPPORT_DATABASE (mysql:8.0); unset keeps .ddev/config.yaml.
+# GQ_SUPPORT_DESIGN_VERSION (0.8.1) installs that real GETQUICK Design release with
+# scripts/ci/install-gq-design.sh; unset writes a one-line fixture in its place.
 # An existing site keeps its WordPress and database, so switching either needs a fresh site.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
@@ -13,7 +15,7 @@ runtime_config=.ddev/config.gq-runtime.yaml
   [[ -z "${GQ_SUPPORT_DATABASE:-}" ]] || printf 'database:\n  type: %s\n  version: "%s"\n' "${GQ_SUPPORT_DATABASE%%:*}" "${GQ_SUPPORT_DATABASE#*:}"
 } > "$runtime_config"
 [[ -s "$runtime_config" ]] || rm "$runtime_config"
-mkdir -p .test-site/wp-content/plugins/gq-design .test-site/wp-content/plugins
+mkdir -p .test-site/wp-content/plugins
 # GQ_SUPPORT_PLUGIN_DIR links another tree, such as the assembled package, in place of plugin/.
 # GQ_SUPPORT_PLUGIN_ZIP (repository-relative) installs a release ZIP instead, once WordPress is up.
 installed=.test-site/wp-content/plugins/gq-support
@@ -23,7 +25,16 @@ else
   [[ -L "$installed" || ! -e "$installed" ]] || rm -rf "$installed"
   ln -sfn "../../../${GQ_SUPPORT_PLUGIN_DIR:-plugin}" "$installed"
 fi
-printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > .test-site/wp-content/plugins/gq-design/gq-design.php
+design=.test-site/wp-content/plugins/gq-design
+if [[ -n "${GQ_SUPPORT_DESIGN_VERSION:-}" ]]; then
+  bash scripts/ci/install-gq-design.sh "$GQ_SUPPORT_DESIGN_VERSION"
+else
+  # Replace an earlier cell's real release.
+  [[ ! -L "$design" ]] || rm "$design"
+  rm -f .test-site/wp-content/mu-plugins/gq-design-autoload.php
+  mkdir -p "$design"
+  printf '%s\n' '<?php /* Plugin Name: GETQUICK Design */ define( "GETQUICK_DESIGN_VERSION", "test" );' > "$design/gq-design.php"
+fi
 ddev start
 # A running site keeps its PHP until restarted, including after an earlier cell's override.
 php_version=${GQ_SUPPORT_PHP_VERSION:-$(sed -n 's/^php_version: *"\(.*\)"/\1/p' .ddev/config.yaml)}

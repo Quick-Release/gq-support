@@ -12,7 +12,8 @@ on:
       - "plugin-v*"
 
 # Candidate verification holds no publication or deployment credential: every job before publish
-# has a read-only token and no secrets. publish promotes the exact ZIP those jobs tested, after
+# has a read-only token, and its one secret is the read-only GETQUICK registry login that the
+# real-design cell reads in the gq-design-sandbox environment (wordpress-lane.yml). publish promotes the exact ZIP those jobs tested, after
 # checking its recorded SHA-256; nothing is rebuilt between verification and publication.
 permissions:
   contents: read
@@ -137,6 +138,8 @@ jobs:
     uses: ./.github/workflows/compatibility.yml
     with:
       tiers: pr scheduled
+    secrets:
+      COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
 
   publish:
     name: Publish Composer package

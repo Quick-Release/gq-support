@@ -69,6 +69,22 @@ test('the oldest and stable boundaries must state the WordPress-provided React t
   assert.match(checkPolicy(unexpected, sources).join('\n'), /React/);
 });
 
+test('a pull-request browser cell installs the real GETQUICK Design at an exact release', () => {
+  const real = cellsFor(manifest, ['pr']).filter((c) => c.gqDesign);
+  assert.ok(real.some((c) => /^\d+\.\d+\.\d+$/.test(c.gqDesign) && c.browser && c.suite === 'acceptance'));
+  assert.match(real[0].name, /GETQUICK Design \d+\.\d+\.\d+/);
+  assert.ok(cellsFor(manifest, ['pr']).filter((c) => !c.gqDesign).every((c) => !/GETQUICK Design/.test(c.name)));
+});
+
+test('dropping the real GETQUICK Design cell, or floating its release, fails', () => {
+  const fixtureOnly = copy();
+  for (const c of fixtureOnly.cells) delete c.gqDesign;
+  assert.match(checkPolicy(fixtureOnly, sources).join('\n'), /no pull-request browser cell installs the real GETQUICK Design/);
+  const floating = copy();
+  floating.cells.find((c) => c.gqDesign).gqDesign = 'latest';
+  assert.match(checkPolicy(floating, sources).join('\n'), /pins gqDesign "latest"/);
+});
+
 const report = {
   php: '8.0.30',
   wordpress: '6.5',
@@ -79,6 +95,7 @@ const report = {
   react: '18.2.0',
   woocommerce: '9.4.3',
   assets: { dependencies: ['wp-a11y', 'wp-api-fetch', 'wp-element', 'wp-i18n'], unresolved: [], forbidden: [] },
+  design: { version: 'test', classes: false },
 };
 
 test('a cell that ran its declared runtime verifies, with 6.5 reported for 6.5.0', () => {
@@ -107,6 +124,16 @@ test('the topology, database and object cache must be the declared ones', () => 
   assert.match(verifyRuntime(cell('mysql-8.0'), { ...report, php: '8.4.1', wordpress: '7.1.3' }).join('\n'), /MySQL 8\.0/);
   assert.deepEqual(verifyRuntime(cell('mysql-8.0'), { ...report, php: '8.4.1', wordpress: '7.1.3', database: { server: '8.0.40', version: '8.0.40' } }), []);
   assert.match(verifyRuntime(cell('object-cache'), { ...report, php: '8.4.1', wordpress: '7.1.3', woocommerce: '11.2.1' }).join('\n'), /object cache/);
+});
+
+test('the GETQUICK Design that ran must be the fixture, or the cell\'s real release with its classes loaded', () => {
+  assert.match(verifyRuntime(cell('minimum'), { ...report, design: { version: '0.8.1', classes: true } }).join('\n'), /GETQUICK Design 0\.8\.1.*fixture/);
+  assert.match(verifyRuntime(cell('minimum'), { ...report, design: undefined }).join('\n'), /GETQUICK Design/);
+  const real = manifest.cells.find((c) => c.gqDesign);
+  const ran = { ...report, php: '8.4.1', wordpress: real.wordpress, woocommerce: real.woocommerce ?? null, react: real.react };
+  assert.deepEqual(verifyRuntime(real, { ...ran, design: { version: real.gqDesign, classes: true } }), []);
+  assert.match(verifyRuntime(real, { ...ran, design: { version: 'test', classes: false } }).join('\n'), new RegExp(`GETQUICK Design test.*${real.gqDesign.replaceAll('.', '\\.')}`));
+  assert.match(verifyRuntime(real, { ...ran, design: { version: real.gqDesign, classes: false } }).join('\n'), /autoload/);
 });
 
 test('a floating canary records whatever WordPress it resolved', () => {
