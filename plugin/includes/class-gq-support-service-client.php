@@ -28,8 +28,11 @@ final class GQ_Support_Service_Client {
 	 * @return array{status: int, body: array<string, mixed>, retry_after: string}|WP_Error
 	 */
 	public static function request( string $method, string $path, ?array $payload, GQ_Support_Signer $signer, int $timeout ) {
-		// Every support operation reaches the service through here, so the fail-safe holds even for a caller that does not check it.
-		if ( GQ_Support_Fail_Safe::disabled() ) {
+		// Data-subject requests keep working while the local support experience is disabled.
+		// Match exact routes and methods so other support operations still fail closed.
+		$privacy_request = ( 'GET' === $method && '/v1/export' === wp_parse_url( $path, PHP_URL_PATH ) )
+			|| ( 'POST' === $method && '/v1/erasures' === $path );
+		if ( GQ_Support_Fail_Safe::disabled() && ! $privacy_request ) {
 			return new WP_Error( 'gq_support_disabled', 'Support is disabled by server configuration.' );
 		}
 		$base = defined( 'GQ_SUPPORT_SERVICE_URL' ) ? (string) constant( 'GQ_SUPPORT_SERVICE_URL' ) : self::BASE_URL;
