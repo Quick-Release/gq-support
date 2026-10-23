@@ -156,8 +156,9 @@ export function checkTree(dir, { version }) {
   if (dependencies.includes('react-jsx-runtime')) problems.push('assets/dist/index.asset.php: depends on react-jsx-runtime, which WordPress 6.5 lacks');
   if (read('assets/dist/index.js').includes('__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED')) problems.push('assets/dist/index.js: bundles its own React');
 
-  // Every runtime class the shipped PHP names must ship, at the path the autoloader loads.
-  const classes = new Set(files.filter((path) => path.endsWith('.php')).flatMap((path) => read(path).match(/\bGQ_Support_[A-Z][a-z]\w*/g) ?? []));
+  // Every runtime class the shipped PHP names must ship, at the path the autoloader loads. The
+  // constants' GQ_SUPPORT_ prefix differs in case, so acronyms like GQ_Support_REST still count.
+  const classes = new Set(files.filter((path) => path.endsWith('.php')).flatMap((path) => read(path).match(/\bGQ_Support_[A-Z]\w*/g) ?? []));
   for (const name of classes) {
     const file = `includes/class-${name.toLowerCase().replace(/_/g, '-')}.php`;
     if (!has.has(file)) problems.push(`${name} is used but ${file} is not shipped`);

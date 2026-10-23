@@ -110,6 +110,12 @@ test('a missing or empty asset manifest fails, as does one that needs a second R
   assert.match(candidate({ ...validFiles(), 'assets/dist/index.asset.php': jsx }).problems.join('\n'), /react-jsx-runtime/);
 });
 
+test('an acronym-named runtime class the package does not ship fails', () => {
+  const plugin = "<?php\nfinal class GQ_Support_Plugin { public static function boot(): void { GQ_Support_State::get(); GQ_Support_REST::register(); } }\n";
+  const { problems } = candidate({ ...validFiles(), 'includes/class-gq-support-plugin.php': plugin });
+  assert.match(problems.join('\n'), /GQ_Support_REST.*includes\/class-gq-support-rest\.php/);
+});
+
 test('a runtime class the package does not ship fails', () => {
   const { problems } = candidate({ ...validFiles(), 'includes/class-gq-support-state.php': undefined });
   assert.match(problems.join('\n'), /GQ_Support_State.*includes\/class-gq-support-state\.php/);
