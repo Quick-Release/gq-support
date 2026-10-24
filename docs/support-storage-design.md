@@ -34,7 +34,7 @@ All times are UTC epoch milliseconds. IDs are service-issued ULIDs with a type p
 | `slot` | Owner (ADR 0014) |
 | `reporter_subject` | Attested Reporter subject |
 | `submission_id` | Browser UUID |
-| `body_digest` | SHA-256 of the canonical Summary and Description. A repeat with a different digest returns 409 |
+| `body_digest` | SHA-256 of the canonical Summary and Description, and of the reviewed Report context when one was sent. A repeat with a different digest returns 409 |
 | `summary`, `description`, `title` | Submitted text (ADR 0015). `title` is derived once, at acceptance |
 | `created_at` | Acceptance time |
 | `installation_id` | Audit only: which enrolled installation submitted the request |
@@ -59,18 +59,23 @@ Constraints and indexes:
 | `id` | `int_…`, the opaque marker written on the issue's first line. It is not the resource `id` |
 | `slot` | The request's Slot, repeated so every statement can be scoped. `(request_id, slot)` is a composite FK to `support_request (id, slot)` |
 | `request_id` | FK to `support_request` |
-| `kind`, `seq` | `create` only in the MVP. `seq` orders later intents (#28, ADR 0006). `UNIQUE (request_id, seq)` |
+| `kind`, `seq` | `create` at `seq` 0, then `close` or `reopen` Status changes at `seq` 1, 2, … in acceptance order (ADR 0006, ADR 0020). `UNIQUE (request_id, seq)`; only a create has `seq` 0 |
+| `change_id` | A Status change's Change ID, `NULL` for the create. `UNIQUE (request_id, change_id)` |
 | `state` | `pending`, `in_flight`, `delivered`, `failed`, `outcome_unknown` |
 | `attempts`, `first_attempt_at`, `lease_expires_at`, `next_attempt_at`, `last_error_class` | Delivery bookkeeping. The error is a class only, never a provider body |
-| `context_json` | Server-side context from #14 that goes into the issue body. Set to `NULL` when the intent reaches a terminal state |
+| `context_json` | The canonical reviewed Report context that goes into the issue body, or `NULL`. Set to `NULL` when the intent is `delivered` or `failed` |
+
+The [Report context decision](support-context-design.md) defines this as a frozen, reviewed, bounded context snapshot, not live diagnostic output. [#71](https://github.com/Quick-Release/gq-support/issues/71) implements it with the intake schemas, intent fingerprinting, fixtures and storage together ([implementation notes](support-context-design.md#implementation-of-the-minimal-context-71)). Clear it on terminal outcome and privacy cleanup; never append recollected fields during delivery/recovery. Keep only the existing restricted metadata when uncertain-outcome erasure requires reconciliation.
 
 Index `due (next_attempt_at) WHERE state IN ('pending', 'outcome_unknown')` and `leases (lease_expires_at) WHERE state = 'in_flight'`.
+
+`support_request.change_seq` is the latest Status change's `seq`, or 0 for none. Projections join `delivery_intent c ON c.seq = r.change_seq`, which is the create again when there is no change, so every request keeps its row without a subquery.
 
 The API `delivery` field comes from the create intent: `pending` and `in_flight` → `accepted-pending`, `outcome_unknown` → `outcome-unknown`, and `delivered`/`failed` keep their names.
 
 ### Delivery extensions decided after the initial schema
 
-[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`) and `0004` the per-call request budget (`request_rate`); `0005`–`0007` add delivery ownership and pacing, and `0012` adds `support_request.erased_at` and the `erasure`, `support_cleanup`, `offboarding` and `cleanup_audit` tables for erasure, offboarding and retention cleanup ([privacy design](support-privacy-design.md#uncertain-create-cleanup-amendment)); `0014` makes cleanup records self-contained, `0015` adds signed erasure requests and the reporter-reference search, and `0016` the restore marker. The suppression ledger (ADR 0016) is a separate D1 with its own migrations in `worker/ledger-migrations/`. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
+[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`) and `0004` the per-call request budget (`request_rate`); `0005`–`0007` add delivery ownership and pacing, and `0012` adds `support_request.erased_at` and the `erasure`, `support_cleanup`, `offboarding` and `cleanup_audit` tables for erasure, offboarding and retention cleanup ([privacy design](support-privacy-design.md#uncertain-create-cleanup-amendment)); `0014` makes cleanup records self-contained, `0015` adds signed erasure requests and the reporter-reference search, `0016` the restore marker, and `0017` the `changed_at` columns and watermarks for incremental ledger mirroring. The suppression ledger (ADR 0016) is a separate D1 with its own migrations in `worker/ledger-migrations/`. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
 
 ### `repository_state`: rebuildable
 
@@ -100,11 +105,14 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 **Accept** (one `batch()`): insert `support_request` and its create `delivery_intent` (`pending`), with the atomic quota debit from the [delivery decision](support-delivery-design.md). If `supersedes_id` is given, also set `superseded_at` on that request, but only where it has the same `slot` and `reporter_subject` and its create intent is `failed`. If the unique key conflicts, read the existing row: the same digest returns it with its current code, and a different digest returns 409. Confirmed rollback/non-acceptance returns `503 gq_support_not_accepted`. If the D1 commit outcome is itself ambiguous, do a same-key primary lookup; if still unresolved return `504 gq_support_outcome_unknown`, never claim known non-acceptance. The next same-key retry resolves it.
 
+**Change status** (one `batch()`, ADR 0020): debit the Status change budgets, move `change_seq` from the value just read, and insert the `close` or `reopen` intent with `state = CASE WHEN changes() = 1 THEN 'pending' END`, so a concurrent change that moved `change_seq` first fails the NOT NULL constraint and rolls the batch back. It is accepted only when the create is `delivered` and the latest change is `delivered` or `failed`. A known Change ID returns that change; the other status is a 409.
+
 **List** (`scope=mine`):
 
 ```sql
 SELECT … FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
-WHERE r.slot = ?1 AND r.reporter_subject = ?2 AND r.superseded_at IS NULL
+  JOIN delivery_intent c ON c.request_id = r.id AND c.seq = r.change_seq
+WHERE r.slot = ?1 AND i.slot = ?1 AND c.slot = ?1 AND r.reporter_subject = ?2 AND r.superseded_at IS NULL
   AND (r.created_at, r.id) < (?3, ?4)
 ORDER BY r.created_at DESC, r.id DESC LIMIT ?5
 ```

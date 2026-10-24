@@ -202,7 +202,8 @@ export const makeFakeGitHub = () => {
       const perPage = Number(request.query.get("per_page") ?? 30);
       const page = Number(request.query.get("page") ?? 1);
       const all = issues
-        .filter((issue) => issue.repositoryId === repository.id && !issue.deleted && (!creator || issue.user.login === creator) &&
+        // A transferred issue no longer belongs to this repository's listing.
+        .filter((issue) => issue.repositoryId === repository.id && !issue.deleted && !issue.movedTo && (!creator || issue.user.login === creator) &&
           (!since || Date.parse(issue.updated_at) >= Date.parse(since)))
         .sort((a, b) => direction * (a[field].localeCompare(b[field]) || a.number - b.number));
       const slice = all.slice((page - 1) * perPage, page * perPage);
@@ -233,10 +234,13 @@ export const makeFakeGitHub = () => {
       if (!issue) return message(404, "Not Found");
       if (issue.movedTo) return new Response(null, { status: 301, headers: { location: issue.movedTo } });
       if (issue.deleted) return message(410, "This issue was deleted");
-      const body = request.body as { title?: string; body?: string };
+      const body = request.body as { title?: string; body?: string; state?: string };
       if (body.title === "") return json({ message: "Validation Failed", errors: [{ resource: "Issue", code: "missing_field", field: "title" }] }, 422);
+      if (body.state !== undefined && body.state !== "open" && body.state !== "closed") {
+        return json({ message: "Validation Failed", errors: [{ resource: "Issue", code: "invalid", field: "state" }] }, 422);
+      }
       Object.assign(issue, body.title === undefined ? {} : { title: body.title }, body.body === undefined ? {} : { body: body.body },
-        { updated_at: iso(now) });
+        body.state === undefined ? {} : { state: body.state }, { updated_at: iso(now) });
       return json(issueJson(issue));
     }
     if (one && request.method === "GET") {

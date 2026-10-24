@@ -1,0 +1,174 @@
+{
+  "limits": {
+    "schema": 1,
+    "scalar_bytes": 256,
+    "context_bytes": 6144,
+    "default_keys": 3,
+    "create_body_bytes": 32768
+  },
+  "cases": [
+    {
+      "name": "all default keys",
+      "context": { "schema": 1, "default": { "wp_version": "6.5.5", "support_plugin_version": "0.1.8", "originating_screen": "post-editor" } },
+      "canonical": "{\"schema\":1,\"default\":{\"wp_version\":\"6.5.5\",\"support_plugin_version\":\"0.1.8\",\"originating_screen\":\"post-editor\"}}"
+    },
+    {
+      "name": "keys in another order",
+      "context": { "default": { "originating_screen": "dashboard", "wp_version": "6.7.1" }, "schema": 1 },
+      "canonical": "{\"schema\":1,\"default\":{\"wp_version\":\"6.7.1\",\"originating_screen\":\"dashboard\"}}"
+    },
+    {
+      "name": "all removable fields omitted",
+      "context": { "schema": 1, "default": {} },
+      "canonical": "{\"schema\":1,\"default\":{}}"
+    },
+    {
+      "name": "post list screen",
+      "context": { "schema": 1, "default": { "originating_screen": "post-list" } },
+      "canonical": "{\"schema\":1,\"default\":{\"originating_screen\":\"post-list\"}}"
+    },
+    {
+      "name": "WooCommerce screen",
+      "context": { "schema": 1, "default": { "originating_screen": "woocommerce" } },
+      "canonical": "{\"schema\":1,\"default\":{\"originating_screen\":\"woocommerce\"}}"
+    },
+    {
+      "name": "pre-release and build versions",
+      "context": { "schema": 1, "default": { "wp_version": "6.8-RC1", "support_plugin_version": "1.0.0+build_7" } },
+      "canonical": "{\"schema\":1,\"default\":{\"wp_version\":\"6.8-RC1\",\"support_plugin_version\":\"1.0.0+build_7\"}}"
+    },
+    {
+      "name": "version at the 64-character grammar limit",
+      "context": { "schema": 1, "default": { "wp_version": "1000000000000000000000000000000000000000000000000000000000000000" } },
+      "canonical": "{\"schema\":1,\"default\":{\"wp_version\":\"1000000000000000000000000000000000000000000000000000000000000000\"}}"
+    },
+    {
+      "name": "version over the grammar limit",
+      "context": { "schema": 1, "default": { "wp_version": "10000000000000000000000000000000000000000000000000000000000000000" } }
+    },
+    {
+      "name": "version with a trailing newline",
+      "context": { "schema": 1, "default": { "wp_version": "6.5.5\n" } }
+    },
+    {
+      "name": "version not starting with a digit",
+      "context": { "schema": 1, "default": { "wp_version": "v6.5" } }
+    },
+    {
+      "name": "nonce-bearing admin URL as a version",
+      "context": { "schema": 1, "default": { "wp_version": "6.5/wp-admin/post.php?post=123&_wpnonce=secret&token=secret#customer" } }
+    },
+    {
+      "name": "nonce-bearing admin URL as the screen",
+      "context": { "schema": 1, "default": { "originating_screen": "post.php?post=123&_wpnonce=secret&token=secret#customer" } }
+    },
+    {
+      "name": "unmapped screen ID",
+      "context": { "schema": 1, "default": { "originating_screen": "post" } }
+    },
+    {
+      "name": "custom screen",
+      "context": { "schema": 1, "default": { "originating_screen": "toplevel_page_acme-customers" } }
+    },
+    {
+      "name": "HTML in a version",
+      "context": { "schema": 1, "default": { "support_plugin_version": "0.1<script>alert(1)</script>" } }
+    },
+    {
+      "name": "Markdown in a version",
+      "context": { "schema": 1, "default": { "support_plugin_version": "0.1`**[x](https://x)**`" } }
+    },
+    {
+      "name": "multibyte version",
+      "context": { "schema": 1, "default": { "wp_version": "6.5.5é" } }
+    },
+    {
+      "name": "256-byte multibyte screen",
+      "context": { "schema": 1, "default": { "originating_screen": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé" } }
+    },
+    {
+      "name": "oversized value",
+      "context": { "schema": 1, "default": { "wp_version": "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111" } }
+    },
+    {
+      "name": "empty value",
+      "context": { "schema": 1, "default": { "wp_version": "" } }
+    },
+    {
+      "name": "number value",
+      "context": { "schema": 1, "default": { "wp_version": 6.5 } }
+    },
+    {
+      "name": "null value",
+      "context": { "schema": 1, "default": { "wp_version": null } }
+    },
+    {
+      "name": "boolean value",
+      "context": { "schema": 1, "default": { "wp_version": true } }
+    },
+    {
+      "name": "array value",
+      "context": { "schema": 1, "default": { "wp_version": ["6.5.5"] } }
+    },
+    {
+      "name": "object value",
+      "context": { "schema": 1, "default": { "wp_version": { "value": "6.5.5" } } }
+    },
+    {
+      "name": "technical key in the default section",
+      "context": { "schema": 1, "default": { "php_version": "8.3.12" } }
+    },
+    {
+      "name": "fourth default key",
+      "context": { "schema": 1, "default": { "wp_version": "6.5.5", "support_plugin_version": "0.1.8", "originating_screen": "dashboard", "page": "dashboard" } }
+    },
+    {
+      "name": "environment override",
+      "context": { "schema": 1, "default": { "environment": "production" } }
+    },
+    {
+      "name": "technical section not approved",
+      "context": { "schema": 1, "default": {}, "technical": { "php_version": "8.3.12" } }
+    },
+    {
+      "name": "unknown top-level key",
+      "context": { "schema": 1, "default": {}, "url": "https://example.test/wp-admin/post.php?post=123&_wpnonce=secret" }
+    },
+    {
+      "name": "unsupported schema",
+      "context": { "schema": 2, "default": {} }
+    },
+    {
+      "name": "string schema",
+      "context": { "schema": "1", "default": {} }
+    },
+    {
+      "name": "missing schema",
+      "context": { "default": {} }
+    },
+    {
+      "name": "missing default",
+      "context": { "schema": 1 }
+    },
+    {
+      "name": "default as an empty array",
+      "context": { "schema": 1, "default": [] }
+    },
+    {
+      "name": "default as a list",
+      "context": { "schema": 1, "default": ["6.5.5"] }
+    },
+    {
+      "name": "context as an array",
+      "context": []
+    },
+    {
+      "name": "context as a string",
+      "context": "{\"schema\":1,\"default\":{}}"
+    },
+    {
+      "name": "null context",
+      "context": null
+    }
+  ]
+}

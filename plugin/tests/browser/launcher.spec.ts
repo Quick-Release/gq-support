@@ -229,7 +229,9 @@ test('the closed launcher never covers admin controls', async ({ page }) => {
       await page.goto(`${site}/wp-admin/${screen}`);
       const tour = page.getByRole('dialog', { name: 'Welcome to the block editor' });
       if (await tour.isVisible()) await tour.getByRole('button', { name: 'Close' }).click();
-      await expect(page.locator('#gq-support-root')).toBeVisible();
+      // Landing on wp-login.php means the session was lost, not that the launcher failed to mount.
+      expect(page.url(), `${screen} at ${viewport.width}px`).not.toContain('/wp-login.php');
+      await expect(page.locator('#gq-support-root'), `${screen} at ${viewport.width}px`).toBeVisible();
       expect(await controlsCoveredByLauncher(page), `${screen} at ${viewport.width}px`).toEqual([]);
     }
   }
@@ -250,6 +252,9 @@ test('launcher and panel keep AA contrast in every admin colour scheme', async (
       await page.goto(`${site}/wp-admin/`);
       await page.getByRole('button', { name: /^Support/ }).click();
       await expect(page.getByRole('dialog', { name: 'Support' })).toBeVisible();
+      // A draft shows the Copy draft link, whose text takes the accent.
+      await page.getByRole('textbox', { name: 'Description' }).fill('A draft');
+      await expect(page.getByRole('button', { name: 'Copy draft' })).toBeVisible();
       const report = await page.evaluate(() => {
         const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
         const luminance = (value: string) => {
@@ -265,23 +270,28 @@ test('launcher and panel keep AA contrast in every admin colour scheme', async (
         probe.remove();
         return {
           coreAccent,
+          coreAccentOnPanel: contrast(coreAccent, css('.gq-support-panel').backgroundColor),
           accent: css('.gq-support-tab[aria-selected="true"]').borderBottomColor,
           launcherText: contrast(css('.gq-support-launcher').color, css('.gq-support-launcher').backgroundColor),
           launcherOnPage: contrast(css('.gq-support-launcher').backgroundColor, getComputedStyle(document.body).backgroundColor),
           selectedTab: contrast(css('.gq-support-tab[aria-selected="true"]').borderBottomColor, css('.gq-support-panel').backgroundColor),
           panelText: contrast(css('.gq-support-panel').color, css('.gq-support-panel').backgroundColor),
+          linkText: contrast(css('.gq-support-link').color, css('.gq-support-panel').backgroundColor),
         };
       });
       accents.add(report.accent);
       coreAccents.add(report.coreAccent);
-      expect(report.accent, scheme).toBe(report.coreAccent);
-      // WCAG AA: 4.5:1 for text, 3:1 for the selected-tab indicator and focus ring (same accent).
+      // Core's accent as it is wherever it is readable on the panel; WordPress 7.0 Sunrise, for one, is not.
+      if (report.coreAccentOnPanel >= 4.5) expect(report.accent, scheme).toBe(report.coreAccent);
+      // WCAG AA: 4.5:1 for text, including links in the accent, and 3:1 for the selected-tab
+      // indicator and focus ring (same accent).
       expect(report.launcherText, scheme).toBeGreaterThanOrEqual(4.5);
       expect(report.panelText, scheme).toBeGreaterThanOrEqual(4.5);
+      expect(report.linkText, scheme).toBeGreaterThanOrEqual(4.5);
       expect(report.launcherOnPage, scheme).toBeGreaterThanOrEqual(3);
       expect(report.selectedTab, scheme).toBeGreaterThanOrEqual(3);
     }
-    // The accent follows core's scheme colour wherever core provides one.
+    // The accent follows core's scheme colour wherever core provides one, darkened or not.
     expect(accents.size).toBe(coreAccents.size);
   } finally {
     wp(['user', 'meta', 'update', 'admin', 'admin_color', 'fresh']);

@@ -31,7 +31,10 @@ for (const change of ['different account', 'new login session', 'revoked grant']
       } });
     }
     try {
-      // Simulates returning to the draft tab after authentication changed elsewhere.
+      // Simulates returning to the draft tab after authentication changed elsewhere, after the
+      // five seconds within which a return does not check the session again.
+      await page.clock.install();
+      await page.clock.runFor(5_100);
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
       await expect(page.getByRole('alert')).toContainText('session');
       await expect(page.getByRole('button', { name: 'Send report' })).toBeDisabled();

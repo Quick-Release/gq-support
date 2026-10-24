@@ -82,28 +82,40 @@ $gq_support_plugin    = static fn( string $file ): string => plugins_url( "gq-su
 
 switch ( $gq_support_violation ) {
 	case 'sql':
+		// One query more than the largest plugin SQL budget (B6: 4), so it breaks every SQL budget from any baseline.
 		add_action(
 			'init',
 			static function (): void {
 				global $wpdb;
-				$wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'gq_support_probe' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				for ( $repeat = 0; $repeat < 5; $repeat++ ) {
+					$wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'gq_support_probe' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				}
+			}
+		);
+		break;
+	case 'memory':
+		// Held from init to shutdown, and more than the largest memory budget (B6: 64 KB).
+		add_action(
+			'init',
+			static function (): void {
+				$GLOBALS['gq_support_probe_ballast'] = str_repeat( 'x', 96 * KB_IN_BYTES );
 			}
 		);
 		break;
 	case 'http':
-		add_action( 'init', static fn() => wp_remote_get( GQ_SUPPORT_SERVICE_URL . '/v1/installation' ) );
+		// A short timeout, so the call costs 1 s with the Worker hung.
+		add_action( 'init', static fn() => wp_remote_get( GQ_SUPPORT_SERVICE_URL . '/v1/installation', array( 'timeout' => 1 ) ) );
 		break;
 	case 'cron':
 		add_action( 'init', static fn() => wp_schedule_single_event( time() + HOUR_IN_SECONDS, 'gq_support_probe' ) );
 		break;
 	case 'bytes':
-		add_action(
-			'wp_head',
-			static function () use ( $gq_support_plugin ): void {
-				// phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- The violation is the point.
-				printf( '<link rel="stylesheet" href="%s" />', esc_url( $gq_support_plugin( 'assets/launcher.css' ) ) );
-			}
-		);
+		$gq_support_stylesheet = static function () use ( $gq_support_plugin ): void {
+			// phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- The violation is the point.
+			printf( '<link rel="stylesheet" href="%s" />', esc_url( $gq_support_plugin( 'assets/launcher.css' ) ) );
+		};
+		add_action( 'wp_head', $gq_support_stylesheet );
+		add_action( 'admin_head', $gq_support_stylesheet );
 		break;
 	case 'request':
 		add_action(
@@ -123,6 +135,17 @@ switch ( $gq_support_violation ) {
 			static fn() => wp_add_inline_script(
 				'gq-support-launcher',
 				sprintf( 'document.addEventListener("click", function (event) { if (event.target.closest(".gq-support-launcher")) fetch(%s); }, true);', wp_json_encode( rest_url( 'gq-support/v1/requests' ) ) )
+			),
+			20
+		);
+		break;
+	case 'preview':
+		// A Report context preview on every launcher click, beyond the panel's one per draft.
+		add_action(
+			'admin_enqueue_scripts',
+			static fn() => wp_add_inline_script(
+				'gq-support-launcher',
+				sprintf( 'document.addEventListener("click", function (event) { if (event.target.closest(".gq-support-launcher")) fetch(%s, { method: "POST", body: new URLSearchParams({ action: "gq_support_context" }) }); }, true);', wp_json_encode( admin_url( 'admin-ajax.php' ) ) )
 			),
 			20
 		);
@@ -168,8 +191,28 @@ $gq_support_cron_events = static function (): int {
 
 if ( isset( $_GET['gq_probe'] ) ) {
 	$gq_support_cron_before = $gq_support_cron_events();
-	// Hold the whole response so the counts can go in a header after everything ran.
-	ob_start();
+	// Hold the whole response so the counts can go in a header after everything ran. It waits in a
+	// temporary file, not in memory, because an unprobed request never holds its page: buffering it
+	// would add the page, and each reallocation of a growing buffer, to the peak memory reported.
+	$gq_support_held     = fopen( 'php://temp/maxmemory:0', 'w+b' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+	$gq_support_released = false;
+	ob_start(
+		static function ( string $buffer, int $phase ) use ( $gq_support_held, &$gq_support_released ): string {
+			if ( $phase & PHP_OUTPUT_HANDLER_CLEAN ) {
+				return '';
+			}
+			// A buffer ended before shutdown sends the page without the counters, which the spec reports.
+			if ( ! $gq_support_released && ! ( $phase & PHP_OUTPUT_HANDLER_FINAL ) ) {
+				fwrite( $gq_support_held, $buffer ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+				return '';
+			}
+			rewind( $gq_support_held );
+			$held = (string) stream_get_contents( $gq_support_held );
+			ftruncate( $gq_support_held, 0 );
+			return $held . $buffer;
+		},
+		4096
+	);
 	add_filter(
 		'query',
 		static function ( string $query ) use ( &$gq_support_probe ): string {
@@ -181,7 +224,7 @@ if ( isset( $_GET['gq_probe'] ) ) {
 	);
 	add_action(
 		'shutdown',
-		static function () use ( &$gq_support_probe, $gq_support_violation, $gq_support_cron_events, $gq_support_cron_before ): void {
+		static function () use ( &$gq_support_probe, &$gq_support_released, $gq_support_violation, $gq_support_cron_events, $gq_support_cron_before ): void {
 			// Events this request scheduled.
 			$gq_support_probe['cron'] = $gq_support_cron_events() - $gq_support_cron_before;
 			if ( 'cron' === $gq_support_violation ) {
@@ -190,6 +233,8 @@ if ( isset( $_GET['gq_probe'] ) ) {
 			header( 'X-GQ-Probe: ' . wp_json_encode( $gq_support_probe ) );
 			// The same names as core's performance-test mu-plugin; memory is in bytes.
 			header( sprintf( 'Server-Timing: wp-total;dur=%.3F, wp-memory-usage;dur=%d', timer_float() * 1000, memory_get_peak_usage() ) );
+			// The held response goes out when the buffers flush, after these headers.
+			$gq_support_released = true;
 		},
 		0
 	);

@@ -20,11 +20,11 @@ for file in "$@"; do
 		plugin/tests/browser/*.spec.ts) add "$(basename "$file")" ;;
 		plugin/tests/performance/* | plugin/assets/launcher.* | plugin/includes/class-gq-support-plugin.php)
 			add performance.spec.ts launcher.spec.ts ;;
-		plugin/app/src/useRequests.ts | plugin/app/src/Requests.tsx) add requests.spec.ts ;;
+		plugin/app/src/useRequests.ts | plugin/app/src/Requests.tsx) add requests.spec.ts status-change.spec.ts ;;
 		plugin/app/src/useSubmission.ts) add submission.spec.ts requests.spec.ts ;;
-		plugin/app/src/useSession.ts | plugin/includes/class-gq-support-access.php) add session.spec.ts submission.spec.ts requests.spec.ts ;;
+		plugin/app/src/useSession.ts | plugin/includes/class-gq-support-access.php) add session.spec.ts submission.spec.ts requests.spec.ts status-change.spec.ts ;;
 		plugin/app/* | plugin/includes/* | plugin/languages/* | plugin/*.php)
-			add launcher.spec.ts session.spec.ts submission.spec.ts requests.spec.ts ;;
+			add launcher.spec.ts session.spec.ts submission.spec.ts requests.spec.ts status-change.spec.ts ;;
 	esac
 done
 [ ${#specs[@]} -eq 0 ] && exit 0

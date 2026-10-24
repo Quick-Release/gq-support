@@ -30,6 +30,8 @@ interface Health {
   readonly repositories: readonly { repositoryId: number; lastSweptAt: string | null; sweepAgeMs: number | null; sweeping: boolean;
     suspended: boolean; withinInterval: boolean }[];
   readonly suspensions: readonly { repositoryId: number; reason: string; suspendedAt: string | null; verifiedSafeAt: string | null; acknowledged: boolean }[];
+  /** The pass that re-reads every open request, the only check that sees deleted and transferred issues. */
+  readonly openRequestPass: { inProgress: boolean; startedAt: string | null; lastCompletedAt: string | null };
 }
 
 const iso = (time: unknown) => typeof time === "number" ? new Date(time).toISOString() : null;
@@ -47,6 +49,7 @@ const health = async ({ query, mappings, now = Date.now() }: OperatorOptions): P
       EXISTS (SELECT 1 FROM status_audit a, json_each(a.suspended_repositories) j WHERE a.action = 'repair'
         AND j.value = s.repository_id AND a.occurred_at >= COALESCE(s.suspended_at, 0)) AS acknowledged
     FROM repository_state s WHERE s.suspended_reason IS NOT NULL ORDER BY s.repository_id`, []);
+  const [pass] = await query("SELECT started_at, completed_at FROM status_refresh_pass WHERE id = 1", []);
   const report = {
     checkedAt: new Date(now).toISOString(),
     dueRefreshes: Number(due?.count ?? 0),
@@ -58,8 +61,9 @@ const health = async ({ query, mappings, now = Date.now() }: OperatorOptions): P
     }),
     suspensions: suspensions.map((row) => ({ repositoryId: Number(row.repository_id), reason: String(row.suspended_reason),
       suspendedAt: iso(row.suspended_at), verifiedSafeAt: iso(row.verified_safe_at), acknowledged: Boolean(row.acknowledged) })),
+    openRequestPass: { inProgress: pass?.started_at != null, startedAt: iso(pass?.started_at), lastCompletedAt: iso(pass?.completed_at) },
   };
-  return { healthy: report.dueRefreshes === 0 && behind(report.repositories) === 0 &&
+  return { healthy: report.dueRefreshes === 0 && behind(report.repositories) === 0 && !report.openRequestPass.inProgress &&
     report.suspensions.every((suspension) => suspension.acknowledged), ...report };
 };
 
@@ -76,7 +80,9 @@ const behind = (repositories: Health["repositories"]) =>
  * next sweep lists from the outage start minus the usual skew, and verifies the
  * repository first, as every sweep does. A sweep already in progress from an
  * earlier position keeps it, and its start, so completing it records the
- * sweep as of when it began.
+ * sweep as of when it began. Deleted and transferred issues never appear in a
+ * listing, so the open-request pass also restarts now rather than at its daily
+ * time; restarting one in progress makes it revisit rows it passed before.
  */
 const reconcile = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
   const { query, mappings, now = Date.now() } = options;
@@ -99,14 +105,16 @@ const reconcile = async (args: readonly string[], options: OperatorOptions): Pro
       sweep_cursor = CASE WHEN sweep_cursor <= excluded.sweep_cursor THEN sweep_cursor ELSE excluded.sweep_cursor END
     RETURNING repository_id`, [now, cursor, configured]);
   if (scheduled.length !== Number(audit?.repositories)) throw new Error("Reconciliation partly scheduled; inspect the audit and run it again");
+  await query("UPDATE status_refresh_pass SET started_at = ?, cursor = '' WHERE id = 1", [now]);
   return `Full reconciliation sweep scheduled for ${scheduled.length} repositories from ${new Date(start).toISOString()}`;
 };
 
 /**
  * `status-repair` records that recovery is confirmed for an outage window:
- * the due backlog is drained and every repository was swept within one
- * interval, apart from suspended ones. It acknowledges the suspensions
- * present at that time, including ones whose repository is still unsafe.
+ * the due backlog is drained, no open-request pass is in progress, and every
+ * repository was swept within one interval, apart from suspended ones. It
+ * acknowledges the suspensions present at that time, including ones whose
+ * repository is still unsafe.
  */
 const repair = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
   const { query, now = Date.now() } = options;
@@ -117,8 +125,9 @@ const repair = async (args: readonly string[], options: OperatorOptions): Promis
   }
   const report = await health(options);
   const lagging = behind(report.repositories);
-  if (report.dueRefreshes > 0 || lagging > 0) {
-    throw new Error(`Status not yet repaired: ${report.dueRefreshes} due refreshes, ${lagging} repositories behind`);
+  if (report.dueRefreshes > 0 || lagging > 0 || report.openRequestPass.inProgress) {
+    throw new Error(`Status not yet repaired: ${report.dueRefreshes} due refreshes, ${lagging} repositories behind` +
+      (report.openRequestPass.inProgress ? ", open-request pass in progress" : ""));
   }
   await query(`INSERT INTO status_audit (id, actor, action, window_start, window_end, repositories, due_refreshes, suspended_repositories, occurred_at)
     VALUES (?, ?, 'repair', ?, ?, ?, 0, ?, ?)`, [crypto.randomUUID(), actor!, start, end, report.repositories.length,

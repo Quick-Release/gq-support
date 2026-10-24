@@ -22,3 +22,8 @@ package-dist/
 /worker/revocations.json.tmp
 .bench-base/
 benchmark-results/
+.ddev/config.gq-runtime.yaml
+package-zip/
+runtime-results/
+audit-results/
+secret-scan/

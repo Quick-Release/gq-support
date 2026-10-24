@@ -436,7 +436,8 @@ final class GQ_Support_Contract_Test extends TestCase {
 			static function ( $fixture ) {
 				return array( $fixture );
 			},
-			self::fixtures( 'local-errors' )
+			// A defined GQ_SUPPORT_DISABLED would outlive its case here: integration/fail-safe.php runs it in its own process.
+			wp_list_filter( self::fixtures( 'local-errors' ), array( 'scenario' => 'disabled' ), 'NOT' )
 		);
 	}
 
@@ -516,6 +517,211 @@ final class GQ_Support_Contract_Test extends TestCase {
 			$result = GQ_Support_Service_Client::request( 'GET', '/v1/requests', null, new GQ_Support_Signer( $key, 'key', 'installation' ), 5 );
 			self::assertInstanceOf( WP_Error::class, $result );
 			self::assertSame( 'gq_support_ambiguous_response', $result->get_error_code() );
+		} finally {
+			remove_filter( 'pre_http_request', $stub, 11 );
+		}
+	}
+
+	/**
+	 * Shared status change payloads.
+	 *
+	 * @return array
+	 */
+	public static function status_change_payloads(): array {
+		$fixtures = array();
+		foreach ( self::fixtures( 'status-change' )['payloads'] as $fixture ) {
+			$fixtures[ $fixture['name'] ] = array( $fixture );
+		}
+		return $fixtures;
+	}
+
+	/**
+	 * The reply the service gives an accepted change: the resource and the change it names.
+	 *
+	 * @param string $status Requested status.
+	 * @param string $delivery The change's delivery outcome.
+	 * @return array
+	 */
+	private function changed( string $status = 'closed', string $delivery = 'accepted-pending' ): array {
+		$resource                  = self::fixtures( 'resources' )[5]['resource'];
+		$resource['status_change'] = array(
+			'change_id' => self::fixtures( 'status-change' )['payloads'][0]['payload']['change_id'],
+			'status'    => $status,
+			'delivery'  => $delivery,
+		);
+		return $this->owned( $resource );
+	}
+
+	/**
+	 * Forward only a well-formed close or reopen, with the attested identity WordPress adds.
+	 *
+	 * @dataProvider status_change_payloads
+	 * @param array $fixture Shared status change payload.
+	 */
+	public function test_status_change_payloads( array $fixture ): void {
+		$this->upstream_status = 202;
+		$this->reply           = $this->changed( $fixture['payload']['status'] ?? 'closed' );
+		$response              = $this->request( 'POST', '/requests/req_one/status', $fixture['payload'] );
+		if ( ! $fixture['valid'] ) {
+			self::assertSame( 400, $response->get_status(), $fixture['name'] );
+			self::assertCount( 0, $this->calls );
+			return;
+		}
+		self::assertSame( 202, $response->get_status(), $fixture['name'] );
+		self::assertSame( $this->reply['status_change'], $response->get_data()['status_change'] );
+		self::assertTrue( $response->get_data()['own'] );
+		self::assertArrayNotHasKey( 'reporter_subject', $response->get_data() );
+		self::assertCount( 1, $this->calls );
+		self::assertStringEndsWith( '/v1/requests/req_one/status', $this->calls[0][0] );
+		self::assertSame( 'POST', $this->calls[0][1]['method'] );
+		self::assertSame( 8, $this->calls[0][1]['timeout'] );
+		self::assertSame(
+			$fixture['payload'] + array(
+				'reporter_subject' => GQ_Support_Access::subject(),
+				'scope'            => 'mine',
+			),
+			json_decode( $this->calls[0][1]['body'], true )
+		);
+	}
+
+	/** Form fields, a query, or an unknown request path never reach the service. */
+	public function test_status_change_rejects_other_shapes(): void {
+		$payload = self::fixtures( 'status-change' )['payloads'][0]['payload'];
+		self::assertSame( 400, $this->request( 'POST', '/requests/req_one/status', $payload, 0, array( 'scope' => 'site' ) )->get_status() );
+		self::assertSame( 404, $this->request( 'PUT', '/requests/req_one/status', $payload )->get_status() );
+		self::assertSame( 404, $this->request( 'GET', '/requests/req_one/status' )->get_status() );
+		self::assertSame( 404, $this->request( 'POST', '/requests/req_one/state', $payload )->get_status() );
+		self::assertCount( 0, $this->calls );
+	}
+
+	/** A Reporter acts on their own requests; only a fresh view-site grant reaches others in this installation. */
+	public function test_status_change_scope_follows_the_grant(): void {
+		$payload                         = self::fixtures( 'status-change' )['payloads'][0]['payload'];
+		$this->upstream_status           = 202;
+		$this->reply                     = $this->changed();
+		$this->reply['reporter_subject'] = wp_generate_uuid4();
+		// Another Reporter's request in the default scope is hidden, even if the service returned it.
+		$hidden = $this->request( 'POST', '/requests/req_one/status', $payload );
+		self::assertSame( array( 404, 'gq_support_not_found' ), array( $hidden->get_status(), $hidden->get_data()['code'] ) );
+		wp_get_current_user()->add_cap( 'gq_support_view_site_requests' );
+		$managed = $this->request( 'POST', '/requests/req_one/status', $payload );
+		self::assertSame( 202, $managed->get_status() );
+		self::assertFalse( $managed->get_data()['own'] );
+		self::assertSame( 'site', json_decode( $this->calls[1][1]['body'], true )['scope'] );
+		// Another installation's request is never accepted, whatever the grant.
+		$this->reply['installation_id'] = 'another-installation';
+		self::assertSame( 404, $this->request( 'POST', '/requests/req_one/status', $payload )->get_status() );
+		// A Support manager without the submit grant may still act within the scope.
+		wp_get_current_user()->remove_cap( 'gq_support_submit_requests' );
+		$this->reply = $this->changed();
+		self::assertSame( 202, $this->request( 'POST', '/requests/req_one/status', $payload )->get_status() );
+		wp_get_current_user()->remove_cap( 'gq_support_view_site_requests' );
+		$denied = $this->request( 'POST', '/requests/req_one/status', $payload );
+		self::assertSame( array( 403, 'gq_support_forbidden' ), array( $denied->get_status(), $denied->get_data()['code'] ) );
+		self::assertCount( 4, $this->calls );
+	}
+
+	/** An expired session or nonce is refused before any service call. */
+	public function test_status_change_requires_a_cookie_session(): void {
+		$payload = self::fixtures( 'status-change' )['payloads'][0]['payload'];
+		unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		self::assertSame( 403, $this->request( 'POST', '/requests/req_one/status', $payload )->get_status() );
+		wp_set_current_user( 0 );
+		self::assertSame( 401, $this->request( 'POST', '/requests/req_one/status', $payload )->get_status() );
+		self::assertCount( 0, $this->calls );
+	}
+
+	/**
+	 * Shared status change outcomes as the service reports them.
+	 *
+	 * @return array
+	 */
+	public static function status_change_cases(): array {
+		$fixtures = array();
+		foreach ( self::fixtures( 'status-change' )['changes'] as $fixture ) {
+			$fixtures[ $fixture['name'] ] = array( $fixture );
+		}
+		return $fixtures;
+	}
+
+	/**
+	 * Reads pass only a well-formed status change through, beside the Support status.
+	 *
+	 * @dataProvider status_change_cases
+	 * @param array $fixture Shared status change outcome.
+	 */
+	public function test_status_change_projection( array $fixture ): void {
+		$resource                  = self::fixtures( 'resources' )[5]['resource'];
+		$resource['status_change'] = $fixture['status_change'];
+		$this->upstream_status     = 200;
+		$this->reply               = $this->owned( $resource );
+		$read                      = $this->request( 'GET', '/requests/req_one' );
+		self::assertSame( $fixture['valid'] ? 200 : 503, $read->get_status(), $fixture['name'] );
+		if ( $fixture['valid'] ) {
+			self::assertSame( $resource + array( 'own' => true ), $read->get_data() );
+		}
+		$this->reply = array(
+			'items'       => array( $this->owned( $resource ) ),
+			'next_cursor' => null,
+		);
+		self::assertSame( $fixture['valid'] ? 200 : 503, $this->request( 'GET' )->get_status() );
+	}
+
+	/** A service that predates status changes still answers with an explicit null. */
+	public function test_missing_status_change_is_none(): void {
+		$resource = self::fixtures( 'resources' )[5]['resource'];
+		unset( $resource['status_change'] );
+		$this->upstream_status = 200;
+		$this->reply           = $this->owned( $resource );
+		self::assertNull( $this->request( 'GET', '/requests/req_one' )->get_data()['status_change'] );
+	}
+
+	/** Known refusals keep their own code; anything uncertain is a same-key check, never a success. */
+	public function test_status_change_errors(): void {
+		$payload = self::fixtures( 'status-change' )['payloads'][0]['payload'];
+		foreach ( array( 'gq_support_change_pending', 'gq_support_change_not_allowed', 'gq_support_idempotency_conflict', 'unlisted_code' ) as $code ) {
+			$this->upstream_status = 409;
+			$this->reply           = array( 'code' => $code );
+			$response              = $this->request( 'POST', '/requests/req_one/status', $payload );
+			self::assertSame( array( 409, 'unlisted_code' === $code ? 'gq_support_idempotency_conflict' : $code ), array( $response->get_status(), $response->get_data()['code'] ) );
+		}
+		$cases = array(
+			array( 404, array( 'code' => 'gq_support_not_found' ), 404, 'gq_support_not_found' ),
+			array( 403, array( 'code' => 'gq_support_not_configured' ), 503, 'gq_support_not_configured' ),
+			array( 503, array( 'code' => 'gq_support_not_accepted' ), 503, 'gq_support_not_accepted' ),
+			array( 504, array( 'code' => 'gq_support_outcome_unknown' ), 504, 'gq_support_outcome_unknown' ),
+			// A change the reply does not name, the wrong status, or a code that disagrees with the outcome proves nothing.
+			array( 202, $this->changed( 'open' ), 504, 'gq_support_outcome_unknown' ),
+			array( 200, $this->changed( 'closed', 'accepted-pending' ), 504, 'gq_support_outcome_unknown' ),
+			array( 202, $this->changed( 'closed', 'delivered' ), 504, 'gq_support_outcome_unknown' ),
+			array( 202, $this->owned( self::fixtures( 'resources' )[5]['resource'] ), 504, 'gq_support_outcome_unknown' ),
+		);
+		foreach ( $cases as list( $upstream, $reply, $status, $code ) ) {
+			$this->upstream_status = $upstream;
+			$this->reply           = $reply;
+			$response              = $this->request( 'POST', '/requests/req_one/status', $payload );
+			self::assertSame( array( $status, $code ), array( $response->get_status(), $response->get_data()['code'] ), wp_json_encode( $reply ) );
+			if ( 504 === $status ) {
+				self::assertSame( $payload['change_id'], $response->get_data()['data']['change_id'] );
+			}
+		}
+		$this->upstream_status = 200;
+		$this->reply           = $this->changed( 'closed', 'delivered' );
+		self::assertSame( 200, $this->request( 'POST', '/requests/req_one/status', $payload )->get_status() );
+	}
+
+	/** A transport failure leaves the change uncertain: the browser checks it again with the same Change ID. */
+	public function test_status_change_transport_failure_is_outcome_unknown(): void {
+		$stub = static function () {
+			return new WP_Error( 'http_request_failed', 'SECRET timeout' );
+		};
+		add_filter( 'pre_http_request', $stub, 11 );
+		try {
+			$payload  = self::fixtures( 'status-change' )['payloads'][0]['payload'];
+			$response = $this->request( 'POST', '/requests/req_one/status', $payload );
+			self::assertSame( array( 504, 'gq_support_outcome_unknown', true ), array( $response->get_status(), $response->get_data()['code'], $response->get_data()['data']['retryable'] ) );
+			self::assertSame( $payload['change_id'], $response->get_data()['data']['change_id'] );
+			self::assertStringNotContainsString( 'SECRET', wp_json_encode( $response->get_data() ) );
 		} finally {
 			remove_filter( 'pre_http_request', $stub, 11 );
 		}

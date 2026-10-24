@@ -1,7 +1,7 @@
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueryDatabase } from "../src/storage.ts";
 import { runOperator } from "../src/operator.ts";
 import { sweepDelivery } from "../src/delivery.ts";
@@ -30,9 +30,9 @@ beforeEach(async () => {
 });
 afterEach(async () => { await stage.dispose(); vi.useRealTimers(); });
 const subject = "00000000-0000-4000-8000-000000000001";
-const accept = async () => {
+const accept = async (context?: object) => {
   const response = await installation.send("POST", "/v1/requests", JSON.stringify({ submission_id: crypto.randomUUID(),
-    reporter_subject: subject, scope: "mine", summary: "Checkout fails", description: "Private report text" }));
+    reporter_subject: subject, scope: "mine", summary: "Checkout fails", description: "Private report text", context }));
   expect(response.status).toBe(202);
   return await response.json() as { id: string };
 };
@@ -120,8 +120,8 @@ it("never recreates after a complete negative reconciliation or its automatic wi
 it("concurrent wake-ups permit one create and preserve dependent sequence order", async () => {
   const request = await accept();
   const db = stage.databases.shared;
-  await db.prepare(`INSERT INTO delivery_intent (id, slot, request_id, kind, seq, state, next_attempt_at, retry_deadline)
-    VALUES ('int_DEPENDENT', ?, ?, 'create', 1, 'pending', ?, ?)`).bind(mapping.slot, request.id, now, now + 86_400_000).run();
+  await db.prepare(`INSERT INTO delivery_intent (id, slot, request_id, kind, seq, state, next_attempt_at, retry_deadline, change_id)
+    VALUES ('int_DEPENDENT', ?, ?, 'close', 1, 'pending', ?, ?, ?)`).bind(mapping.slot, request.id, now, now + 86_400_000, crypto.randomUUID()).run();
   await Promise.all(Array.from({ length: 8 }, () => sweep()));
   expect(github.issues).toHaveLength(1);
   expect(await read(request.id)).toMatchObject({ delivery: 'delivered' });
@@ -144,7 +144,7 @@ it("pins approved routing and refuses a changed mapping", async () => {
 
 it.each(['slot', 'request'])("suppresses %s work without treating key revocation as cancellation", async (scope) => {
   const request = await accept();
-  await stage.databases.shared.prepare("INSERT INTO delivery_suppression VALUES (?, ?, 'erasure')")
+  await stage.databases.shared.prepare("INSERT INTO delivery_suppression (scope, reference, reason) VALUES (?, ?, 'erasure')")
     .bind(scope, scope === 'slot' ? mapping.slot : request.id).run();
   await sweep();
   expect(github.requests).toHaveLength(0);
@@ -266,7 +266,7 @@ it("refuses unknown and suppressed resume", async () => {
   await expect(resume(request.id)).rejects.toThrow('cannot be resumed');
   const db = stage.databases.shared;
   await db.prepare("UPDATE delivery_intent SET state = 'failed', last_error_class = 'PermissionMissing'").run();
-  await db.prepare("INSERT INTO delivery_suppression VALUES ('slot', ?, 'offboarding')").bind(mapping.slot).run();
+  await db.prepare("INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('slot', ?, 'offboarding')").bind(mapping.slot).run();
   await expect(resume(request.id)).rejects.toThrow('cannot be resumed');
 });
 
@@ -361,4 +361,77 @@ it("honours installation-wide rate cooldown across two read-only reconcilers", a
   advance(1000);
   await sweep([mapping, other]);
   expect(github.requests.length - before).toBeGreaterThan(1);
+});
+
+describe("Report context", () => {
+  const CONTEXT = { schema: 1, default: { wp_version: "6.5.5", support_plugin_version: "0.1.8", originating_screen: "post-editor" } };
+  const stored = async (id: string) => (await stage.databases.shared.prepare("SELECT context_json FROM delivery_intent WHERE request_id = ?")
+    .bind(id).first<{ context_json: string | null }>())!.context_json;
+  let logged: string[];
+  beforeEach(() => {
+    logged = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args) => { logged.push(JSON.stringify(args)); });
+    }
+  });
+  afterEach(() => {
+    // Delivery logs carry outcomes, never context.
+    for (const line of logged) for (const value of ["6.5.5", "0.1.8", "post-editor", "context"]) expect(line).not.toContain(value);
+    vi.restoreAllMocks();
+  });
+
+  it("delivers the context frozen at acceptance, separately from the text, and clears it once delivered", async () => {
+    const request = await accept(CONTEXT);
+    expect(await stored(request.id)).toBe(JSON.stringify(CONTEXT));
+    await sweep();
+    const body = github.issues[0]!.body!;
+    expect(body.indexOf("### Report context")).toBeGreaterThan(body.indexOf("Private report text"));
+    expect(body).toContain("- WordPress version: `6.5.5`\n- Support plugin version: `0.1.8`\n- Originating admin screen: `post-editor`");
+    expect(await stored(request.id)).toBeNull();
+    expect(JSON.stringify(await read(request.id))).not.toContain("6.5.5");
+  });
+
+  it("clears context at a confirmed failure and at the acceptance deadline", async () => {
+    const rejected = await accept(CONTEXT);
+    respondToPost(403);
+    await sweep();
+    expect(await read(rejected.id)).toMatchObject({ delivery: "failed" });
+    expect(await stored(rejected.id)).toBeNull();
+    const late = await accept(CONTEXT);
+    advance(86_400_000);
+    await sweep();
+    expect(await read(late.id)).toMatchObject({ delivery: "failed" });
+    expect(await stored(late.id)).toBeNull();
+  });
+
+  it("keeps context while the outcome is unknown, so reconciliation recognises the issue that carries it", async () => {
+    const request = await accept(CONTEXT);
+    github.onCreate(() => new Response(null, { status: 502 }));
+    await sweep();
+    expect(await read(request.id)).toMatchObject({ delivery: "outcome-unknown" });
+    expect(await stored(request.id)).toBe(JSON.stringify(CONTEXT));
+    advance(60_000);
+    await sweep();
+    expect(await read(request.id)).toMatchObject({ delivery: "delivered" });
+    expect(github.issues).toHaveLength(1);
+    expect(github.issues[0]!.body).toContain("### Report context");
+    expect(await stored(request.id)).toBeNull();
+  });
+
+  it("never restores context for an Operator's resume of a confirmed failure", async () => {
+    const request = await accept(CONTEXT);
+    respondToPost(403);
+    await sweep();
+    advance(60_000);
+    expect(await resume(request.id)).toBe("Delivery resumed");
+    await sweep();
+    expect(await read(request.id)).toMatchObject({ delivery: "delivered" });
+    expect(github.issues[0]!.body).not.toContain("Report context");
+  });
+
+  it("delivers a context-free request without a context section", async () => {
+    await accept();
+    await sweep();
+    expect(github.issues[0]!.body).not.toContain("Report context");
+  });
 });

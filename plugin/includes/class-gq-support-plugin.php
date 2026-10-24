@@ -14,8 +14,15 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class GQ_Support_Plugin {
 
-	/** Approved site-admin screens; WooCommerce screens match by the `woocommerce` prefix. */
-	private const SCREENS = array( 'dashboard', 'post', 'edit-post' );
+	/**
+	 * Approved site-admin screens, each with its coarse Report context screen.
+	 * WooCommerce screens match by the `woocommerce` prefix.
+	 */
+	private const SCREENS = array(
+		'dashboard' => 'dashboard',
+		'edit-post' => 'post-list',
+		'post'      => 'post-editor',
+	);
 
 	/**
 	 * Explain why an already-active plugin cannot initialize without its dependency.
@@ -39,46 +46,40 @@ final class GQ_Support_Plugin {
 		add_action( 'rest_api_init', array( __CLASS__, 'register_rest' ) );
 		add_action( 'wp_ajax_gq_support_session', array( __CLASS__, 'check_session' ) );
 		add_action( 'wp_ajax_nopriv_gq_support_session', array( __CLASS__, 'check_session' ) );
+		add_action( 'wp_ajax_gq_support_context', array( GQ_Support_Report_Context::class, 'preview' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_launcher' ) );
 		add_action( 'admin_footer', array( __CLASS__, 'render_launcher' ) );
+		add_action( 'admin_notices', array( __CLASS__, 'render_disabled_notice' ) );
 		add_action( 'admin_print_footer_scripts', array( __CLASS__, 'render_deferred_assets' ), 20 );
 		self::register_privacy();
+		add_filter( 'debug_information', array( GQ_Support_Site_Health::class, 'information' ) );
 
 		if ( is_admin() ) {
-			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-setup-page.php';
 			GQ_Support_Setup_Page::register();
 		}
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			GQ_Support_Lifecycle::ensure_site();
-			require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-cli.php';
 			WP_CLI::add_command( 'gq-support', GQ_Support_CLI::class );
 		}
 	}
 
 	/**
-	 * Privacy tools, user deletion and the privacy guide fire rarely: their
-	 * class loads only when one of these hooks does.
+	 * Privacy tools, user deletion and the privacy guide fire rarely: the autoloader
+	 * loads their class only when one of these hooks does.
 	 */
 	private static function register_privacy(): void {
-		$lazy = static function ( string $method ): callable {
-			return static function ( ...$args ) use ( $method ) {
-				require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-privacy.php';
-				return GQ_Support_Privacy::$method( ...$args );
-			};
-		};
-		add_filter( 'wp_privacy_personal_data_exporters', $lazy( 'register_exporter' ) );
-		add_filter( 'wp_privacy_personal_data_erasers', $lazy( 'register_eraser' ) );
-		add_action( 'admin_init', $lazy( 'add_policy_content' ) );
-		add_action( 'delete_user', $lazy( 'erase_deleted_user' ) );
-		add_action( 'wpmu_delete_user', $lazy( 'erase_deleted_network_user' ) );
-		add_action( 'gq_support_retry_erasure', $lazy( 'retry_erasure' ), 10, 2 );
+		add_filter( 'wp_privacy_personal_data_exporters', array( GQ_Support_Privacy::class, 'register_exporter' ) );
+		add_filter( 'wp_privacy_personal_data_erasers', array( GQ_Support_Privacy::class, 'register_eraser' ) );
+		add_action( 'admin_init', array( GQ_Support_Privacy::class, 'add_policy_content' ) );
+		add_action( 'delete_user', array( GQ_Support_Privacy::class, 'erase_deleted_user' ) );
+		add_action( 'wpmu_delete_user', array( GQ_Support_Privacy::class, 'erase_deleted_network_user' ) );
+		add_action( 'gq_support_retry_erasure', array( GQ_Support_Privacy::class, 'retry_erasure' ), 10, 2 );
 	}
 
 	/** Load support controllers only when WordPress initializes REST. */
 	public static function register_rest(): void {
 		GQ_Support_Lifecycle::ensure_site();
-		require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-rest.php';
 		GQ_Support_REST::register();
 	}
 
@@ -90,7 +91,7 @@ final class GQ_Support_Plugin {
 		nocache_headers();
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The session binding authorizes only a same-session nonce refresh; no mutation.
 		$expected = isset( $_GET['session'] ) && is_string( $_GET['session'] ) ? sanitize_text_field( wp_unslash( $_GET['session'] ) ) : '';
-		if ( ! is_user_logged_in() || get_current_user_id() !== wp_validate_auth_cookie( '', 'logged_in' ) || '' === wp_get_session_token() || ! hash_equals( GQ_Support_Access::session(), $expected ) ) {
+		if ( ! GQ_Support_Access::current_session( $expected ) ) {
 			wp_send_json( array( 'state' => 'changed' ) );
 		}
 		if ( ! GQ_Support_Access::can( 'gq_support_submit_requests' ) ) {
@@ -136,17 +137,26 @@ final class GQ_Support_Plugin {
 			return false;
 		}
 
-		$screen = get_current_screen();
-		if ( ! $screen || ( ! in_array( $screen->id, self::SCREENS, true ) && ! str_starts_with( $screen->id, 'woocommerce' ) ) ) {
+		if ( null === self::originating_screen() ) {
 			return false;
 		}
 
 		return 'connected' === GQ_Support_State::get()['connection'];
 	}
 
+	/**
+	 * The coarse screen this admin page reports as Report context, from the
+	 * already-built admin screen and never the request URL; null when the page
+	 * is not an approved one.
+	 */
+	private static function originating_screen(): ?string {
+		$id = (string) get_current_screen()?->id;
+		return self::SCREENS[ $id ] ?? ( str_starts_with( $id, 'woocommerce' ) ? 'woocommerce' : null );
+	}
+
 	/** Register the app without enqueueing it; only the tiny launcher is sent initially. */
 	public static function enqueue_launcher(): void {
-		if ( ! self::eligible() ) {
+		if ( GQ_Support_Fail_Safe::disabled() || ! self::eligible() ) {
 			return;
 		}
 
@@ -167,8 +177,29 @@ final class GQ_Support_Plugin {
 			'timezone' => wp_timezone_string(),
 			'loading'  => __( 'Loading support…', 'gq-support' ),
 			'error'    => __( 'Support could not load. Press to retry.', 'gq-support' ),
+			'help'     => GQ_Support_Fail_Safe::help(),
+			// Kept only in launcher memory until the Reporter opens the panel.
+			'screen'   => self::originating_screen(),
 		);
 		wp_add_inline_script( 'gq-support-launcher', 'window.gqSupportLauncher=' . wp_json_encode( $bootstrap ) . ';', 'before' );
+	}
+
+	/**
+	 * While `GQ_SUPPORT_DISABLED` is set, a Reporter who would have the launcher
+	 * sees why it is missing and the independent contact, from server-rendered core markup only.
+	 */
+	public static function render_disabled_notice(): void {
+		if ( ! GQ_Support_Fail_Safe::disabled() || ! self::eligible() ) {
+			return;
+		}
+		$help = GQ_Support_Fail_Safe::help();
+		echo '<div class="notice notice-info gq-support-disabled"><p>';
+		echo esc_html__( 'Support is temporarily disabled on this site.', 'gq-support' );
+		if ( null !== $help ) {
+			echo ' ';
+			GQ_Support_Fail_Safe::render_contact( $help );
+		}
+		echo '</p></div>';
 	}
 
 	/** Later hooks render only when `enqueue_launcher()` accepted this request. */
@@ -187,7 +218,14 @@ final class GQ_Support_Plugin {
 				<?php echo esc_html__( 'Support', 'gq-support' ); ?>
 				<span class="gq-support-draft-indicator" hidden><span class="gq-support-sr-only"><?php echo esc_html__( 'Unsent draft', 'gq-support' ); ?></span></span>
 			</button>
-			<span class="gq-support-launcher-status gq-support-sr-only" role="status" aria-live="polite"></span>
+			<div class="gq-support-launcher-notice">
+				<span class="gq-support-launcher-status gq-support-sr-only" role="status" aria-live="polite"></span>
+				<?php $help = GQ_Support_Fail_Safe::help(); ?>
+				<?php if ( null !== $help ) : ?>
+					<?php // Server-rendered, so it works when the app assets do not. ?>
+					<p class="gq-support-launcher-help" hidden><?php GQ_Support_Fail_Safe::render_contact( $help ); ?></p>
+				<?php endif; ?>
+			</div>
 		</div>
 		<?php
 	}

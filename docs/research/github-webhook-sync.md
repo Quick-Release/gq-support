@@ -1,7 +1,7 @@
 # GitHub webhook synchronization of Support status
 
 - **Research target:** GitHub issue [#12](https://github.com/Quick-Release/gq-support/issues/12)
-- **Status:** Accepted 2026-10-17 (see Decisions) for status projection refresh, repository safety checks, and the webhook receiver. Not implemented.
+- **Status:** Accepted 2026-10-17 (see Decisions) for status projection refresh, repository safety checks, and the webhook receiver. Implemented by #51 to #57 under #50; the lifecycle webhook handlers remain with #40.
 - **Access date:** 2026-10-17. Every GitHub and Cloudflare fact below was read on this date. Re-check before relying on them.
 - **Inputs:** [CONTEXT.md](../../CONTEXT.md), [ADR 0003](../adr/0003-durable-acceptance-separates-delivery-from-status.md), [ADR 0006](../adr/0006-ordered-reconciliation-of-support-mutations.md), [ADR 0009](../adr/0009-project-repository-intake-and-reporter-scoped-projection.md), [ADR 0010](../adr/0010-installation-scoped-attestation-not-cross-site-identity.md), [ADR 0013](../adr/0013-shared-cloudflare-resources-per-stage.md), [ADR 0015](../adr/0015-reporters-see-submitted-text-and-projected-status.md), [ADR 0016](../adr/0016-restores-never-rewind-revocations-or-deliveries.md), [ADR 0019](../adr/0019-uncertain-creates-require-review.md), [support storage design](../support-storage-design.md), [support delivery design](../support-delivery-design.md), [support security design](../support-security-design.md), [support privacy design](../support-privacy-design.md), [support domain design](../support-domain-design.md), [support API contract](../support-api-contract.md), [GitHub App research](github-app-issue-integration.md)
 
@@ -196,7 +196,7 @@ Design:
 2. **Daily re-check of open rows.** A deleted or transferred issue drops out of the list, so the `since` sweep cannot see it. Once a day, run a bounded, resumable pass of conditional GETs over `open` + `active` rows. Unchanged issues return `304` with no primary-quota cost.
 3. **Repository safety on every sweep** (decision 3). The sweep's scoped mint reports `private` (and `archived`, **verify in spike**; otherwise one `GET /repos/{o}/{r}`). A public, archived or inaccessible repository, or a failed mint, suspends the mapping and alerts. This also catches missed `repository`, `public` and `installation` events within one interval.
 4. **No delivery-log check** (decision 8). The sweep already repairs every missed `issues` event, and item 3 repairs missed lifecycle events, so scanning `GET /app/hook/deliveries` would add an app-level JWT surface, a checkpoint row and payload-capable endpoints for no extra correctness. Webhook health is watched through the Worker's own `401`/`5xx` counts and sweep lag. Redelivery stays a manual Operator action in GitHub's UI; it is safe because every handler is idempotent.
-5. **After a long outage:** run a full reconciliation. Sweep every mapped repository with `since = outage start − skew`, verify every mapping, then resume normal cadence. After a D1 restore, ADR 0016's ordering applies first. Projections are rebuildable by this sweep.
+5. **After a long outage:** run a full reconciliation. Sweep every mapped repository with `since = outage start − skew`, verify every mapping, and restart the daily open-row pass, because listings never show a deleted or transferred issue. Then resume normal cadence. After a D1 restore, ADR 0016's ordering applies first. Projections are rebuildable by this sweep.
 
 Rate considerations:
 
@@ -360,7 +360,7 @@ Prerequisites:
 1. #56's issue handlers deployed to staging. They are on `main` (#79), but
    staging deploys only when an Operator runs **Deploy Worker** for staging,
    and the #55 evidence was taken with an empty allowlist. That deploy also
-   applies migrations 0012–0016 to staging D1.
+   applies the pending migrations, 0012 onward, to staging D1.
 2. A staging Slot mapped to the sandbox repository `1424354303`, pinned to the
    staging installation `172696674`. Decided 2026-10-18: mappings are keyed by
    stage (`stageMappings` in `worker/src/repository-mappings.ts`), so the Slot

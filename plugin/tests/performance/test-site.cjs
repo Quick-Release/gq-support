@@ -21,26 +21,31 @@ exports.wp = (args) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.te
 /** macOS mounts the site through Mutagen, so files written on the host need a sync. */
 exports.sync = () => { if (process.platform === 'darwin') execFileSync('ddev', ['mutagen', 'sync']); };
 
-/** The admin's cookies from the last form login in this worker; each test gets a fresh context. */
-let adminCookies;
+/** Each user's cookies from their last form login in this worker; each test gets a fresh context. */
+const savedCookies = new Map();
 
-/** Forget the saved admin login, after anything that may end its session (such as a password reset). */
-exports.forgetLogIn = () => { adminCookies = undefined; };
+/** Forget the saved logins, after anything that may end a session (such as a password reset). */
+exports.forgetLogIn = () => { savedCookies.clear(); };
 
 /**
- * Logs the page's context in as admin. The first call submits the login form; later calls reuse
- * its cookies, which saves a login round trip per test. It leaves the page where it was.
+ * Logs the page's context in, as admin by default. A user's first call submits the login form;
+ * later calls reuse its cookies, which saves a login round trip per test. It leaves the page where it was.
  * @param {import('@playwright/test').Page} page
+ * @param {string} [user]
+ * @param {string} [password]
  */
-exports.logIn = async function logIn(page) {
-  if (adminCookies) {
-    await page.context().addCookies(adminCookies);
+exports.logIn = async function logIn(page, user = 'admin', password = exports.adminPassword) {
+  if (savedCookies.has(user)) {
+    await page.context().addCookies(savedCookies.get(user));
     return;
   }
+  // Logged in as someone else, wp-login.php clears the typed password.
+  await page.context().clearCookies({ name: /^wordpress/ });
   await page.goto(`${exports.site}/wp-login.php`);
-  await page.locator('#user_login').fill('admin');
-  await page.locator('#user_pass').fill(exports.adminPassword);
+  await page.locator('#user_login').fill(user);
+  await page.locator('#user_pass').fill(password);
   await page.locator('#wp-submit').click();
   await page.waitForURL(/wp-admin/);
-  adminCookies = await page.context().cookies();
+  // Only the login's own cookies, not a test's (such as a Worker outage).
+  savedCookies.set(user, (await page.context().cookies()).filter(({ name }) => name.startsWith('wordpress')));
 };

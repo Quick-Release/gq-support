@@ -11,81 +11,27 @@ on:
     tags:
       - "plugin-v*"
 
+# Candidate verification holds no publication or deployment credential: every job before publish
+# has a read-only token, and its one secret is the read-only GETQUICK registry login that the
+# real-design cell reads in the gq-design-sandbox environment (wordpress-lane.yml). publish promotes the exact ZIP those jobs tested, after
+# checking its recorded SHA-256; nothing is rebuilt between verification and publication.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  performance-gates:
-    # The performance gates run against the assembled package, which publish then ships unchanged.
-    name: Performance gates on the package
+  candidate:
+    # Built once from the frozen lockfiles and assembled once; every later job uses this artifact.
+    name: Build the release candidate
     runs-on: ubuntu-latest
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up DDEV
-        uses: ddev/github-action-setup-ddev@v1
-        with:
-          version: 1.25.4
-          autostart: false
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 12
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - name: Build and assemble the package
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build:app
-          scripts/assemble-plugin-package.sh package-dist
-
-      - name: Size gate on the package
-        run: node plugin/tests/performance/size-gate.mjs package-dist
-
-      - name: Install the package on a disposable site
-        env:
-          GQ_SUPPORT_PLUGIN_DIR: package-dist
-        run: bash plugin/tests/integration/run.sh
-
-      - name: Counter gate on the package
-        run: |
-          pnpm exec playwright install --with-deps chromium
-          ddev wp --path=.test-site plugin install woocommerce
-          pnpm exec playwright test --config plugin/tests/browser/playwright.config.ts performance.spec.ts
-
-      - name: Keep failed browser test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-browser-test-results
-          path: test-results/
-          if-no-files-found: ignore
-
-      - name: Keep the tested package
-        uses: actions/upload-artifact@v4
-        with:
-          name: package-dist
-          path: package-dist/
-          if-no-files-found: error
-
-  publish:
-    name: Publish Composer package
-    needs: performance-gates
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
     outputs:
-      tag: v${{ steps.version.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
+      cells: ${{ steps.cells.outputs.cells }}
+      # Pinned outside the artifact, so publish can refuse a candidate swapped after testing.
+      sha256: ${{ steps.pack.outputs.sha256 }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Resolve package version
         id: version
@@ -108,50 +54,140 @@ jobs:
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Download the tested package
-        uses: actions/download-artifact@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
-          name: package-dist
-          path: package-dist
+          version: 12
 
-      - name: Verify release metadata and assets
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Build and assemble the package
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:app
+          scripts/assemble-plugin-package.sh package-dist
+
+      - name: Size gate on the package
+        run: node plugin/tests/performance/size-gate.mjs package-dist
+
+      # One gq-support/ root, exactly the expected runtime files, every version equal to the
+      # release, Composer metadata, translations, no secrets; then its SHA-256 and file manifest.
+      - name: Package and verify the installable ZIP
+        id: pack
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          node scripts/ci/release-package.mjs pack package-dist package-zip --version "$VERSION"
+          echo "sha256=$(jq -r .zip.sha256 package-zip/gq-support.manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Record provenance
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          jq -n --arg version "$VERSION" --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+            --arg pnpm_lock "$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)" \
+            --arg composer_lock "$(sha256sum plugin/composer.lock | cut -d' ' -f1)" \
+            --arg node "$(node --version)" --arg pnpm "$(pnpm --version)" \
+            --arg zip "$(jq -r .zip.sha256 package-zip/gq-support.manifest.json)" \
+            '{ version: $version, commit: $commit, run: $run, zip_sha256: $zip, lockfiles: { "pnpm-lock.yaml": $pnpm_lock, "plugin/composer.lock": $composer_lock }, toolchain: { node: $node, pnpm: $pnpm } }' \
+            > package-zip/provenance.json
+          cat package-zip/provenance.json
+
+      # The floor and current endpoints, each as acceptance (with multisite, and Plugin Check on
+      # stable) and as the counter gate.
+      - name: Installed-package cells
+        id: cells
+        run: |
+          cells=$(node scripts/ci/runtime-matrix.mjs cells pr | jq -c 'map(select(.id | IN("minimum", "stable", "minimum-counters", "stable-counters")))')
+          [ "$(jq length <<<"$cells")" = 4 ]
+          echo "cells=$cells" >> "$GITHUB_OUTPUT"
+
+      # The scan before upload is the secret scan of the exact archive that publish ships.
+      - name: Keep the release candidate
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: release-candidate
+          path: package-zip/
+          if-no-files-found: error
+          retention-days: 30
+
+  installed:
+    # WP-CLI installs the candidate ZIP on a fresh site: dependency absent and present, lifecycle,
+    # browser suite or counters, multisite, Plugin Check, real uninstall and the upgrade from the
+    # previous release (plugin/tests/integration/package.sh).
+    name: Installed package ${{ matrix.cell.name }}
+    needs: candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.candidate.outputs.cells) }}
+    uses: ./.github/workflows/wordpress-lane.yml
+    with:
+      cell: ${{ toJSON(matrix.cell) }}
+      package: release-candidate
+
+  # Every pull-request and scheduled runtime cell must pass on the release commit; canaries never block.
+  compatibility:
+    name: Pre-release compatibility
+    permissions:
+      contents: read
+    uses: ./.github/workflows/compatibility.yml
+    with:
+      tiers: pr scheduled
+    secrets:
+      COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
+
+  publish:
+    name: Publish Composer package
+    needs: [candidate, installed, compatibility]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: write
+    outputs:
+      tag: v${{ needs.candidate.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Download the tested candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate
+          path: package-zip
+
+      # Refuses an archive whose bytes differ from the recorded SHA-256, then unpacks exactly the
+      # manifest's files: the tree published below is the tree every installed cell ran.
+      - name: Promote the tested bytes
+        env:
+          VERSION: ${{ needs.candidate.outputs.version }}
+          SHA256: ${{ needs.candidate.outputs.sha256 }}
+        run: |
           set -euo pipefail
-
-          php_version=$(sed -n 's/^ \* Version: *//p' plugin/gq-support.php)
-          constant_version=$(sed -n "s/^define( 'GQ_SUPPORT_VERSION', '\([^']*\)' );/\1/p" plugin/gq-support.php)
-          stable_tag=$(sed -n 's/^Stable tag: *//p' plugin/readme.txt)
-
-          [ "$php_version" = "$VERSION" ] || { echo "Plugin header is $php_version, expected $VERSION" >&2; exit 1; }
-          [ "$constant_version" = "$VERSION" ] || { echo "PHP constant is $constant_version, expected $VERSION" >&2; exit 1; }
-          [ "$stable_tag" = "$VERSION" ] || { echo "Stable tag is $stable_tag, expected $VERSION" >&2; exit 1; }
-          test -s package-dist/assets/dist/index.js
-          test -s package-dist/assets/dist/index.css
-          test -s package-dist/assets/dist/index-rtl.css
-          test -s package-dist/assets/launcher.js
-          test -s package-dist/assets/launcher.css
-          test -s package-dist/assets/dist/index.asset.php
-          grep -q "'wp-element'" package-dist/assets/dist/index.asset.php
-          ! grep -q "'react-jsx-runtime'" package-dist/assets/dist/index.asset.php
+          [ "$(jq -r .version package-zip/gq-support.manifest.json)" = "$VERSION" ]
+          [ "$(sha256sum package-zip/gq-support.zip | cut -d' ' -f1)" = "$SHA256" ]
+          node scripts/ci/release-package.mjs extract package-zip package-dist
 
       - name: Publish package branch and tag
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.candidate.outputs.version }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
+          sha=$(jq -r .zip.sha256 package-zip/gq-support.manifest.json)
           package_repo=$(mktemp -d)
           git -C "$package_repo" init --initial-branch=composer
           git -C "$package_repo" config user.name "github-actions[bot]"
           git -C "$package_repo" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           cp -R package-dist/. "$package_repo/"
           git -C "$package_repo" add --all
-          git -C "$package_repo" commit -m "Release GETQUICK Support $VERSION"
-          git -C "$package_repo" tag -a "v$VERSION" -m "GETQUICK Support $VERSION"
+          git -C "$package_repo" commit -m "Release GETQUICK Support $VERSION" -m "Tested gq-support.zip SHA-256: $sha (run $GITHUB_RUN_ID, source $GITHUB_SHA)"
+          git -C "$package_repo" tag -a "v$VERSION" -m "GETQUICK Support $VERSION" -m "Tested gq-support.zip SHA-256: $sha"
           git -C "$package_repo" remote add origin "https://x-access-token:$GH_TOKEN@github.com/$REPOSITORY.git"
           git -C "$package_repo" push --force origin HEAD:refs/heads/composer
           git -C "$package_repo" push origin "v$VERSION"

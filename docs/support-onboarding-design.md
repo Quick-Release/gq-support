@@ -91,6 +91,7 @@ The lifecycle already gives a site a new installation ID when `home_url()` chang
 
 - The existing `gq_support_installation_id`, `gq_support_installation_origin`, `gq_support_schema_version` and `gq_support_administrator_grants` options migrate into `gq_support_state` in one versioned step. That takes admin screens from 2–4 option queries to one ([performance research](https://github.com/Quick-Release/gq-support/issues/18)).
 - `GQ_SUPPORT_SIGNING_KEY` and `GQ_SUPPORT_KEY_ID` constants in `wp-config.php` override the stored key, for sites whose deployment manages secrets. The setup page then shows "Managed by server configuration" and hides Disconnect. `GQ_SUPPORT_SERVICE_URL` is described in the API contract.
+- `GQ_SUPPORT_DISABLED` turns support off locally without touching the connection: no launcher, no service request (including enrollment, test and disconnect, which report it), and the setup page says so. `GQ_SUPPORT_HELP_URL` and `GQ_SUPPORT_HELP_LABEL` hold the Operator-verified independent contact, shown on the setup page and to Reporters when support is unavailable ([outage decision](research/outage-draft-recovery.md#independent-help-and-support-fail-safe)).
 - Neither option is registered with `show_in_rest` or exported to the browser. The key is excluded from Site Health debug data and never logged.
 - There are no free-form settings, so the setup page does not use `register_setting()`. Its actions (enroll, test, disconnect) are `admin-post.php` handlers that check a nonce and `gq_support_manage_settings`.
 

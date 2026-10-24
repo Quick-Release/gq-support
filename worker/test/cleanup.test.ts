@@ -41,8 +41,8 @@ beforeEach(async () => {
   key = await digestKey("test App private key");
 });
 afterEach(async () => {
-  // No log line from any flow carries Submitted text, subjects or credentials.
-  expect(logs.join("\n")).not.toMatch(/Private report text|Checkout fails|00000000-0000-4000|ghs_|Bearer/);
+  // No log line from any flow carries Submitted text, subjects, the subject's `rs_` hash or credentials.
+  expect(logs.join("\n")).not.toMatch(/Private report text|Checkout fails|00000000-0000-4000|rs_[a-f0-9]{32}|ghs_|Bearer/);
   await stage.dispose();
   vi.useRealTimers();
 });
@@ -113,6 +113,32 @@ it("erasure before dispatch suppresses the create and completes after purging", 
   expect(posts()).toHaveLength(0);
 });
 
+it("a pending status change is suppressed with its request, drains with it and is purged by the erasure", async () => {
+  const request = await accept();
+  await sweep();
+  advance(60_000);
+  const changed = await installation.send("POST", `/v1/requests/${request.id}/status`, JSON.stringify({
+    change_id: crypto.randomUUID(), status: "closed", reporter_subject: subject, scope: "mine" }));
+  expect(changed.status).toBe(202);
+  // A claimed status change's live lease holds the capture until it drains.
+  await db().prepare("UPDATE delivery_intent SET owner = 'other', lease_expires_at = ? WHERE seq = 1").bind(now + 60_000).run();
+  const erasure = await erase();
+  await cleanup();
+  expect(await cleanupRow(request.id)).toMatchObject({ state: "draining" });
+  await db().prepare("UPDATE delivery_intent SET owner = NULL, lease_expires_at = NULL WHERE seq = 1").run();
+  await sweep();
+  await cleanup();
+  advance(10_000);
+  await cleanup();
+  expectRedacted(github.issues[0]!, "Support request (erased)");
+  // The redaction's PATCH only: the suppressed close was never sent.
+  expect(patches().map((request) => Object.keys(request.body as object).sort())).toEqual([["body", "title"]]);
+  expect(github.issues[0]!.state).toBe("open");
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ counts: { redacted: 1, pending: 0 } });
+  await expectMinimal(request.id);
+  expect((await db().prepare("SELECT COUNT(*) AS n FROM intake_debit WHERE subject LIKE ?").bind(`%${subject}`).first<{ n: number }>())!.n).toBe(0);
+});
+
 it("an authorized create drains, then its issue is redacted and retitled", async () => {
   const request = await accept();
   let erasure = "";
@@ -144,7 +170,7 @@ it("an uncertain result is reconciled read-only, then the found issue is redacte
   await cleanup();
   await expectMinimal(request.id);
   // Only the keyed title digest outlives the text, and only while automatic retitling remains possible.
-  expect(await cleanupRow(request.id)).toMatchObject({ state: "reconciling", title_digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  expect(await cleanupRow(request.id)).toMatchObject({ state: "reconciling", title_digest: expect.stringMatching(/^[a-f0-9]{16}\.[a-f0-9]{64}$/) });
   advance(60_000);
   await cleanup();
   expectRedacted(github.issues[0]!, "Support request (erased)");
@@ -355,12 +381,37 @@ it("unresolved records cross 45-day compaction; the tombstone window starts afte
   expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "excepted" });
   expect(await operator("erasure-close", erasure, "operator-1")).toBe("Erasure closed");
   await expect(operator("erasure-close", erasure, "operator-1")).rejects.toThrow("Only a finished, open erasure");
+  // Closing never completes it, and the excepted record's tombstone window starts at the close.
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "closed", residual: ["remote_outcome"] });
+  await cleanup();
+  expect(await cleanupRow(uncertain.id)).toMatchObject({ state: "excepted" });
+  expect(await suppressed(uncertain.id)).toBe(true);
+  advance(45 * DAY);
   await cleanup();
   expect(await cleanupRow(uncertain.id)).toBeNull();
   expect(await suppressed(uncertain.id)).toBe(false);
   expect(await erasureStatus(db(), erasure)).toBeNull();
   expect(posts()).toHaveLength(1);
 }, 30_000);
+
+it("a completed erasure's tombstone window starts when its reference search ends", async () => {
+  const request = await accept();
+  const erasure = await erase();
+  github.next(() => undefined); // installation token
+  github.next(() => Response.json({ message: "rate limit" }, { status: 429, headers: { "retry-after": String(12 * 3_600) } }));
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "in_progress", counts: { pending: 0 } });
+  advance(12 * 3_600_000);
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "completed" });
+  advance(45 * DAY - 12 * 3_600_000);
+  await cleanup();
+  expect(await cleanupRow(request.id)).toBeNull(); // resolved at recording, so compacted first
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "completed" });
+  advance(12 * 3_600_000);
+  await cleanup();
+  expect(await erasureStatus(db(), erasure)).toBeNull();
+});
 
 it("offboarding suppresses creates, purges content after 30 days and leaves the Client's issues", async () => {
   const delivered = await accept();
@@ -488,3 +539,14 @@ it("a search that keeps failing is reported, not taken as proof", async () => {
   for (let hour = 0; hour < 25; hour++) { advance(3_600_000); await cleanup(); }
   expect(await erasureStatus(db(), erasure)).toMatchObject({ state: "needs_review", residual: ["reference_search"] });
 }, 30_000);
+
+it("a digest made before the key rotated leaves the title for review, not as retitled", async () => {
+  await accept();
+  await sweep();
+  const erasure = await erase();
+  await cleanup(await digestKey("the rotated App private key"));
+  advance(10_000);
+  await cleanup(await digestKey("the rotated App private key"));
+  expectRedacted(github.issues[0]!, "Checkout fails");
+  expect(await erasureStatus(db(), erasure)).toMatchObject({ residual: ["edit_history", "title_review"] });
+});

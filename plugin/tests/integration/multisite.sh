@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 # Run after run.sh on the disposable DDEV site; conversion is destructive.
+# GQ_SUPPORT_MULTISITE=subdomain converts to a subdomain network instead of subdirectories.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 wp() { ddev wp --path=.test-site "$@"; }
 if ! wp eval 'exit( is_multisite() ? 0 : 1 );' >/dev/null 2>&1; then
   wp plugin deactivate gq-support
-  wp core multisite-convert --title='Lifecycle network' --subdomains=false
+  topology=()
+  [[ "${GQ_SUPPORT_MULTISITE:-}" == subdomain ]] && topology=(--subdomains)
+  wp core multisite-convert --title='Lifecycle network' "${topology[@]}"
 fi
 wp plugin activate gq-design --network
+# Site-local activation first: it initializes only the site it activates on.
+if ! wp plugin is-active gq-support --network; then
+  wp plugin activate gq-support
+  wp eval-file plugin/tests/integration/lifecycle.php active
+  wp plugin deactivate gq-support
+fi
 wp plugin activate gq-support --network
 wp eval-file plugin/tests/integration/lifecycle.php active
 wp eval-file plugin/tests/integration/lifecycle.php network
