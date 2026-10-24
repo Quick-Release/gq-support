@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Metric from "effect/Metric";
 
+import { applyLifecycleChange, lifecycleChange } from "./lifecycle-webhooks.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { requestStatusRefresh } from "./status-refresh.ts";
@@ -112,6 +113,14 @@ export const createGitHubWebhookReceiver = ({ appId, secret, previousSecret, dia
         }, catch: () => "storage" as const }).pipe(Effect.catch(() => Effect.succeed("storage" as const)));
         responseStatus = accepted === "storage" ? 503 : accepted ? 202 : 204;
       }
+    }
+    const change = status ? lifecycleChange(request.headers.get("x-github-event")!, result.payload, status.mappings) : undefined;
+    if (status && change && (change.suspend.length > 0 || change.verify.length > 0)) {
+      // Written before the acknowledgement: GitHub does not redeliver a 2xx.
+      const applied = yield* Effect.tryPromise({ try: () => status.database(), catch: () => "storage" as const }).pipe(
+        Effect.flatMap((db) => applyLifecycleChange(db, change, Date.now())),
+        Effect.as("applied" as const), Effect.catch(() => Effect.succeed("storage" as const)));
+      responseStatus = applied === "storage" ? 503 : 202;
     }
     return new Response(null, { status: responseStatus, headers: diagnostics ? {
       "X-GQ-Webhook-Bytes": String(result.bytes), "X-GQ-Webhook-Key": result.key,
