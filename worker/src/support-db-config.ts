@@ -11,3 +11,9 @@ export const supportDatabaseProps = {
   jurisdiction: "eu",
   migrations: "./migrations",
 } as const;
+
+/** The suppression ledger (ADR 0016): never restored with SupportDB. Same rules apply. */
+export const supportLedgerProps = {
+  jurisdiction: "eu",
+  migrations: "./ledger-migrations",
+} as const;

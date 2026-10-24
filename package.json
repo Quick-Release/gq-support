@@ -9,20 +9,31 @@
     "test:browser": "playwright test --config plugin/tests/browser/playwright.config.ts",
     "dev:worker": "pnpm --filter gq-support-worker dev",
     "deploy:worker": "pnpm --filter gq-support-worker deploy",
-    "wp:start": "ddev start gq-support-testsite && pnpm run wp:update",
-    "wp:stop": "ddev stop gq-support-testsite",
-    "wp:open": "ddev launch gq-support-testsite",
-    "wp:ssh": "ddev ssh gq-support-testsite",
-    "wp:update": "ddev exec -p gq-support-testsite composer update roots/wordpress --with-all-dependencies --no-interaction && ddev exec -p gq-support-testsite wp plugin update --all",
-    "wp": "ddev exec -p gq-support-testsite wp",
-    "wp:check": "ddev exec -p gq-support-testsite wp plugin check gq-support",
-    "lint:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcs",
-    "lint:php:fix": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcbf",
-    "analyse:php": "ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-support-testsite --dir /var/www/html/web/app/plugins/gq-support composer analyse",
-    "test:size": "node plugin/tests/performance/size-gate.mjs && node --test plugin/tests/performance/"
+    "wp:start": "cd ../playground && ddev start",
+    "wp:stop": "ddev stop gq-wp-playground",
+    "wp:open": "ddev launch gq-wp-playground",
+    "wp:ssh": "ddev ssh gq-wp-playground",
+    "wp:update": "cd ../playground && ddev refresh",
+    "wp": "ddev exec -p gq-wp-playground wp",
+    "wp:check": "ddev exec -p gq-wp-playground wp plugin activate plugin-check && ddev exec -p gq-wp-playground wp plugin check gq-support",
+    "wp:test": "cd ../playground && ddev test-plugin gq-support",
+    "lint:php": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcs",
+    "lint:php:fix": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcbf",
+    "analyse:php": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer analyse",
+    "lint:js": "pnpm --filter gq-support-app lint && eslint . --max-warnings=0",
+    "audit:deps": "node scripts/ci/dependency-audit.mjs",
+    "scan:secrets": "scripts/ci/gitleaks.sh git .",
+    "test:ci": "node --test 'scripts/ci/*.test.mjs'",
+    "test:lint": "node --test scripts/lint-gate.test.mjs",
+    "test:size": "node plugin/tests/performance/size-gate.mjs && node --test 'plugin/tests/performance/*.test.mjs'",
+    "bench:timing": "node plugin/tests/performance/timing-benchmark.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
-    "lefthook": "^2.1.14"
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "lefthook": "^2.1.14",
+    "typescript-eslint": "^8.70.1"
   }
 }

@@ -19,3 +19,8 @@ Use the canonical triage label names: `needs-triage`, `needs-info`, `ready-for-a
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Cloudflare account
+
+Use the **Tipme** account for this project's Cloudflare resources: `8f38791a8c37b182239af2a385ab3c31`.
+For Cloudflare credentials and the Alchemy profile, see `worker/README.md`.

@@ -10,9 +10,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Produces the signing headers from the API contract. The canonical string,
- * clock window and replay rules belong to #32; this version is provisional
- * and must match the Worker's verifier before either side ships.
+ * Produces the signing headers from the API contract. The Worker verifies
+ * them within a five-minute clock window and rejects a reused request ID;
+ * contract/fixtures/signing.json pins the canonical string on both sides.
  */
 final class GQ_Support_Signer {
 
@@ -53,17 +53,19 @@ final class GQ_Support_Signer {
 	/**
 	 * Headers that authenticate one request.
 	 *
-	 * @param string $method HTTP method.
-	 * @param string $path   Path and query, e.g. `/v1/installation`.
-	 * @param string $body   Exact request body.
+	 * @param string      $method     HTTP method.
+	 * @param string      $path       Path and query, e.g. `/v1/installation`.
+	 * @param string      $body       Exact request body.
+	 * @param int|null    $timestamp  Epoch seconds; now, except in signing fixtures.
+	 * @param string|null $request_id A single-use request ID; a fresh UUID, except in signing fixtures.
 	 * @return array<string, string>
 	 */
-	public function headers( string $method, string $path, string $body ): array {
+	public function headers( string $method, string $path, string $body, ?int $timestamp = null, ?string $request_id = null ): array {
 		$headers = array(
 			'GQ-Support-Key-Id'          => $this->key_id,
 			'GQ-Support-Installation-Id' => $this->installation_id,
-			'GQ-Support-Timestamp'       => (string) time(),
-			'GQ-Support-Request-Id'      => wp_generate_uuid4(),
+			'GQ-Support-Timestamp'       => (string) ( $timestamp ?? time() ),
+			'GQ-Support-Request-Id'      => $request_id ?? wp_generate_uuid4(),
 			'Content-Digest'             => self::digest( $body ),
 		);
 

@@ -1,0 +1,70 @@
+name: GitHub webhook spike (staging)
+run-name: Webhook ${{ inputs.operation }} ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [configure, config, break, probe, installation, collect, redeliver, retire]
+        required: true
+      request_id:
+        description: Non-secret correlation ID for the local runner
+        required: true
+      delivery_id:
+        description: Delivery to redeliver (redeliver only)
+        required: false
+      since:
+        description: ISO UTC lower bound for evidence collection
+        required: false
+
+permissions:
+  contents: read
+
+# Share the deploy lock, including configuration and rotation operations.
+concurrency:
+  group: deploy-worker-staging
+  cancel-in-progress: false
+
+jobs:
+  spike:
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run staging-only operation
+        env:
+          OPERATION: ${{ inputs.operation }}
+          SPIKE_DELIVERY_ID: ${{ inputs.delivery_id }}
+          SPIKE_SINCE: ${{ inputs.since }}
+          CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_APP_CLIENT_ID: ${{ vars.SUPPORT_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_ID: ${{ vars.SUPPORT_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ vars.SUPPORT_GITHUB_APP_SLUG }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_WEBHOOK_PREVIOUS_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET }}
+          GITHUB_WEBHOOK_DIAGNOSTICS: 'true'
+        run: |
+          set -euo pipefail
+          if [ "$OPERATION" = retire ]; then
+            # The encrypted old source remains available to the probe in this
+            # job, but is explicitly absent from the runtime deployment.
+            GITHUB_WEBHOOK_PREVIOUS_SECRET='' pnpm exec alchemy deploy --stage staging --yes
+            node scripts/github-webhook-spike.ts retired-probe
+          else
+            node scripts/github-webhook-spike.ts "$OPERATION"
+          fi

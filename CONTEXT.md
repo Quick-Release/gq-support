@@ -13,7 +13,7 @@ A Client's project whose WordPress installation is connected to its existing Git
 
 **WordPress installation**:
 A configured WordPress site through which a Reporter submits and views support requests. Its environment distinguishes contexts such as production and staging.
-_Avoid_: Site when the deployment boundary matters
+_Avoid_: Site when the deployment boundary matters. In the widget's copy ("All requests on this site") and in `scope=site`, "site" means this installation's Visibility scope, because that is the word Reporters use.
 
 **Slot**:
 The Operator-approved place for one WordPress installation in one environment, such as `acme-shop/production`. Support requests belong to the Slot, so they survive a domain change and re-enrollment, while a copy enrolled elsewhere starts empty.
@@ -58,8 +58,22 @@ The WordPress projection of Support requests associated with the authenticated R
 The Summary and Description exactly as the Reporter sent them. It is what the Reporter sees, even after developers retitle or edit the GitHub issue.
 _Avoid_: Issue body, when the GitHub-side text is not meant
 
+**Report context**:
+The disclosed, approved technical facts accompanying a Support request, separate from Submitted text and installation attribution. A Reporter can remove optional context before submitting it.
+
+**Technical details**:
+The optional additional Report context collected only when the Reporter explicitly requests it and reviews the selected values before submission.
+_Avoid_: Full Site Health report, automatic diagnostics
+
 **Support status**:
-Whether a Support request's GitHub issue is open or closed. GitHub is authoritative for this status; what the Reporter sees is the service's last observation of it. Delivery outcome is separate.
+Whether a Support request's GitHub issue is open or closed. GitHub is authoritative for this status; what the Reporter sees is the service's last observation of it. An issue deleted or transferred out of the Project repository shows as closed, and an Operator is alerted. Delivery outcome is separate.
+
+**Status change**:
+A Reporter's or Support manager's request to close or reopen a delivered Support request. It is delivered to GitHub like a create, in order after it, and has its own delivery outcome. It never becomes a Support status of its own: the status is whatever GitHub then reports.
+_Avoid_: Status update, when GitHub's own change is meant
+
+**Change ID**:
+The browser's identity for one Status change, reused only to check an uncertain one again, so the service records it at most once. It is scoped to the Support request.
 
 **Engineering issue**:
 An issue used for internal project work in the same Project repository. It is never included in a Reporter's issue list merely because it shares a label or repository.
@@ -68,6 +82,10 @@ An issue used for internal project work in the same Project repository. It is ne
 
 **Repository mapping**:
 The approved association between a WordPress project/installation and its existing Project repository. Reporters cannot choose or change the mapping through the support experience.
+
+**Suspended mapping**:
+A Repository mapping the service has stopped sending new Support requests to, because the Project repository became public, was archived, or the GitHub App lost access. Reporters keep seeing existing requests' last-known status. Only an Operator lifts a suspension, even when the cause appears resolved.
+_Avoid_: Disabled, disconnected
 
 **Installation credential**:
 A revocable identity for one approved WordPress installation and environment when contacting the support service; it does not authorize another installation or an operator. The installation holds it; the service knows only how to verify it.

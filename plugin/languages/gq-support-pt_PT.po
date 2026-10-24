@@ -1,4 +1,4 @@
-# Portuguese (Portugal) translations for the PHP-rendered launcher strings.
+# Portuguese (Portugal) translations for the plugin's PHP strings.
 msgid ""
 msgstr ""
 "Language: pt_PT\n"
@@ -19,3 +19,270 @@ msgstr "A carregar o apoio…"
 
 msgid "Support could not load. Press to retry."
 msgstr "Não foi possível carregar o apoio. Prima para tentar novamente."
+
+msgid "For help, contact:"
+msgstr "Para obter ajuda, contacte:"
+
+msgid "Support is temporarily disabled on this site."
+msgstr "O apoio está temporariamente desativado neste site."
+
+msgid "GETQUICK Support"
+msgstr "Apoio GETQUICK"
+
+msgid "Adds an in-dashboard support widget for authenticated users to submit reports and view their status."
+msgstr "Adiciona ao painel um widget de apoio para os utilizadores autenticados enviarem pedidos e verem o respetivo estado."
+
+msgid "Support is unavailable. Try again."
+msgstr "O apoio não está disponível. Tente novamente."
+
+msgid "Enter the Enrollment code GETQUICK gave you."
+msgstr "Introduza o código de inscrição que a GETQUICK lhe deu."
+
+msgid "Too many attempts. Wait a few minutes and try again."
+msgstr "Demasiadas tentativas. Aguarde alguns minutos e tente novamente."
+
+msgid "This Enrollment code is not valid. Ask GETQUICK for a new one."
+msgstr "Este código de inscrição não é válido. Peça um novo à GETQUICK."
+
+msgid "GQ_SUPPORT_KEY_ID does not match the enrolled key. Update wp-config.php with the enrolled key ID."
+msgstr "GQ_SUPPORT_KEY_ID não corresponde à chave inscrita. Atualize o wp-config.php com o ID da chave inscrita."
+
+msgid "This site is not connected."
+msgstr "Este site não está ligado."
+
+msgid "This connection is managed by server configuration."
+msgstr "Esta ligação é gerida pela configuração do servidor."
+
+msgid "Support is temporarily disabled by GQ_SUPPORT_DISABLED in wp-config.php. Nothing was sent to the support service."
+msgstr "O apoio está temporariamente desativado por GQ_SUPPORT_DISABLED no wp-config.php. Nada foi enviado para o serviço de apoio."
+
+msgid "The support service could not be reached. Try again."
+msgstr "Não foi possível contactar o serviço de apoio. Tente novamente."
+
+msgid "GETQUICK Support requires the active GETQUICK Design plugin."
+msgstr "O Apoio GETQUICK requer o plugin GETQUICK Design ativo."
+
+msgid "GETQUICK Support requests"
+msgstr "Pedidos de apoio GETQUICK"
+
+msgid "The support export expired. Start the export again."
+msgstr "A exportação de apoio expirou. Inicie novamente a exportação."
+
+msgid "The support service is unavailable. Try the export again."
+msgstr "O serviço de apoio não está disponível. Tente novamente a exportação."
+
+msgid "Request ID"
+msgstr "ID do pedido"
+
+msgid "Summary"
+msgstr "Resumo"
+
+msgid "Description"
+msgstr "Descrição"
+
+msgid "Submitted"
+msgstr "Enviado"
+
+msgid "Delivery"
+msgstr "Entrega"
+
+msgid "Support status"
+msgstr "Estado do apoio"
+
+msgid "Report context"
+msgstr "Contexto do pedido"
+
+msgid "Support requests"
+msgstr "Pedidos de apoio"
+
+msgid "The support service could not record the erasure. Try again."
+msgstr "O serviço de apoio não conseguiu registar a eliminação. Tente novamente."
+
+msgid "Support request text was erased, but GETQUICK could not confirm whether a copy reached GitHub, so the erasure is incomplete. The Support settings page shows it."
+msgstr "O texto dos pedidos de apoio foi eliminado, mas a GETQUICK não conseguiu confirmar se alguma cópia chegou ao GitHub, pelo que a eliminação está incompleta. A página de definições do Apoio mostra-a."
+
+msgid "Support request text was erased. GETQUICK has reviewed the copies that could not be removed automatically, such as earlier versions kept in GitHub."
+msgstr "O texto dos pedidos de apoio foi eliminado. A GETQUICK reviu as cópias que não puderam ser removidas automaticamente, como versões anteriores guardadas no GitHub."
+
+msgid "Support request text was erased. Some copies need review by GETQUICK, such as earlier versions kept in GitHub; the Support settings page shows the erasure until it is closed."
+msgstr "O texto dos pedidos de apoio foi eliminado. Algumas cópias, como versões anteriores guardadas no GitHub, têm de ser revistas pela GETQUICK; a página de definições do Apoio mostra a eliminação até ser fechada."
+
+msgid "Support request erasure is continuing. The Support settings page shows its progress."
+msgstr "A eliminação dos pedidos de apoio continua em curso. A página de definições do Apoio mostra o progresso."
+
+msgid "Suggested text for your privacy policy. Adapt it to your agreement with GETQUICK; it is not legal advice."
+msgstr "Texto sugerido para a sua política de privacidade. Adapte-o ao seu acordo com a GETQUICK; não constitui aconselhamento jurídico."
+
+msgid "When you send a support request from this site's admin area, the summary and description you write are sent to our support provider, GETQUICK, which stores them on Cloudflare (database in the EU) and creates an issue in this project's private GitHub repository so that the development team can work on it. Your name, email address and username are not sent. The request is linked to you through a random identifier that is kept on this site. GitHub may email notifications of new issues to members of the development team."
+msgstr "Quando envia um pedido de apoio a partir da área de administração deste site, o resumo e a descrição que escreve são enviados para o nosso fornecedor de apoio, a GETQUICK, que os guarda na Cloudflare (base de dados na UE) e cria um issue no repositório GitHub privado deste projeto para que a equipa de desenvolvimento possa tratá-lo. O seu nome, endereço de email e nome de utilizador não são enviados. O pedido fica associado a si através de um identificador aleatório guardado neste site. O GitHub pode enviar notificações de novos issues por email aos membros da equipa de desenvolvimento."
+
+msgid "Unless you remove them before sending, your request also includes the WordPress version, the support plugin version, and the kind of admin screen you opened support from (the dashboard, the posts list, the post editor or WooCommerce). These appear in the GitHub issue, not in your list of requests on this site. GETQUICK deletes its copy once the request reaches GitHub or fails. The address of the page you were on is never sent."
+msgstr "A menos que as remova antes de enviar, o seu pedido inclui também a versão do WordPress, a versão do plugin de apoio e o tipo de ecrã de administração a partir do qual abriu o apoio (o painel, a lista de artigos, o editor de artigos ou o WooCommerce). Estas informações aparecem no issue do GitHub, não na sua lista de pedidos neste site. A GETQUICK elimina a sua cópia assim que o pedido chega ao GitHub ou falha. O endereço da página em que se encontrava nunca é enviado."
+
+msgid "Support requests are kept by GETQUICK for 12 months after they are closed; requests that never reached GitHub are kept for at most 12 months. The issue in GitHub stays part of this project's engineering history. If you ask this site to erase your personal data, your requests are deleted from GETQUICK's service and the text of your requests and the information sent with them are removed from the GitHub issues, including older issues found by their pseudonymous reference. Copies that cannot be removed automatically, such as notification emails and earlier versions kept in GitHub's edit history, are reviewed and deleted by hand where possible."
+msgstr "A GETQUICK conserva os pedidos de apoio durante 12 meses após serem fechados; os pedidos que nunca chegaram ao GitHub são conservados durante, no máximo, 12 meses. O issue no GitHub continua a fazer parte do histórico de engenharia deste projeto. Se pedir a este site que elimine os seus dados pessoais, os seus pedidos são eliminados do serviço da GETQUICK e o texto dos seus pedidos e as informações enviadas com eles são removidos dos issues do GitHub, incluindo issues mais antigos encontrados através da sua referência pseudónima. As cópias que não podem ser removidas automaticamente, como emails de notificação e versões anteriores guardadas no histórico de edições do GitHub, são revistas e eliminadas manualmente sempre que possível."
+
+msgid "WordPress version"
+msgstr "Versão do WordPress"
+
+msgid "Support plugin version"
+msgstr "Versão do plugin de apoio"
+
+msgid "Screen you opened support from"
+msgstr "Ecrã a partir do qual abriu o apoio"
+
+msgid "Support is unavailable. Reload the page to continue."
+msgstr "O apoio não está disponível. Recarregue a página para continuar."
+
+msgid "Sorry, you are not allowed to manage GETQUICK Support."
+msgstr "Lamentamos, mas não tem permissão para gerir o Apoio GETQUICK."
+
+msgid "Temporarily disabled"
+msgstr "Temporariamente desativado"
+
+msgid "GQ_SUPPORT_DISABLED is set in wp-config.php. Reporters see no support panel, and this site sends nothing to the support service. The connection, its key and requests the service already received are unchanged. Remove the constant to turn support back on."
+msgstr "GQ_SUPPORT_DISABLED está definido no wp-config.php. Os utilizadores não veem o painel de apoio e este site não envia nada para o serviço de apoio. A ligação, a respetiva chave e os pedidos que o serviço já recebeu mantêm-se. Remova a constante para voltar a ativar o apoio."
+
+msgid "Independent help"
+msgstr "Ajuda independente"
+
+msgid "Shown to Reporters when support is unavailable. Give it to them outside WordPress too."
+msgstr "Mostrado aos utilizadores quando o apoio não está disponível. Indique-o também fora do WordPress."
+
+msgid "Not valid. GQ_SUPPORT_HELP_URL must be an https, mailto or tel address without a query string, and GQ_SUPPORT_HELP_LABEL at most 120 characters on one line."
+msgstr "Não é válido. GQ_SUPPORT_HELP_URL tem de ser um endereço https, mailto ou tel sem query string, e GQ_SUPPORT_HELP_LABEL ter no máximo 120 caracteres numa só linha."
+
+msgid "Not set. GETQUICK sets the verified contact with GQ_SUPPORT_HELP_URL and GQ_SUPPORT_HELP_LABEL in wp-config.php."
+msgstr "Não definido. A GETQUICK define o contacto verificado com GQ_SUPPORT_HELP_URL e GQ_SUPPORT_HELP_LABEL no wp-config.php."
+
+msgid "Connection"
+msgstr "Ligação"
+
+msgid "Signing key"
+msgstr "Chave de assinatura"
+
+msgid "Managed by server configuration"
+msgstr "Gerida pela configuração do servidor"
+
+msgid "Environment"
+msgstr "Ambiente"
+
+#. translators: %s: the environment type WordPress reports, e.g. "production".
+msgid "This site reports the \"%s\" environment. Ask GETQUICK to check that the connection is for the right environment."
+msgstr "Este site indica o ambiente \"%s\". Peça à GETQUICK que confirme se a ligação é para o ambiente correto."
+
+msgid "Connected"
+msgstr "Ligado"
+
+msgid "Key fingerprint"
+msgstr "Impressão digital da chave"
+
+msgid "Last test"
+msgstr "Último teste"
+
+#. translators: 1: test result, 2: how long ago the test ran.
+msgid "%1$s, %2$s ago"
+msgstr "%1$s, há %2$s"
+
+msgid "Enrollment code"
+msgstr "Código de inscrição"
+
+msgid "GETQUICK gives you a single-use code that is valid for 30 minutes."
+msgstr "A GETQUICK dá-lhe um código de utilização única válido durante 30 minutos."
+
+msgid "Connect"
+msgstr "Ligar"
+
+msgid "Test connection"
+msgstr "Testar ligação"
+
+msgid "Disconnect"
+msgstr "Desligar"
+
+msgid "Personal data erasures"
+msgstr "Eliminações de dados pessoais"
+
+msgid "Erasures requested through Tools → Erase Personal Data. Each stays listed until GETQUICK has reviewed any remaining copies and closed it. One closed while a possible copy in GitHub is unresolved stays listed as incomplete."
+msgstr "Eliminações pedidas em Ferramentas → Eliminar dados pessoais. Cada uma fica na lista até a GETQUICK rever as cópias restantes e fechá-la. Uma eliminação fechada com uma possível cópia no GitHub por resolver fica na lista como incompleta."
+
+msgid "Erasure"
+msgstr "Eliminação"
+
+msgid "State"
+msgstr "Estado"
+
+msgid "Checked"
+msgstr "Verificado"
+
+#. translators: %s: how long ago the state was checked, e.g. "5 mins".
+msgid "%s ago"
+msgstr "Há %s"
+
+msgid "Erasure status cannot be refreshed while support is disabled."
+msgstr "Não é possível atualizar o estado das eliminações enquanto o apoio estiver desativado."
+
+msgid "Refresh erasure status"
+msgstr "Atualizar estado das eliminações"
+
+msgid "Closed by GETQUICK as incomplete: whether a copy reached GitHub could not be confirmed"
+msgstr "Fechada pela GETQUICK como incompleta: não foi possível confirmar se alguma cópia chegou ao GitHub"
+
+msgid "Closed"
+msgstr "Fechada"
+
+msgid "Completed"
+msgstr "Concluída"
+
+msgid "Text erased; remaining copies under review by GETQUICK"
+msgstr "Texto eliminado; cópias restantes em revisão pela GETQUICK"
+
+msgid "In progress"
+msgstr "Em curso"
+
+msgid "Connected. Reporters on this site can now send Support requests."
+msgstr "Ligado. Os utilizadores deste site já podem enviar pedidos de apoio."
+
+msgid "Connected, but the environment differs from the one this site reports."
+msgstr "Ligado, mas o ambiente é diferente do que este site indica."
+
+msgid "Connection tested."
+msgstr "Ligação testada."
+
+msgid "Disconnected. Reconnecting needs a new Enrollment code."
+msgstr "Desligado. Para voltar a ligar, é necessário um novo código de inscrição."
+
+msgid "Disconnected locally, but the service could not be told. Ask GETQUICK to revoke this site's key."
+msgstr "Desligado localmente, mas não foi possível avisar o serviço. Peça à GETQUICK que revogue a chave deste site."
+
+msgid "Erasure status refreshed."
+msgstr "Estado das eliminações atualizado."
+
+msgid "Disconnected: this site was copied or moved. Ask GETQUICK to reconnect."
+msgstr "Desligado: este site foi copiado ou movido. Peça à GETQUICK que volte a ligá-lo."
+
+msgid "Rejected by service"
+msgstr "Rejeitado pelo serviço"
+
+msgid "Not connected"
+msgstr "Não ligado"
+
+msgid "Working"
+msgstr "A funcionar"
+
+msgid "Suspended by the service"
+msgstr "Suspenso pelo serviço"
+
+msgid "Service unreachable"
+msgstr "Serviço inacessível"
+
+msgid "Copied or moved"
+msgstr "Copiado ou movido"
+
+msgid "Rejected"
+msgstr "Rejeitado"
+
+msgid "Local connection state"
+msgstr "Estado local da ligação"
+
+msgid "Local connection state only. No live service check has been performed."
+msgstr "Apenas o estado local da ligação. Não foi efetuada uma verificação do serviço em tempo real."

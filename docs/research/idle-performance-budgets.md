@@ -80,15 +80,15 @@ The two queries on every site-admin screen come from `GQ_Support_Lifecycle::ensu
 | # | Scenario | Budget | Baseline | Type |
 |---|---|---|---|---|
 | B1 | Anonymous public page | 0 GQ tags or bytes in HTML; 0 plugin SQL; 0 HTTP API; 0 plugin cron events; HTML byte-identical on/off | 0 / 0 / 0 / 0 / identical | Hard |
-| B2 | Anonymous public page, PHP peak memory delta | ≤ 32 KB | +8.6 KB | Hard |
-| B3 | Logged-in user without `gq_support_submit_requests`, any admin screen, AJAX, or non-plugin REST | 0 GQ assets; plugin SQL ≤ 2 (target ≤ 1 once the state is one record, see Q1); 0 HTTP API | 0 / 2 / 0 | Hard + ratchet |
+| B2 | Anonymous public page, PHP peak memory delta | ≤ 32 KB | +8.6 KB (DDEV after #48: +12.9 to +18.0 KB) | Hard |
+| B3 | Logged-in user without `gq_support_submit_requests`, any admin screen, AJAX, or non-plugin REST | 0 GQ assets; plugin SQL ≤ 2 (target ≤ 1 once the state is one record, see Q1); 0 HTTP API | 0 / 2 / 0 (DDEV after #48: 0 / 1 / 0) | Hard + ratchet |
 | B4 | Eligible screen, closed: plugin-owned requests | Exactly 2 (`launcher.js` and `launcher.css`); no plugin REST, AJAX or `fetch` | 2 | Hard |
 | B5 | Eligible screen, closed: launcher bytes | JS ≤ 1.5 KB gz; CSS ≤ 1.0 KB gz; inline HTML ≤ 2 KB | 1,089 B / 675 B / 946 B | Hard |
-| B6 | Eligible screen, closed: PHP | Plugin SQL ≤ 4 (ratchet to ≤ 2); HTTP API 0; memory delta ≤ 64 KB | 4 / 0 / +13.9 KB | Hard + ratchet |
+| B6 | Eligible screen, closed: PHP | Plugin SQL ≤ 4 (ratchet to ≤ 2); HTTP API 0; memory delta ≤ 64 KB | 4 / 0 / +13.9 KB (DDEV after #48: 1 / 0 / +31.0 to +51.1 KB) | Hard + ratchet |
 | B7 | First open: plugin-owned code | App JS ≤ 10 KB gz; app CSS ≤ 4 KB gz; plugin asset requests ≤ 2; no second copy of a core script (React, element, i18n, api-fetch) | 1,326 B / 703 B / 2 / none | Hard |
-| B8 | First open: data | At most 1 REST list call, and only when My requests is shown (`per_page` ≤ 20 by default, ≤ 50 maximum per the [contract](../support-api-contract.md)); New report makes 0 calls | 0 (no routes yet) | Hard once #34 lands |
+| B8 | First open: data | At most 1 REST list call, and only when My requests is shown (`per_page` ≤ 20 by default, ≤ 50 maximum per the [contract](../support-api-contract.md)); New report makes 0 REST calls and one local Report context preview (`admin-ajax.php`, #71) per draft Submission ID | 0 (no routes yet) | Hard once #34 lands |
 | B9 | First open: main thread | 0 long tasks (> 50 ms, [W3C Long Tasks](https://w3c.github.io/longtasks/)) attributable to the open, on the CI desktop profile | 0 | Hard |
-| B10 | Reopen after mount | 0 asset requests; 0 REST unless the Reporter presses refresh or switches to My requests | 0 | Hard |
+| B10 | Reopen after mount | 0 asset requests; 0 REST unless the Reporter presses refresh, even when My requests is shown again (Q2). One exception: when a session check finds a Support manager's view-site grant gone, the installation-wide list is dropped and the Reporter's own list loads once, as a first view | 0 | Hard |
 | B11 | Closed, before and after use | 0 plugin-owned requests in a 60 s idle window after `focus`, `online` and `visibilitychange` events; no plugin interval timers; no WP-Cron events | 0 | Hard |
 | B12 | Options | 0 autoloaded bytes owned by the plugin (every `gq_support_*` option has `autoload` `off`/`no`), unless an allowlisted record ≤ 1 KB is chosen under Q1 | 0 | Hard |
 | B13 | Submit, list or read (after #34) | WordPress route time is reported separately from the Worker round-trip. Adapter timeouts are 8 s for create and 5 s for read, per the contract. An unavailable provider never affects non-plugin requests (B1–B6 still hold with the Worker down) | n/a | Hard for isolation; timings are report-only |
@@ -100,7 +100,7 @@ The two queries on every site-admin screen come from `GQ_Support_Lifecycle::ensu
 **Why these numbers:**
 - **Byte budgets (B5, B7).** The launcher budgets leave about 40% headroom over the measured size. size-limit's own advice is to set limits at about the current value plus 25% ([size-limit](https://github.com/ai/size-limit)). The launcher is deliberately tiny and vanilla (ADR 0011), so its headroom is kept tight. The app budget is generous on purpose: #34 and #13 add the list, delivery states and `@wordpress/api-fetch`, and a hard ceiling is enough to catch an accidental bundled React or TanStack Query. That alone would be roughly 45 KB gz.
 - **For scale.** Plugin Check flags *front-end* scripts totalling more than 300,000 bytes ([`Enqueued_Scripts_Size_Check`](https://github.com/WordPress/plugin-check/tree/trunk/includes/Checker/Checks/Performance)). It does not test wp-admin, so it cannot stand in for B4–B7.
-- **Memory (B2, B6).** Ceilings of 2 to 4 times the measured delta absorb PHP-version differences in class loading while still catching any new eager `require` or data load.
+- **Memory (B2, B6).** Ceilings of 2 to 4 times the measured delta absorb PHP-version differences in class loading while still catching any new eager `require` or data load. On DDEV the deltas are larger than on Playground, so the headroom there is 1.25 to 2.5 times. The ceilings stay: the gate caught the eager loading that B2 was set for (see Implementation).
 - **Timing thresholds (T1, T2).** These start from the DDEV run-to-run spread. Two runs of the same code differed by about 0.5 ms in median delta, so 1 ms is roughly twice the observed noise. This is a starting rule, not a proven budget. It becomes binding only after `main` history exists.
 
 ## Gate design
@@ -131,6 +131,24 @@ Three layers keep noise out of the pass/fail signal.
 
 **Keeping provider latency out of the site gate.** CI points `GQ_SUPPORT_SERVICE_URL` at a local fake Worker with fixed latency, or stubs it with `pre_http_request`, so B13 measures only WordPress work. Worker acknowledgement, queue delay and GitHub delivery latency are production telemetry owned by #20. They never feed the site gate. A separate outage test sets the fake to hang or refuse and checks that B1–B6 are unchanged and that plugin routes return within the adapter timeout plus 1 s.
 
+**Implementation.** Layer 1 is `.github/workflows/performance.yml` (`size-gate.mjs`). Layer 2 is `plugin/tests/browser/performance.spec.ts`, which covers B1–B4, B6, B8 and B10–B13; the fake Worker in `plugin/tests/performance/gq-probe.php` also simulates the outages (`down`, `hang`, and the negative control `stall`), and B13 re-runs B1, B2, B3, B4 and B6 in the `down` and `hang` outages. How the spec measures B2, B3 and B6:
+- Each request is sent once with `gq_off=1` and once without it as a warm-up, then as three interleaved pairs. SQL and HTTP are the worst plugin-on sample. Memory is the smallest plugin-on peak minus the smallest plugin-off peak, because one-off core work such as a cron spawn only ever adds to a sample.
+- Repeated runs on one site give the same deltas to within about 300 B, so the gate adds no noise margin. Two things had to be removed first.
+  - The probe held the response in an output buffer, which put the page into the peak. It now holds the response in a temporary file.
+  - WooCommerce's Action Scheduler resets its store migration whenever a plugin is deactivated, and schedules it again a minute later. The spec deactivates WooCommerce itself between variants. Until the migration ran, the dashboard peaked up to 40 KB higher with Support on, so B6 failed intermittently. A real store passes through the same state for about a minute after any plugin is deactivated, which is not Support's steady-state cost. The spec now finishes the migration before it measures.
+- B3 runs as an Editor on the dashboard, the posts list and the profile screen, on core Heartbeat AJAX and on core REST (`/wp/v2/users/me`). With WooCommerce active, a Shop manager also opens WooCommerce settings. B6 runs as the Administrator on the screens B4 uses. Each negative control adds one violation: 5 plugin queries, an HTTP API call, a 96 KB allocation or a plugin stylesheet. Each exceeds its budget from any baseline.
+- Measured on DDEV, 2026-10-21, with WooCommerce off / on:
+  - **B2.** +15.8 / +12.9 KB on WordPress 7.1.3 with PHP 8.2. +18.0 / +13.8 KB on WordPress 6.5.0 with PHP 8.0.
+  - **B3.** 1 plugin query on admin screens and REST, and 0 on Heartbeat. No assets and no HTTP, on both stacks.
+  - **B6.** 1 plugin query and no HTTP on both stacks. Memory on 7.1.3 was +40.6 / +31.4 KB, and +31.0 KB on WooCommerce settings. On 6.5.0 it was +51.1 / +31.6 KB, and +43.6 KB on WooCommerce settings.
+- Before #48, the plugin loaded all ten class files on every request, and B2 measured +39.8 KB on 7.1.3. The autoloader in `gq-support.php` now loads a class on first use, so a public request loads only `class-gq-support-plugin.php`. The privacy hooks also name their class directly, instead of wrapping it in closures.
+
+Layer 3 is `.github/workflows/benchmark.yml`, which runs `plugin/tests/performance/timing-benchmark.mjs` on DDEV:
+- Every round runs each variant once, rotating the order: plugin off, base (on PRs) and head. Base is the PR's base tree, mounted as a second plugin directory and swapped in per request.
+- T1 and T2 use 50 rounds, read from the probe's `Server-Timing` header. T3 uses 20 rounds of a cold browser context.
+- The report also carries peak memory (M1, M2) for B2 and B6, the raw samples and the environment. It is uploaded as the `timing-<sha>` artifact and written to the job summary.
+- The rules live in `plugin/tests/performance/timing-stats.mjs`. Every metric has `promoted: false`, so no timing can fail the job. To promote T1 and T2, set `mainMad` from ten `main` artifacts. T3 is relative to the PR's base and needs no history. Then set `promoted: true` and record the thresholds here. T3's rule is the whole-CI rule: it fails only when the CI's lower bound exceeds 25% of the base median, which is stricter than "over 25% with a CI excluding 0". T4 (heap after 50 cycles) is not benchmarked yet.
+
 ## Alternatives considered
 
 - **Lighthouse or LHCI scores as the gate.** Rejected. A score blends everything on the page, and the plugin's share of a wp-admin page is a few kilobytes. Lighthouse's own guidance is that the median of 5 runs is only about twice as stable as one run, and it recommends dedicated hardware ([variability.md](https://github.com/GoogleChrome/lighthouse/blob/main/docs/variability.md)). Lighthouse 12 also removed `budgets.json`. LHCI `resource-summary` assertions would work, but they duplicate the byte check at a higher cost.
@@ -147,6 +165,7 @@ Three layers keep noise out of the pass/fail signal.
 - **Core already printing React.** On a future screen or WordPress version without the command palette, first open would add core `react`, `react-dom` and `wp-element`. These are core bytes, not plugin bytes. B7 counts plugin-owned bytes and separately asserts no duplicates, and T3 reports the case.
 - **Sequential ordering drift.** The DDEV harness ran all inactive samples, then all active. Thermal and cache drift then shows up as plugin cost. Interleave every sample, as the Playground probe does.
 - **`memory_get_peak_usage(true)`.** This measures in 2 MB allocator chunks, so it showed no difference in DDEV. Use the default `false`.
+- **PHP hash-table growth.** PHP's tables of included files, classes and hooks double in size at powers of two. When the plugin's few entries take a table past a boundary, peak memory jumps by a whole table. On DDEV without WooCommerce, core and the theme include 504 files, so the plugin's ten eager includes crossed 512 and doubled the table, adding 20 KB. Keep the files and hooks a request loads to a minimum. If B2 or B6 jumps by roughly 20 KB or 40 KB on a new WordPress or PHP version, check for a boundary crossing before looking for a leak.
 - **Idle window.** A 60 s window catches 60 s intervals but not a 5-minute timer. The timer-registration hook (B11) covers longer ones without waiting.
 - **Heap sampling.** Heap growth after GC is noisy and depends on the React version. It is report-only (T4).
 
@@ -163,18 +182,18 @@ Three layers keep noise out of the pass/fail signal.
 ## Open questions for the map
 
 - **Q1 (for #3 and #7).** Should the four small `gq_support_*` records be consolidated into one state record? The choice is between non-autoloaded (1 admin query) and autoloaded with a size cap under 1 KB (0 queries everywhere, but bytes on public requests). The measurements show the current layout costs 2 queries on every site-admin screen and 4 on eligible ones.
-- **Q2 (for #13).** When the panel reopens on My requests, does it refetch automatically or show the last list until refresh is pressed? The domain design says the list "loads when My requests is shown", which is ambiguous for reopen. B10 assumes no automatic refetch on reopen.
+- **Q2 (for #13).** When the panel reopens on My requests, does it refetch automatically or show the last list until refresh is pressed? The domain design says the list "loads when My requests is shown", which is ambiguous for reopen. B10 assumes no automatic refetch on reopen. **Resolved by #26:** the list loads once per page session, the first time My requests is shown; reopening or switching back to My requests shows the last list until refresh is pressed, and an accepted report joins it from its receipt.
 - **Q3 (for #19).** Should the counter benchmark run in the existing DDEV job or in a Playground job? Playground is faster to boot and gives exact counters, but it is not a production-like database or PHP runtime.
 - **Q4.** The T4 heap growth of about 0.6 MB over 50 cycles should be re-measured on the real app once #34 and #13 add state, to confirm there is no retained-tree leak.
 
 ## Reproducing
 
-Build the app first with `pnpm build:app`. Then start a disposable Playground site. Replace `<dir>` in the command below with the directory that holds a copy of `gq-probe.php` in `mu/` and a `getquick-design/getquick-design.php` stub defining `GETQUICK_DESIGN_VERSION`:
+Build the app first with `pnpm build:app`. Then start a disposable Playground site. Replace `<dir>` in the command below with the directory that holds a copy of `gq-probe.php` in `mu/` and a `gq-design/gq-design.php` stub defining `GETQUICK_DESIGN_VERSION`:
 
 ```sh
 npx @wp-playground/cli@3.1.56 server --port=9471 \
   --mount=./plugin:/wordpress/wp-content/plugins/gq-support \
-  --mount=<dir>/getquick-design:/wordpress/wp-content/plugins/getquick-design \
+  --mount=<dir>/gq-design:/wordpress/wp-content/plugins/gq-design \
   --mount=<dir>/mu:/wordpress/wp-content/mu-plugins \
   --blueprint=docs/research/idle-performance-budgets/blueprint.json --login
 WT=$PWD RUNS=20 IDLE_MS=60000 SCREEN=index.php node docs/research/idle-performance-budgets/measure.cjs

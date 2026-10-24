@@ -12,8 +12,18 @@ plugin/vendor/
 *.tsbuildinfo
 test-results/
 .alchemy/
-.test-site/
+.test-site
 
 __pycache__/
 *.pyc
 package-dist/
+
+/worker/revocations.lock
+/worker/revocations.json.tmp
+.bench-base/
+benchmark-results/
+.ddev/config.gq-runtime.yaml
+package-zip/
+runtime-results/
+audit-results/
+secret-scan/

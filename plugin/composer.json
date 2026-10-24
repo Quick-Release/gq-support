@@ -25,7 +25,8 @@
         "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
         "phpstan/phpstan": "^2.2",
         "szepeviktor/phpstan-wordpress": "^2.0",
-        "phpstan/extension-installer": "^1.4"
+        "phpstan/extension-installer": "^1.4",
+        "phpunit/phpunit": "^9.6"
     },
     "extra": {
         "installer-name": "gq-support"
@@ -35,6 +36,9 @@
             "composer/installers": true,
             "dealerdirect/phpcodesniffer-composer-installer": true,
             "phpstan/extension-installer": true
+        },
+        "platform": {
+            "php": "8.0.30"
         }
     },
     "scripts": {

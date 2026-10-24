@@ -1,0 +1,68 @@
+[
+  {
+    "status": 400,
+    "create_code": "gq_support_invalid_request",
+    "read_code": "gq_support_invalid_request",
+    "browser_status": 400
+  },
+  {
+    "status": 401,
+    "create_code": "gq_support_not_configured",
+    "read_code": "gq_support_not_configured",
+    "browser_status": 503
+  },
+  {
+    "status": 403,
+    "create_code": "gq_support_not_configured",
+    "read_code": "gq_support_not_configured",
+    "browser_status": 503
+  },
+  {
+    "status": 404,
+    "create_code": "gq_support_not_found",
+    "read_code": "gq_support_not_found",
+    "browser_status": 404
+  },
+  {
+    "status": 409,
+    "create_code": "gq_support_idempotency_conflict",
+    "read_code": "gq_support_idempotency_conflict",
+    "browser_status": 409
+  },
+  {
+    "status": 413,
+    "create_code": "gq_support_payload_too_large",
+    "read_code": "gq_support_payload_too_large",
+    "browser_status": 413
+  },
+  {
+    "status": 426,
+    "create_code": "gq_support_plugin_outdated",
+    "read_code": "gq_support_plugin_outdated",
+    "browser_status": 426
+  },
+  {
+    "status": 429,
+    "create_code": "gq_support_rate_limited",
+    "read_code": "gq_support_rate_limited",
+    "browser_status": 429
+  },
+  {
+    "status": 500,
+    "create_code": "gq_support_internal",
+    "read_code": "gq_support_internal",
+    "browser_status": 500
+  },
+  {
+    "status": 503,
+    "create_code": "gq_support_not_accepted",
+    "read_code": "gq_support_unavailable",
+    "browser_status": 503
+  },
+  {
+    "status": 504,
+    "create_code": "gq_support_outcome_unknown",
+    "read_code": "gq_support_unavailable",
+    "browser_status": 504
+  }
+]

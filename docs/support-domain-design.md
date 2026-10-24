@@ -83,21 +83,23 @@ Decided in #13.
 
 - **Views.** One panel with two tabs. **New report** is the default. **My requests** lists items that expand in place to show the full text and status. There is no separate detail view. After a successful submit, the panel switches to My requests with the new item at the top.
 - **Form.** A required **Description** and an optional one-line **Summary**. The placeholder asks "What happened, and what did you expect?". There is no bug/feedback/question picker in the MVP; developers classify in GitHub. Environment context is added server-side; the fields are decided in #14.
-- **Status is read-only.** Reporters cannot close or reopen requests in the MVP. Status reflects what developers do in GitHub.
+- **Close and reopen** ([ADR 0020](adr/0020-reporter-status-changes-are-ordered-intents.md), #28). An expanded delivered request offers **Close request** or **Reopen request**, for the Reporter's own requests and for a Support manager's installation scope. The badge keeps showing GitHub's status. The change's own delivery appears beside it: "Close requested. Delivery is pending.", a check while its outcome is unknown, or "couldn't be confirmed" once failed, since a failed change may also have been overridden in GitHub. No further action is offered until that change resolves. An uncertain send offers **Check again** with the same Change ID. GitHub stays authoritative: a Developer's change in GitHub shows after refresh, even over a delivered Reporter change.
 - **Honest status wording.** Each list item shows one badge (table below). The launcher is hidden from Reporters on an unconfigured installation; operators see the notice on the setup page.
 
 | State | Reporter sees |
 |---|---|
 | Submitting | "Sending…", with the submit button disabled |
-| `accepted-pending` | "Received", with the hint "Our team will see it shortly" |
+| `accepted-pending` | "Received", with the hint "Delivery is pending"; no promised delivery time |
 | `delivered`, issue open or closed | "Open" or "Closed" |
 | `failed` or `locally-unsent` | "Not sent", with **Try again** and the draft restored |
-| `outcome-unknown` | "Checking…", with no resubmit while the service reconciles |
+| `outcome-unknown` | "Delivery needs review", with manual status refresh and no resubmit while the service reconciles |
 | REST 401/403 or expired login | "Your session expired. Reload the page to continue." The draft is kept. |
 | Empty list | "No requests yet", with a link to New report |
 
 - **Drafts** live in memory only. They survive closing and reopening the panel and failed sends, and are lost on reload or navigation. With an unsent draft, the closed launcher shows a small indicator. No browser storage is used.
+- **Outages and recovery.** The [outage and draft-recovery decision](research/outage-draft-recovery.md) defines the delivery promise, failure matrix, independent help route and fail-safe requirements. An ambiguous transport response shows "Checking…" and permits bounded same-key reconciliation; a valid receipt with `delivery: outcome-unknown` is already recorded and needs review, not a new submission. Copy an unsent draft before reloading. A changed account/session clears it; never replay a write after reauthentication. Browser persistence and a local WordPress outbox are deferred.
 - **Refresh.** The list loads the first time My requests is shown in a page session and when the Reporter presses refresh. Closing and reopening the panel does not refetch; a successful submit adds the new item from the create response. There is no polling, and no work runs while the panel is closed.
+- **Support manager scope.** A Reporter whose session check carries a fresh view-site grant also sees a **Show** control in My requests that switches to all requests on this installation, where the Reporter's own requests are marked **Yours**. The grant is re-read on every session check; when it is gone, the installation-wide list is dropped and the view returns to the Reporter's own requests, which load once as a first view. Changing scope loads that scope's list. A changed session clears the list, and a failed read keeps any list already shown in this session beside the error, never an empty list.
 - **Accessibility.** The launcher is a `<button>` with `aria-expanded`. The panel is a non-modal dialog so the admin screen stays usable while the Reporter writes. Focus moves to the first field on open and returns to the launcher on close, and Escape closes the panel. Status changes and errors are announced through `wp.a11y.speak`. The panel respects `prefers-reduced-motion`, meets WCAG AA contrast in every admin colour scheme, and becomes a full-width sheet below the 782px admin breakpoint.
 - **Translations.** All strings go through `@wordpress/i18n` in the `gq-support` text domain, with `_n()` plurals and dates in the site timezone. RTL uses the generated `index-rtl.css`. A pt_PT smoke test runs in DDEV.
 
@@ -106,6 +108,5 @@ Decided in #13.
 The Developer assignee (one default per WordPress project) and the connection lifecycle are decided in [support onboarding design](support-onboarding-design.md).
 
 
-- Reporter close/reopen (#28) is a post-MVP slice after ordered mutations (ADR 0006).
 - Privacy/retention of report text in the operational service while delivery is pending or being reconciled.
 - Any future client-visible response channel. Adding comments to the WordPress projection would require a new decision; repository comments remain internal by default.

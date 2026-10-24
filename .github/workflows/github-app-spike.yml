@@ -1,0 +1,57 @@
+name: GitHub App spike (staging)
+
+# First-spike checks for the GitHubGateway (#37). Creates real issues in the
+# given staging sandbox repository; never point it at a Project repository.
+on:
+  workflow_dispatch:
+    inputs:
+      installation_id:
+        description: Staging App installation ID
+        required: true
+      repository_id:
+        description: Private sandbox repository ID (issues are created here)
+        required: true
+      assignee:
+        description: Collaborator login to assign
+        required: true
+      label:
+        description: Existing label to apply
+        required: true
+        default: client-support
+      archived_repository_id:
+        description: Optional archived sandbox repository ID, to observe the create error
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run the gateway spike
+        env:
+          CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
+          GITHUB_APP_CLIENT_ID: ${{ vars.SUPPORT_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_SLUG: ${{ vars.SUPPORT_GITHUB_APP_SLUG }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
+          SPIKE_INSTALLATION_ID: ${{ inputs.installation_id }}
+          SPIKE_REPOSITORY_ID: ${{ inputs.repository_id }}
+          SPIKE_ASSIGNEE: ${{ inputs.assignee }}
+          SPIKE_LABEL: ${{ inputs.label }}
+          SPIKE_ARCHIVED_REPOSITORY_ID: ${{ inputs.archived_repository_id }}
+        run: node scripts/github-spike.ts

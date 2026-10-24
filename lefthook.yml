@@ -9,3 +9,10 @@ pre-commit:
         - "plugin/vendor/**"
         - "plugin/app/**"
       run: scripts/phpcs-staged.sh {staged_files}
+
+# Optional: the affected browser specs on the shared DDEV test site. CI stays the gate.
+pre-push:
+  commands:
+    browser:
+      root: ""
+      run: scripts/pre-push-browser.sh {push_files}

@@ -3,7 +3,7 @@
  * Plugin Name:       GETQUICK Support
  * Plugin URI:         https://github.com/Quick-Release/gq-support
  * Description:        Adds an in-dashboard support widget for authenticated users to submit reports and view their status.
- * Version:            0.1.4
+ * Version:            0.1.10
  * Requires at least:  6.5
  * Requires PHP:       8.0
  * Requires Plugins:   gq-design
@@ -21,18 +21,24 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'GQ_SUPPORT_VERSION', '0.1.4' );
+define( 'GQ_SUPPORT_VERSION', '0.1.10' );
 define( 'GQ_SUPPORT_PLUGIN_FILE', __FILE__ );
 define( 'GQ_SUPPORT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GQ_SUPPORT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
-require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-state.php';
-require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-signing-key.php';
-require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-signer.php';
-require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-service-client.php';
-require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-connection.php';
-require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-lifecycle.php';
-require_once GQ_SUPPORT_PLUGIN_DIR . 'includes/class-gq-support-plugin.php';
+// Classes load on first use, so a public request pays only for the code it runs (B2 in
+// docs/research/idle-performance-budgets.md).
+spl_autoload_register(
+	static function ( string $class_name ): void {
+		if ( ! str_starts_with( $class_name, 'GQ_Support_' ) ) {
+			return;
+		}
+		$file = GQ_SUPPORT_PLUGIN_DIR . 'includes/class-' . str_replace( '_', '-', strtolower( $class_name ) ) . '.php';
+		if ( is_file( $file ) ) {
+			require_once $file;
+		}
+	}
+);
 
 register_activation_hook( __FILE__, array( GQ_Support_Lifecycle::class, 'activate' ) );
 register_deactivation_hook( __FILE__, array( GQ_Support_Lifecycle::class, 'deactivate' ) );

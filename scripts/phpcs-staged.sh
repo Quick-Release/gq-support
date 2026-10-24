@@ -2,7 +2,7 @@
 # Runs PHPCS on staged plugin PHP files inside the DDEV test site.
 set -euo pipefail
 
-project=gq-support-testsite
+project=gq-wp-playground
 plugin_dir=/var/www/html/web/app/plugins/gq-support
 
 files=()

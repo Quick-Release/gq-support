@@ -4,7 +4,7 @@ Decision record for [issue #10](https://github.com/Quick-Release/gq-support/issu
 
 ## Decision
 
-Use D1 for this state. There is no alternative store: KV and Durable Objects stay rejected (ADR 0013), and WordPress keeps no cache or copy of Support requests (API contract). Every query goes through `storageFor(slot)`. Mappings (Slot → Client, WordPress project, environment, repository ID, default Developer) are code, not rows.
+Use D1 for this state. There is no alternative store: KV and Durable Objects stay rejected (ADR 0013), and WordPress keeps no cache or copy of Support requests (API contract). Slot-owned request queries go through `storageFor(slot)`; narrow named queries handle cross-Slot scheduling and credentials as described below. Mappings (Slot → Client, WordPress project, environment, repository ID, default Developer) are code, not rows.
 
 ## Out of scope
 
@@ -34,7 +34,7 @@ All times are UTC epoch milliseconds. IDs are service-issued ULIDs with a type p
 | `slot` | Owner (ADR 0014) |
 | `reporter_subject` | Attested Reporter subject |
 | `submission_id` | Browser UUID |
-| `body_digest` | SHA-256 of the canonical Summary and Description. A repeat with a different digest returns 409 |
+| `body_digest` | SHA-256 of the canonical Summary and Description, and of the reviewed Report context when one was sent. A repeat with a different digest returns 409 |
 | `summary`, `description`, `title` | Submitted text (ADR 0015). `title` is derived once, at acceptance |
 | `created_at` | Acceptance time |
 | `installation_id` | Audit only: which enrolled installation submitted the request |
@@ -42,7 +42,7 @@ All times are UTC epoch milliseconds. IDs are service-issued ULIDs with a type p
 | `repository_id` | Pinned at creation from the Slot's mapping. Never re-read from the current mapping |
 | `issue_id`, `issue_number` | Set once delivered |
 | `status`, `status_etag`, `status_observed_at` | **Projection.** `open`/`closed`, `NULL` until delivered |
-| `tracking` | `active` or `lost`. `lost` means the issue was deleted or transferred out of the Client's repositories |
+| `tracking` | `active` or `lost`. `lost` means the issue was deleted or transferred out of its Project repository |
 
 Constraints and indexes:
 
@@ -59,14 +59,23 @@ Constraints and indexes:
 | `id` | `int_…`, the opaque marker written on the issue's first line. It is not the resource `id` |
 | `slot` | The request's Slot, repeated so every statement can be scoped. `(request_id, slot)` is a composite FK to `support_request (id, slot)` |
 | `request_id` | FK to `support_request` |
-| `kind`, `seq` | `create` only in the MVP. `seq` orders later intents (#28, ADR 0006). `UNIQUE (request_id, seq)` |
+| `kind`, `seq` | `create` at `seq` 0, then `close` or `reopen` Status changes at `seq` 1, 2, … in acceptance order (ADR 0006, ADR 0020). `UNIQUE (request_id, seq)`; only a create has `seq` 0 |
+| `change_id` | A Status change's Change ID, `NULL` for the create. `UNIQUE (request_id, change_id)` |
 | `state` | `pending`, `in_flight`, `delivered`, `failed`, `outcome_unknown` |
 | `attempts`, `first_attempt_at`, `lease_expires_at`, `next_attempt_at`, `last_error_class` | Delivery bookkeeping. The error is a class only, never a provider body |
-| `context_json` | Server-side context from #14 that goes into the issue body. Set to `NULL` when the intent reaches a terminal state |
+| `context_json` | The canonical reviewed Report context that goes into the issue body, or `NULL`. Set to `NULL` when the intent is `delivered` or `failed` |
+
+The [Report context decision](support-context-design.md) defines this as a frozen, reviewed, bounded context snapshot, not live diagnostic output. [#71](https://github.com/Quick-Release/gq-support/issues/71) implements it with the intake schemas, intent fingerprinting, fixtures and storage together ([implementation notes](support-context-design.md#implementation-of-the-minimal-context-71)). Clear it on terminal outcome and privacy cleanup; never append recollected fields during delivery/recovery. Keep only the existing restricted metadata when uncertain-outcome erasure requires reconciliation.
 
 Index `due (next_attempt_at) WHERE state IN ('pending', 'outcome_unknown')` and `leases (lease_expires_at) WHERE state = 'in_flight'`.
 
-The API `delivery` field comes from the create intent: `pending` and `in_flight` → `accepted-pending`, and every other state maps to the value of the same name.
+`support_request.change_seq` is the latest Status change's `seq`, or 0 for none. Projections join `delivery_intent c ON c.seq = r.change_seq`, which is the create again when there is no change, so every request keeps its row without a subquery.
+
+The API `delivery` field comes from the create intent: `pending` and `in_flight` → `accepted-pending`, `outcome_unknown` → `outcome-unknown`, and `delivered`/`failed` keep their names.
+
+### Delivery extensions decided after the initial schema
+
+[The delivery decision](support-delivery-design.md) requires a forward migration adding per-attempt owner/generation and execution bookkeeping, a permit keyed by GitHub App installation, pinned provider installation identity, atomic intake quotas, and suppression/review records for uncertain erasures. Migration `0003` adds the intake quota ledger (`intake_debit`) and `0004` the per-call request budget (`request_rate`); `0005`–`0007` add delivery ownership and pacing, and `0012` adds `support_request.erased_at` and the `erasure`, `support_cleanup`, `offboarding` and `cleanup_audit` tables for erasure, offboarding and retention cleanup ([privacy design](support-privacy-design.md#uncertain-create-cleanup-amendment)); `0014` makes cleanup records self-contained, `0015` adds signed erasure requests and the reporter-reference search, `0016` the restore marker, and `0017` the `changed_at` columns and watermarks for incremental ledger mirroring. The suppression ledger (ADR 0016) is a separate D1 with its own migrations in `worker/ledger-migrations/`. A losing conditional update must also prevent all dependent writes; a zero-row update does not fail a batch.
 
 ### `repository_state`: rebuildable
 
@@ -76,13 +85,13 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 - `enrollment_code`: `code_hash` PK, `slot`, `expires_at`, `consumed_at`, `consumed_public_key`.
 - `installation_key`: `key_id` PK, `slot`, `installation_id`, `origin`, `public_key`, `enrolled_at`, `revoked_at`. `UNIQUE (slot) WHERE revoked_at IS NULL`, so a Slot has at most one active key.
-- `replay`: `(key_id, request_id)` PK, `expires_at`. An insert that conflicts rejects the request. #32 sets the window.
+- `replay`: `(key_id, request_id)` PK, `expires_at`. An insert that conflicts rejects the request. Rows live 10 minutes, longer than the 5-minute clock window.
 
 ## Data ownership
 
 | Data | Source of truth | Sensitivity | Retention | Rebuildable |
 |---|---|---|---|---|
-| Submitted text, subject, Submission ID, digest | D1 (the Reporter's submission) | Client content, pseudonymous subject | 12 months after last close ([privacy design](support-privacy-design.md)); erasure goes through the suppression ledger (ADR 0016) | No |
+| Submitted text, subject, Submission ID, digest | D1 (the Reporter's submission) | Client content, pseudonymous subject | 12 months after last close if delivered; never-delivered text at most 12 months from acceptance ([privacy design](support-privacy-design.md)); erasure goes through the suppression ledger (ADR 0016) | No |
 | Repository and issue IDs | D1, set from the GitHub create response | Internal | With the request | Partly: marker reconciliation can find them again |
 | Status, ETag, observed time, tracking | GitHub | Low | With the request | Yes: sweep |
 | Delivery intent and bookkeeping | D1 | Internal | With the request | No |
@@ -94,13 +103,16 @@ The API `delivery` field comes from the create intent: `pending` and `in_flight`
 
 ## Operations
 
-**Accept** (one `batch()`): insert `support_request` and its create `delivery_intent` (`pending`). If `supersedes_id` is given, also set `superseded_at` on that request, but only where it has the same `slot` and `reporter_subject` and its create intent is `failed`. If the unique key conflicts, read the existing row: the same digest returns it with its current code, and a different digest returns 409. If the batch fails, the response is `503 gq_support_not_accepted`.
+**Accept** (one `batch()`): insert `support_request` and its create `delivery_intent` (`pending`), with the atomic quota debit from the [delivery decision](support-delivery-design.md). If `supersedes_id` is given, also set `superseded_at` on that request, but only where it has the same `slot` and `reporter_subject` and its create intent is `failed`. If the unique key conflicts, read the existing row: the same digest returns it with its current code, and a different digest returns 409. Confirmed rollback/non-acceptance returns `503 gq_support_not_accepted`. If the D1 commit outcome is itself ambiguous, do a same-key primary lookup; if still unresolved return `504 gq_support_outcome_unknown`, never claim known non-acceptance. The next same-key retry resolves it.
+
+**Change status** (one `batch()`, ADR 0020): debit the Status change budgets, move `change_seq` from the value just read, and insert the `close` or `reopen` intent with `state = CASE WHEN changes() = 1 THEN 'pending' END`, so a concurrent change that moved `change_seq` first fails the NOT NULL constraint and rolls the batch back. It is accepted only when the create is `delivered` and the latest change is `delivered` or `failed`. A known Change ID returns that change; the other status is a 409.
 
 **List** (`scope=mine`):
 
 ```sql
 SELECT … FROM support_request r JOIN delivery_intent i ON i.request_id = r.id AND i.seq = 0
-WHERE r.slot = ?1 AND r.reporter_subject = ?2 AND r.superseded_at IS NULL
+  JOIN delivery_intent c ON c.request_id = r.id AND c.seq = r.change_seq
+WHERE r.slot = ?1 AND i.slot = ?1 AND c.slot = ?1 AND r.reporter_subject = ?2 AND r.superseded_at IS NULL
   AND (r.created_at, r.id) < (?3, ?4)
 ORDER BY r.created_at DESC, r.id DESC LIMIT ?5
 ```
@@ -111,22 +123,22 @@ The query uses `list_mine` (an index search, not a scan), and rows read are abou
 
 **Webhook or sweep:** find the row by `(repository_id, issue_id)`, GET the issue with `If-None-Match`, and overwrite `status`, `status_etag` and `status_observed_at`. The sweep lists `creator=<app>[bot]&state=all&since=<last_swept_at − skew>` for each repository.
 
-- **301:** the row moves to the new repository and issue only if the new repository is mapped to the same Client.
-- **410, or a transfer elsewhere:** set `status = closed` and `tracking = lost`, and alert the operator.
+- **301:** set `status = closed` and `tracking = lost`, and alert the Operator. A Slot maps to exactly one repository (ADR 0014), so rows never move.
+- **410, or an issue 404 while its repository remains accessible:** set `status = closed` and `tracking = lost`, and alert the operator.
 
 ## Invariants for #11 and #12
 
-1. Acceptance is the single `batch()` above. A Queue message, if #11 adds Queues, is only a wake-up and never the only record.
-2. Before any POST, an attempt moves the intent from `pending` to `in_flight` with a conditional update (`WHERE state = 'pending'`), which acts as the lease. Only the process that wins the update may POST.
-3. A lease that expires while `in_flight` becomes `outcome_unknown`. `outcome_unknown` is reconciled by its marker, never re-POSTed blindly.
-4. Only one create per Slot is `in_flight` at a time (GitHub research).
+1. Acceptance is the single `batch()` above and returns `202`. Prompt background work and a minute sweep read the D1 outbox; Queues are deferred. Any future queue is only a wake-up, never the only record.
+2. Before any POST, atomically claim the intent and GitHub App installation permit with an owner/generation. Record `in_flight` before dispatch; only the current owner may authorize a POST or update the outcome. Test all dependent writes for ownership, expiry and suppression.
+3. A lease that expires while `in_flight` becomes `outcome_unknown`. Reconcile read-only by marker; no negative scan count proves absence or permits automatic recreation. Reject stale writes and drain the old execution before reusing its installation permit.
+4. Serialize service-authorized create dispatch per **GitHub App installation**, across all its Slots. A drained uncertain attempt stays unknown but does not indefinitely block unrelated requests. This does not fence an already-running GitHub server-side operation.
 5. Webhook handling is fetch-and-overwrite, so duplicate and out-of-order deliveries do no harm. Correctness never depends on a webhook arriving.
 6. Sweeps and fetches use the repository pinned on the row, never the current mapping.
-7. After a restore (ADR 0016), every intent that is not `delivered` becomes `outcome_unknown`, and the revocation and erasure log is replayed before the Worker serves traffic.
+7. After a restore (ADR 0016), every intent that is not `delivered` becomes `outcome_unknown`, and the revocation, erasure and suspension logs are replayed before the Worker serves traffic. A restore never lifts a repository suspension.
 
 ## Isolation
 
-The Slot → Client relation lives in code, so D1 cannot enforce it with a foreign key. `storageFor(slot)` (`worker/src/storage.ts`) is the only query path for Slot-owned tables: it binds the Slot as `?1` and rejects any statement that does not AND `slot = ?1` for every table it reads or writes. Cross-Slot work (the delivery sweep, webhook lookups by issue, credential lookups before a Slot is known) uses narrow, named queries outside the seam. A Client moved to its own database (ADR 0013) is routed there by the same seam. Acceptance checks that `repository_id` equals the Slot's mapping at that moment. A transfer that updates a row is accepted only within the same Client. Cross-Slot tests are mandatory (ADR 0013), and they include:
+The Slot → Client relation lives in code, so D1 cannot enforce it with a foreign key. `storageFor(slot)` (`worker/src/storage.ts`) is the only query path for Slot-owned tables: it binds the Slot as `?1` and rejects any statement that does not AND `slot = ?1` for every table it reads or writes. Cross-Slot work (the delivery sweep, webhook lookups by issue, credential lookups before a Slot is known) uses narrow, named queries outside the seam. Two named operations inside the seam use subqueries the checker rejects: `debitIntake` counts atomic intake quota debits, and `supersedeFailedRequest` verifies the predecessor’s failed create intent. Their fixed SQL lives in `storage.ts`, with every table and subquery explicitly bound to the Slot. Supersession also checks the Reporter and that the predecessor has no replacement; the immediately following acceptance INSERT requires one changed row, so a losing update rolls back the entire batch, including quota debits. A Client moved to its own database (ADR 0013) is routed there by the same seam. Acceptance checks that `repository_id` equals the Slot's mapping at that moment. Rows never follow an issue transfer. Cross-Slot tests are mandatory (ADR 0013), and they include:
 
 - the same Submission ID used from two Reporters and from two Slots;
 - a production and a staging Slot that share one repository;

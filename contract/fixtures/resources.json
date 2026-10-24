@@ -1,0 +1,274 @@
+[
+  {
+    "name": "accepted-pending/None",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "accepted-pending",
+      "status": null,
+      "status_change": null
+    },
+    "valid": true,
+    "create_status": 202
+  },
+  {
+    "name": "accepted-pending/open",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "accepted-pending",
+      "status": "open",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "accepted-pending/closed",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "accepted-pending",
+      "status": "closed",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "accepted-pending/invalid",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "accepted-pending",
+      "status": "invalid",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "delivered/None",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "delivered",
+      "status": null,
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 201
+  },
+  {
+    "name": "delivered/open",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "delivered",
+      "status": "open",
+      "status_change": null
+    },
+    "valid": true,
+    "create_status": 201
+  },
+  {
+    "name": "delivered/closed",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "delivered",
+      "status": "closed",
+      "status_change": null
+    },
+    "valid": true,
+    "create_status": 201
+  },
+  {
+    "name": "delivered/invalid",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "delivered",
+      "status": "invalid",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 201
+  },
+  {
+    "name": "failed/None",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "failed",
+      "status": null,
+      "status_change": null
+    },
+    "valid": true,
+    "create_status": 202
+  },
+  {
+    "name": "failed/open",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "failed",
+      "status": "open",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "failed/closed",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "failed",
+      "status": "closed",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "failed/invalid",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "failed",
+      "status": "invalid",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "outcome-unknown/None",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "outcome-unknown",
+      "status": null,
+      "status_change": null
+    },
+    "valid": true,
+    "create_status": 202
+  },
+  {
+    "name": "outcome-unknown/open",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "outcome-unknown",
+      "status": "open",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "outcome-unknown/closed",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "outcome-unknown",
+      "status": "closed",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "outcome-unknown/invalid",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "outcome-unknown",
+      "status": "invalid",
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  },
+  {
+    "name": "unknown delivery",
+    "resource": {
+      "id": "req_one",
+      "submission_id": "3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11",
+      "title": "Report",
+      "summary": null,
+      "description": "Report",
+      "created_at": "2026-09-28T10:00:00Z",
+      "delivery": "invalid",
+      "status": null,
+      "status_change": null
+    },
+    "valid": false,
+    "create_status": 202
+  }
+]

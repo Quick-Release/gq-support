@@ -1,0 +1,14 @@
+{
+  "$comment": "Time-bounded exceptions to the dependency audit (scripts/ci/dependency-audit.mjs). Each one covers one advisory in one package, reached only through `via` for pnpm, until `expires` (at most 120 days ahead). Renew only after re-checking for a fix.",
+  "exceptions": [
+    {
+      "tool": "pnpm",
+      "advisory": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "via": "plugin__app>@wordpress/scripts>@wordpress/e2e-test-utils-playwright>lighthouse>puppeteer-core>chromium-bidi>",
+      "owner": "vvaz",
+      "expires": "2027-01-22",
+      "reason": "The fix is only in zod 4.6.6, and no patched 3.x release exists. puppeteer-core 25.12.0 pins chromium-bidi 17.0.2, which requires zod ^3, so a zod 4 override would force a major version on it. It is a memory-exhaustion denial of service on oversized constrained collections; here chromium-bidi only validates protocol messages from a locally launched browser during lighthouse runs, never untrusted input, and nothing ships to WordPress sites. Drop this once @wordpress/scripts reaches a puppeteer-core whose chromium-bidi uses zod 4."
+    }
+  ]
+}

@@ -356,6 +356,15 @@ switch ( $gq_support_scenario ) {
 		$gq_support_service->calls     = array();
 		$gq_support_service->responder = static fn() => GQ_Support_Test_Service::json( 200, array( 'mapping_state' => 'active' ) );
 		$gq_support_enrolled_key       = base64_encode( sodium_crypto_sign_publickey( $gq_support_keypair ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		// The service enrolled `key_test`: a constant naming another key fails closed.
+		$gq_support_mismatch = GQ_Support_Connection::test();
+		if ( ! is_wp_error( $gq_support_mismatch ) || 'gq_support_key_id_mismatch' !== $gq_support_mismatch->get_error_code() || array() !== $gq_support_service->calls ) {
+			$gq_support_fail( 'A mismatched GQ_SUPPORT_KEY_ID signed a request.' );
+		}
+		if ( '' !== GQ_Support_State::key_id( GQ_Support_State::get() ) ) {
+			$gq_support_fail( 'A mismatched GQ_SUPPORT_KEY_ID was used for support requests.' );
+		}
+		GQ_Support_State::update( array( 'key_id' => 'key_from_config' ) );
 		GQ_Support_Connection::test();
 		$gq_support_headers = $gq_support_service->calls[0]['headers'];
 		if ( 'key_from_config' !== $gq_support_headers['GQ-Support-Key-Id'] ) {
@@ -386,7 +395,16 @@ switch ( $gq_support_scenario ) {
 			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress uninstall guard.
 			define( 'WP_UNINSTALL_PLUGIN', 'gq-support/gq-support.php' );
 		}
-		require dirname( __DIR__, 2 ) . '/uninstall.php';
+		global $wpdb;
+		$gq_support_subject_key = $wpdb->get_blog_prefix() . 'gq_support_reporter_uninstall-test';
+		update_user_meta( 1, $gq_support_subject_key, 'owned-subject' );
+		update_user_meta( 1, 'gq_support_independent_meta', 'keep' );
+		// The running copy's uninstall.php: the installed release package, when that is under test.
+		require GQ_SUPPORT_PLUGIN_DIR . 'uninstall.php';
+		if ( '' !== get_user_meta( 1, $gq_support_subject_key, true ) || 'keep' !== get_user_meta( 1, 'gq_support_independent_meta', true ) ) {
+			$gq_support_fail( 'Uninstall did not remove exactly this site\'s Reporter mappings.' );
+		}
+		delete_user_meta( 1, 'gq_support_independent_meta' );
 		if ( false !== get_option( 'gq_support_state' ) || false !== get_option( 'gq_support_signing_key' ) ) {
 			$gq_support_fail( 'Uninstall kept plugin options.' );
 		}

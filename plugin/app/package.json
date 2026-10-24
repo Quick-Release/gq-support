@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wp-scripts start --output-path=../assets/dist",
-    "build": "tsc -b && wp-scripts build --output-path=../assets/dist"
+    "build": "tsc -b && wp-scripts build --output-path=../assets/dist",
+    "lint": "wp-scripts lint-js src --max-warnings=0"
   },
   "dependencies": {
     "@wordpress/a11y": "^4.56.0",
