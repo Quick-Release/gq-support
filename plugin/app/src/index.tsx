@@ -20,6 +20,9 @@ let render: (() => void) | undefined;
 let app: { root: Root; host: HTMLElement } | undefined;
 
 window.gqSupportMount = (container, onVisibilityChange) => {
+  // DO NOT MERGE: injected T3 regression for #47.
+  const until = performance.now() + 20;
+  while (performance.now() < until);
   render = () => {
     const host = document.createElement("div");
     host.className = "gq-support-app-host";
