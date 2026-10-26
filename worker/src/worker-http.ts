@@ -23,11 +23,11 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
   // Only the service's successful mutation receipt enters telemetry. Never use
   // request bodies, URLs, headers or authentication Request IDs as annotations.
   const mutation = web.success.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(url.pathname);
-  if (mutation && (response.status === 201 || response.status === 202)) {
+  const operation = url.pathname.endsWith("/status") ? "status" : "create";
+  if (mutation && (response.status === 201 || response.status === 202 || (operation === "status" && response.status === 200))) {
     const receipt = (yield* Effect.promise(() => response.clone().json())) as {
       id: string; delivery: string; status_change: { delivery: string } | null;
     };
-    const operation = url.pathname.endsWith("/status") ? "status" : "create";
     const annotations = { event: "support.receipt", request: receipt.id,
       operation, delivery: operation === "status" ? receipt.status_change!.delivery : receipt.delivery };
     yield* Effect.logInfo("Support receipt returned").pipe(Effect.annotateLogs(annotations),

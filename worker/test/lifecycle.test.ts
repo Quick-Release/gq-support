@@ -104,11 +104,21 @@ it("logs a status receipt's delivery separately from the delivered create, and r
   const accepted = await send(JSON.stringify({ submission_id: crypto.randomUUID(), reporter_subject: subject, scope: "mine", description: "Private report" }));
   const { id } = await accepted.json() as { id: string };
   await sweep();
-  const response = await send(JSON.stringify({ change_id: crypto.randomUUID(), reporter_subject: subject, scope: "mine", status: "closed" }), `/v1/requests/${id}/status`);
+  const change = JSON.stringify({ change_id: crypto.randomUUID(), reporter_subject: subject, scope: "mine", status: "closed" });
+  const response = await send(change, `/v1/requests/${id}/status`);
   expect(response.status).toBe(202);
   expect(await response.json()).toMatchObject({ delivery: "delivered", status: "open", status_change: { delivery: "accepted-pending" } });
   expect(logs.map(line => JSON.parse(line).annotations)).toContainEqual({
     event: "support.receipt", request: id, operation: "status", delivery: "accepted-pending",
+  });
+  now += 60_000;
+  vi.setSystemTime(now);
+  await sweep();
+  const replay = await send(change, `/v1/requests/${id}/status`);
+  expect(replay.status).toBe(200);
+  expect(await replay.json()).toMatchObject({ status: "closed", status_change: { delivery: "delivered" } });
+  expect(logs.map(line => JSON.parse(line).annotations)).toContainEqual({
+    event: "support.receipt", request: id, operation: "status", delivery: "delivered",
   });
   const credential = github.requests.find(request => request.path.endsWith("/issues"))!.headers.get("authorization")!;
   const forbidden = await Effect.runPromise(handleWorkerRequest(HttpServerRequest.fromWeb(new Request(
@@ -117,5 +127,5 @@ it("logs a status receipt's delivery separately from the delivered create, and r
   expect(forbidden.status).toBe(403);
   expect(await forbidden.json()).toEqual({ code: "gq_support_not_configured", message: "Installation rejected." });
   expect(logs.join("\n")).not.toContain(credential);
-  expect(logs.filter(line => JSON.parse(line).annotations.event === "support.receipt")).toHaveLength(2);
+  expect(logs.filter(line => JSON.parse(line).annotations.event === "support.receipt")).toHaveLength(3);
 });
