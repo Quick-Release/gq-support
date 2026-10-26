@@ -34,7 +34,10 @@ try {
 	);
 	$gq_support_failure            = GQ_Support_Connection::test();
 	wp_set_current_user( 1 );
-	wp_get_current_user()->add_cap( 'gq_support_submit_requests' );
+	$gq_support_reporter  = wp_get_current_user();
+	$gq_support_had_grant = array_key_exists( 'gq_support_submit_requests', $gq_support_reporter->caps );
+	$gq_support_grant     = $gq_support_reporter->caps['gq_support_submit_requests'] ?? false;
+	$gq_support_reporter->add_cap( 'gq_support_submit_requests' );
 	require_once ABSPATH . 'wp-admin/includes/class-wp-screen.php';
 	require_once ABSPATH . 'wp-admin/includes/screen.php';
 	set_current_screen( 'dashboard' );
@@ -105,6 +108,14 @@ try {
 		}
 	}
 } finally {
+	// A temporary bootstrap grant must not override later role revocation tests.
+	if ( isset( $gq_support_reporter ) ) {
+		if ( $gq_support_had_grant ) {
+			$gq_support_reporter->add_cap( 'gq_support_submit_requests', $gq_support_grant );
+		} else {
+			$gq_support_reporter->remove_cap( 'gq_support_submit_requests' );
+		}
+	}
 	ob_end_clean();
 	ini_set( 'error_log', $gq_support_error_log );
 	ini_set( 'log_errors', $gq_support_logging );
