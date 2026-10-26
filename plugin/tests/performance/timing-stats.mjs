@@ -1,13 +1,13 @@
 // Statistics and the gate rule for the interleaved timing benchmark (T1–T4 in
 // docs/research/idle-performance-budgets.md). Pure functions; timing-benchmark.mjs collects the samples.
 
-/** T1/T2: max(1 ms, 3 × the MAD of the paired delta across `main` runs). */
+/** T1/T2: max(1 ms, 3 × the MAD of the paired delta across `main` runs, see `mainMad`). */
 const phpThreshold = ({ mainMad }) => Math.max(1, 3 * (mainMad ?? 0));
 
 /**
- * The timed metrics. Every metric is report-only (`promoted: false`) until ten `main` runs give
- * its variance. To promote T1 or T2, set `mainMad` from those runs; T3 is relative to base and
- * needs none. Then set `promoted: true` and write the threshold back into the research doc.
+ * The timed metrics. T1–T3 are promoted: a regression fails the job. T1 and T2 take `mainMad` from
+ * ten `main` artifacts (`node plugin/tests/performance/main-mad.mjs <timing.json>...`); when it is
+ * re-derived, write the thresholds back into the research doc. T3 is relative to base and needs none.
  *
  * `against` is the variant head is compared with: `off` (the plugin's own cost) or `base` (a PR's
  * regression). `threshold` gets the main MAD and the comparison variant's median.
@@ -21,24 +21,27 @@ export const METRICS = {
     unit: 'ms',
     against: 'off',
     threshold: phpThreshold,
-    promoted: false,
-    mainMad: null,
+    promoted: true,
+    // Ten `main` runs, a37484f back to daa8a79 (500 rounds); the research doc has the thresholds.
+    mainMad: 0.855,
   },
   T2: {
     label: 'Eligible dashboard, PHP wall time',
     unit: 'ms',
     against: 'off',
     threshold: phpThreshold,
-    promoted: false,
-    mainMad: null,
+    promoted: true,
+    // The same ten runs.
+    mainMad: 0.89,
   },
   T3: {
     label: 'First open, click to focused Description field',
     unit: 'ms',
     against: 'base',
-    // A regression over 25% of the base median, by the same whole-CI rule.
+    // A regression over 25% of the base median, by the same whole-CI rule: the CI's lower bound,
+    // not merely its exclusion of 0, must exceed it.
     threshold: ({ againstMedian }) => 0.25 * againstMedian,
-    promoted: false,
+    promoted: true,
   },
   T4: {
     label: 'Heap growth over 50 open/close cycles, after forced GC',
@@ -75,6 +78,23 @@ export function summarize(values) {
     stddev: n > 1 ? Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (n - 1)) : 0,
     mad: median(values.map((value) => Math.abs(value - center))),
   };
+}
+
+/**
+ * The MAD of the paired head−off delta, pooled over every round of every `main` run. Pooling
+ * carries run-to-run drift as well as within-run noise; the spread of run medians alone would
+ * leave T2's steady ~0.9 ms cost against a 1 ms floor.
+ *
+ * @param {{ samples: Record<string, Record<string, number[]>> }[]} reports Parsed `timing.json` artifacts.
+ * @param {string} id The metric, `T1` or `T2`.
+ */
+export function mainMad(reports, id) {
+  const deltas = reports.flatMap(({ metadata, samples }, run) => {
+    const { off, head } = samples[id] ?? {};
+    if (!off?.length || off.length !== head?.length) throw new Error(`Run ${run} (${metadata?.commit ?? 'unknown commit'}) has no ${id} head and off samples paired by round`);
+    return head.map((value, round) => value - off[round]);
+  });
+  return summarize(deltas).mad;
 }
 
 /** A seeded generator, so a report's CI is reproducible from its samples. */
@@ -163,7 +183,7 @@ export function markdown(report) {
     `Commit \`${metadata.commit ?? 'unknown'}\`${metadata.baseCommit ? ` against base \`${metadata.baseCommit}\`` : ''}.`,
     Object.values(report.metrics).some((metric) => metric.comparisons.some(({ gate }) => gate?.promoted))
       ? 'Promoted metrics fail this job when the whole 95% CI of the delta exceeds the threshold; the rest are report-only.'
-      : 'Every metric is **report-only** until ten `main` runs give its variance; no timing fails this job yet.',
+      : 'Every metric is **report-only**: no timing fails this job.',
     ...(Object.values(report.metrics).some((metric) => metric.warning) ? ['Heap growth (T4) is never promoted: above its limit it only warns.'] : []),
     '',
     '| Metric | Variant | n | Median | p95 | SD | MAD |',

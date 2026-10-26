@@ -1,7 +1,8 @@
 name: Timing benchmark
 
-# Report-only timings (T1–T4 in docs/research/idle-performance-budgets.md). Every `main` run adds
-# to the variance history that promotes them to gates; PRs run only when labelled `perf`.
+# Timings T1–T4 in docs/research/idle-performance-budgets.md. T1–T3 are promoted gates that fail
+# the job; the rest are report-only. `main` runs keep the variance history that T1 and T2's
+# thresholds come from; PRs run only when labelled `perf`.
 on:
   push:
     branches: [main]
@@ -19,7 +20,7 @@ permissions:
 
 jobs:
   timing:
-    name: Interleaved timing benchmark (report-only)
+    name: Interleaved timing benchmark
     # Adding any other label skips the job before it joins the concurrency group, so it cannot
     # cancel a running benchmark.
     if: >-
