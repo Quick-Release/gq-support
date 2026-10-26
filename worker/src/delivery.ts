@@ -56,9 +56,10 @@ const suspendIfUnsafe = (options: DeliveryOptions, row: DeliveryRow, error: { re
     Effect.catch(() => Effect.logError("Repository suspension not recorded").pipe(
       Effect.annotateLogs({ repository: row.repository_id, reason, alert: true })))) : Effect.void;
 };
-const log = (row: Pick<DeliveryRow, "id" | "generation">, outcome: string, alert = false) =>
+const log = (row: Pick<DeliveryRow, "id" | "request_id" | "generation"> & { owner?: string | null }, outcome: string, alert = false) =>
   (alert ? Effect.logError("Support delivery requires review") : Effect.logInfo("Support delivery outcome")).pipe(
-    Effect.annotateLogs({ intent: row.id, generation: row.generation, outcome, alert }),
+    Effect.annotateLogs({ request: row.request_id, intent: row.id, generation: row.generation,
+      ...(row.owner ? { attempt: row.owner } : {}), outcome, alert }),
   );
 
 /** One bounded wake-up. D1, never this invocation, is the durable work queue. */
@@ -74,9 +75,12 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
   const due = yield* io(() => store.due(now()));
   for (const candidate of due) {
     if (now() >= deadline) break;
+    let attempt = candidate;
     const process = Effect.gen(function* () {
       const row = yield* io(() => store.claim(candidate, crypto.randomUUID(), now(), started + DRAIN_MS));
       if (!row) return;
+      attempt = row;
+      yield* Effect.annotateCurrentSpan({ request: row.request_id, intent: row.id, generation: row.generation, attempt: row.owner });
       // A delayed claim response cannot extend the dispatch window.
       if (now() >= deadline) return;
       const finish = (outcome: Parameters<typeof store.finish>[2]) => io(() => store.finish(row, now(), outcome));
@@ -228,9 +232,10 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         yield* finish({ state: 'failed', next: null, error: error._tag });
       }
       yield* log(row, error._tag, !['OutcomeUnknown', 'RateLimited', 'ProviderUnavailable'].includes(error._tag));
-    }).pipe(Effect.withSpan("support.delivery", { attributes: { intent: candidate.id } }));
+    }).pipe(Effect.annotateLogs({ request: candidate.request_id, intent: candidate.id }),
+      Effect.withSpan("support.delivery", { attributes: { request: candidate.request_id, intent: candidate.id } }));
     // Isolate storage/poison failures. An authorized attempt stays in flight;
     // expired ownership becomes unknown on the next sweep, never a new POST.
-    yield* process.pipe(Effect.catchCause(() => log(candidate, 'SchedulerFailure', true)));
+    yield* process.pipe(Effect.catchCause(() => log(attempt, 'SchedulerFailure', true)));
   }
 }).pipe(Effect.withSpan("support.delivery.sweep"));

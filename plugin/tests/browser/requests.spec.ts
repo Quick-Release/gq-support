@@ -71,6 +71,72 @@ async function returnToTab(page: Page) {
 const requestsPanel = (page: Page) => page.getByRole('tabpanel', { name: 'My requests' });
 const showRequests = (page: Page) => page.getByRole('tab', { name: 'My requests' }).click();
 
+test('one report moves from a pending receipt to readable text, close and reopen through explicit refresh', async ({ page }) => {
+  const description = 'Checkout <b>fails</b>\nPlease keep this as plain text.';
+  const summary = 'Checkout needs help';
+  let item = { ...resource({ title: summary, summary, description, delivery: 'accepted-pending', status: null }),
+    status_change: null as { change_id: string; status: string; delivery: string } | null };
+  let accepted = false;
+  let providerStatus = 'open';
+  const writes: Record<string, string>[] = [];
+  await page.route(/(?:rest_route=.*gq-support|wp-json\/gq-support)/, async route => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      const sent = request.postDataJSON();
+      writes.push(sent);
+      if (decodeURIComponent(request.url()).includes('/status')) {
+        providerStatus = sent.status;
+        item = { ...item, status_change: { change_id: sent.change_id, status: sent.status, delivery: 'accepted-pending' } };
+      } else {
+        accepted = true;
+        item = { ...item, submission_id: sent.submission_id, summary: sent.summary, title: sent.summary, description: sent.description };
+      }
+      await route.fulfill({ status: 202, json: item });
+    } else {
+      await route.fulfill({ json: { items: accepted ? [item] : [], next_cursor: null } });
+    }
+  });
+  await logIn(page);
+  await openPanel(page);
+  await page.getByRole('textbox', { name: 'Summary' }).fill(summary);
+  await page.getByRole('textbox', { name: 'Description' }).fill(description);
+  await page.getByRole('button', { name: 'Send report' }).click();
+  const panel = requestsPanel(page);
+  await expect(page.getByRole('tab', { name: 'My requests' })).toHaveAttribute('aria-selected', 'true');
+  await expect(panel.getByRole('status').filter({ hasText: 'Received' })).toBeVisible();
+  const toggle = panel.getByRole('button', { name: new RegExp(summary) });
+  await expect(toggle).toContainText('Received');
+  await toggle.click();
+  await expect(panel.getByText(description, { exact: true })).toBeVisible();
+  await expect(panel.locator('.gq-support-item-text b')).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: /^(Close|Reopen) request$/ })).toHaveCount(0);
+
+  // The controlled provider completes delivery. Nothing changes until Refresh.
+  const refresh = async () => {
+    item = { ...item, delivery: 'delivered', status: providerStatus,
+      status_change: item.status_change ? { ...item.status_change, delivery: 'delivered' } : null };
+    await panel.getByRole('button', { name: 'Refresh' }).click();
+    await expect(panel.getByRole('status').filter({ hasText: 'Requests updated' })).toBeVisible();
+  };
+  await expect(toggle).toContainText('Received');
+  await refresh();
+  await expect(toggle).toContainText('Open');
+  for (const [action, pending, status] of [
+    ['Close request', 'Close requested. Delivery is pending.', 'Closed'],
+    ['Reopen request', 'Reopen requested. Delivery is pending.', 'Open'],
+  ]) {
+    await panel.getByRole('button', { name: action }).click();
+    await expect(panel).toContainText(pending);
+    await refresh();
+    await expect(toggle).toContainText(status);
+    await expect(panel.getByText(description, { exact: true })).toBeVisible();
+  }
+  expect(writes).toHaveLength(3);
+  expect(writes[0]).toMatchObject({ summary, description, submission_id: expect.any(String) });
+  expect(writes.slice(1).map(write => write.status)).toEqual(['closed', 'open']);
+  await expect(panel.getByRole('textbox')).toHaveCount(0); // No client comment composer.
+});
+
 test('Submitted text keeps HTML, script and malicious Markdown inert', async ({ page }) => {
   const title = '<img src=x onerror="window.supportInjected=true">';
   const description = '<script>window.supportInjected=true</script> [open](javascript:alert(1)) ![image](https://attacker.example/track)';

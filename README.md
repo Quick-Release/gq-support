@@ -99,7 +99,8 @@ To rotate it:
   dependency manifest for WordPress script loading.
 - `worker/` — a Cloudflare Worker backend, provisioned with
   [Alchemy](https://alchemy.run) and written with
-  [Effect](https://effect.website). Currently a placeholder with no routes.
+  [Effect](https://effect.website), with signed installation routes, D1-backed
+  delivery/reconciliation and a Reporter-scoped projection.
 
 ## Local WordPress playground
 
@@ -121,6 +122,9 @@ The playground symlinks `plugin/`;
 build the widget before testing. Worker services are still developed separately.
 
 ## Development
+
+For the reproducible support lifecycle and recovery gates, see
+[Support lifecycle verification](docs/support-lifecycle-verification.md).
 
 ```sh
 pnpm install

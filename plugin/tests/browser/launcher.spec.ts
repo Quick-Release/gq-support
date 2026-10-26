@@ -99,6 +99,40 @@ test('ungranted Reporter has no assets', async ({ page }) => {
   await expect(page.locator('script[src*="gq-support-launcher"]')).toHaveCount(0);
 });
 
+test('keyboard operation and focus remain usable with reduced motion on a narrow screen', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await logIn(page);
+  await page.goto(`${site}/wp-admin/`);
+  const launcher = page.getByRole('button', { name: /^Support/ });
+  await launcher.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Support', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Description' })).toBeFocused();
+  await expect(dialog).toHaveAttribute('aria-modal', 'false');
+  const newReport = page.getByRole('tab', { name: 'New report' });
+  const myRequests = page.getByRole('tab', { name: 'My requests' });
+  await newReport.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(myRequests).toBeFocused();
+  await expect(myRequests).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Home');
+  await expect(newReport).toBeFocused();
+  await expect(newReport).toHaveAttribute('aria-selected', 'true');
+  const bounds = await dialog.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  expect(await dialog.evaluate(element => element.getAnimations({ subtree: true }).length)).toBe(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(launcher).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Description' })).toBeFocused();
+});
+
 test('Reporter on an unconfigured installation has no assets', async ({ page }) => {
   setConnection('not_connected');
   try {

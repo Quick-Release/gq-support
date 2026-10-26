@@ -75,6 +75,23 @@ it("closes a deleted issue and alerts an Operator on the daily pass", async () =
 
 const reads = () => github.requests.filter((r) => r.method === "GET" && /\/issues\/\d+$/.test(r.path));
 const due = () => requestStatusRefresh(stage.databases.shared, 42, issueOf().id, now);
+
+it("refreshes GitHub status without exposing internal edits or fetching comments", async () => {
+  const installation = await enroll(production);
+  const request = await accept(installation);
+  await tick();
+  const issue = issueOf();
+  advance(MINUTE);
+  github.edit(issue, { state: "closed", title: "Internal engineering title", body: "Internal investigation notes" });
+  issue.comments = 4;
+  await requestStatusRefresh(stage.databases.shared, 42, issue.id, now);
+  await tick();
+  const items = await list(installation);
+  expect(items).toEqual([expect.objectContaining({ id: request.id, title: "Checkout fails", description: "Private report text", status: "closed" })]);
+  expect(JSON.stringify(items)).not.toMatch(/Internal|comments/);
+  expect(github.requests.filter(call => call.path.includes("/comments"))).toHaveLength(0);
+  expect(logs.join("\n")).not.toContain("Internal investigation notes");
+});
 const scriptRead = (script: import("./fake-github.ts").Script) => {
   // A new invocation has a new read-only token cache.
   github.next((request) => { expect(request.path).toContain("/access_tokens"); return undefined; });

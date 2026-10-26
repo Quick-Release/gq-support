@@ -19,5 +19,19 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
     return yield* webhook(web.success, waitUntil, status);
   }
   const db = yield* database;
-  return yield* Effect.promise(() => handleRequest(web.success, db, mappings, installation));
+  const response = yield* Effect.promise(() => handleRequest(web.success, db, mappings, installation));
+  // Only the service's successful mutation receipt enters telemetry. Never use
+  // request bodies, URLs, headers or authentication Request IDs as annotations.
+  const mutation = web.success.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(url.pathname);
+  const operation = url.pathname.endsWith("/status") ? "status" : "create";
+  if (mutation && (response.status === 201 || response.status === 202 || (operation === "status" && response.status === 200))) {
+    const receipt = (yield* Effect.promise(() => response.clone().json())) as {
+      id: string; delivery: string; status_change: { delivery: string } | null;
+    };
+    const annotations = { event: "support.receipt", request: receipt.id,
+      operation, delivery: operation === "status" ? receipt.status_change!.delivery : receipt.delivery };
+    yield* Effect.logInfo("Support receipt returned").pipe(Effect.annotateLogs(annotations),
+      Effect.withSpan("support.receipt", { attributes: annotations }));
+  }
+  return response;
 });
