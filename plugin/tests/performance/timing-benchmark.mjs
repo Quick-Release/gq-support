@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Interleaved timing benchmark, report-only (T1–T4 in docs/research/idle-performance-budgets.md).
+// Interleaved timing benchmark (T1–T4 in docs/research/idle-performance-budgets.md).
 // Run from the repository root against the DDEV test site that plugin/tests/integration/run.sh leaves:
 //   node plugin/tests/performance/timing-benchmark.mjs
 // Environment:
@@ -10,7 +10,7 @@
 //   GQ_BENCH_OUT           Output directory (default benchmark-results).
 // Every round runs each variant once, in a rotating order: plugin off, base (when given) and head,
 // on the same server. Results go to timing.json and the job summary. Only a broken harness or a
-// promoted gate (none yet, see timing-stats.mjs) fails this script.
+// promoted gate (T1–T3, see timing-stats.mjs) fails this script.
 import { chromium, request } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
