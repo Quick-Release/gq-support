@@ -104,6 +104,41 @@ try {
 		);
 	};
 	add_filter( 'pre_http_request', $gq_support_stub, 10, 3 );
+	// Checklist 1 and 5: exercise each operation, including status changes (#63),
+	// with fresh request objects so a prior permission result cannot authorize it.
+	$gq_support_routes = array(
+		array( 'GET', '/requests', null ),
+		array( 'POST', '/requests', null ),
+		array( 'GET', '/requests/req_one', null ),
+		array(
+			'POST',
+			'/requests/req_one/status',
+			array(
+				'change_id' => wp_generate_uuid4(),
+				'status'    => 'closed',
+			),
+		),
+	);
+	foreach ( rest_get_server()->get_routes() as $gq_support_route => $gq_support_endpoints ) {
+		if ( ! str_starts_with( $gq_support_route, '/gq-support/v1/requests' ) ) {
+			continue;
+		}
+		foreach ( $gq_support_endpoints as $gq_support_endpoint ) {
+			$gq_support_assert( is_callable( $gq_support_endpoint['permission_callback'] ?? null ), 'Every Reporter route declares a permission callback.' );
+		}
+	}
+	foreach ( $gq_support_routes as list( $gq_support_method, $gq_support_path, $gq_support_body ) ) {
+		$gq_support_assert( 403 === $gq_support_request( $gq_support_method, $gq_support_path, array(), $gq_support_body, 'expired' )->get_status(), 'Every operation rejects an invalid nonce.' );
+		wp_get_current_user()->remove_cap( 'gq_support_submit_requests' );
+		$gq_support_assert( 403 === $gq_support_request( $gq_support_method, $gq_support_path, array(), $gq_support_body )->get_status(), 'A valid nonce cannot replace an operation grant.' );
+		wp_get_current_user()->add_cap( 'gq_support_submit_requests' );
+		WP_Session_Tokens::get_instance( $gq_support_user )->destroy_all();
+		$gq_support_assert( 403 === $gq_support_request( $gq_support_method, $gq_support_path, array(), $gq_support_body )->get_status(), 'Expired cookie sessions deny every operation.' );
+		wp_set_current_user( 0 );
+		$gq_support_assert( 401 === $gq_support_request( $gq_support_method, $gq_support_path, array(), $gq_support_body )->get_status(), 'Logout denies every operation.' );
+		$gq_support_login( $gq_support_user );
+	}
+	$gq_support_assert( array() === $gq_support_seen, 'Denied operations make no downstream service calls.' );
 	$gq_support_assert( 200 === $gq_support_request()->get_status(), 'Reporter can list own requests.' );
 	$gq_support_assert( 1 === count( $gq_support_seen ), 'Authorized read reaches service.' );
 	$gq_support_query = array();
@@ -136,6 +171,24 @@ try {
 	$gq_support_own      = $gq_support_request( 'GET', '/requests/req_one' );
 	$gq_support_assert( 200 === $gq_support_own->get_status() && ! isset( $gq_support_own->get_data()['provider_secret'] ) && ! isset( $gq_support_own->get_data()['reporter_subject'] ), 'Own read returns only public fields.' );
 	$gq_support_assert( true === $gq_support_own->get_data()['own'], 'WordPress marks the current Reporter\'s own request.' );
+	// A second real Reporter must not inherit a warmed projection or guess a read.
+	$gq_support_second = wp_insert_user(
+		array(
+			'user_login' => 'access-second-' . wp_generate_uuid4(),
+			'user_pass'  => wp_generate_password(),
+			'role'       => 'subscriber',
+		)
+	);
+	$gq_support_assert( is_int( $gq_support_second ), 'Create second Reporter.' );
+	$gq_support_login( $gq_support_second );
+	wp_get_current_user()->add_cap( 'gq_support_submit_requests' );
+	$gq_support_assert( GQ_Support_Access::subject() !== $gq_support_subject, 'Two Reporters have distinct subjects.' );
+	$gq_support_assert( 404 === $gq_support_request( 'GET', '/requests/req_one' )->get_status(), 'Second Reporter cannot read the first Reporter\'s warmed resource.' );
+	$gq_support_reply = array(
+		'items'       => array( $gq_support_resource ),
+		'next_cursor' => null,
+	);
+	$gq_support_assert( 404 === $gq_support_request()->get_status(), 'Second Reporter cannot receive the first Reporter\'s cached list.' );
 	$gq_support_login( $gq_support_user );
 	$gq_support_reply = array(
 		'items'       => array(),
@@ -196,7 +249,9 @@ try {
 		remove_user_from_blog( $gq_support_user, get_current_blog_id() );
 		wp_set_current_user( 0 );
 		$gq_support_login( $gq_support_user );
-		$gq_support_assert( 403 === $gq_support_request()->get_status(), 'Removed site membership denies the next request.' );
+		foreach ( $gq_support_routes as list( $gq_support_method, $gq_support_path, $gq_support_body ) ) {
+			$gq_support_assert( 403 === $gq_support_request( $gq_support_method, $gq_support_path, array(), $gq_support_body )->get_status(), 'Removed site membership denies every operation.' );
+		}
 		add_user_to_blog( get_current_blog_id(), $gq_support_user, 'subscriber' );
 	}
 	wp_get_current_user()->add_cap( 'gq_support_submit_requests' );
@@ -257,8 +312,14 @@ try {
 	require_once ABSPATH . 'wp-admin/includes/user.php';
 	if ( is_multisite() ) {
 		wpmu_delete_user( $gq_support_user );
+		if ( isset( $gq_support_second ) ) {
+			wpmu_delete_user( $gq_support_second );
+		}
 	} else {
 		wp_delete_user( $gq_support_user );
+		if ( isset( $gq_support_second ) ) {
+			wp_delete_user( $gq_support_second );
+		}
 	}
 }
 WP_CLI::success( 'Support REST authorization' );

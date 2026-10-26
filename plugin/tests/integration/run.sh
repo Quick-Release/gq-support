@@ -78,6 +78,9 @@ wp eval-file plugin/tests/integration/lifecycle.php active
 for scenario in state no-remote-calls legacy-upgrade enroll interrupted-setup test-connection disconnect clone no-key-exposure constants; do
   wp eval-file plugin/tests/integration/connection.php "$scenario"
 done
+for source in generated constants; do
+  wp eval-file plugin/tests/integration/key-custody.php "$source"
+done
 wp eval-file plugin/tests/integration/access.php
 wp eval-file plugin/tests/integration/privacy.php
 # Its own process: it defines GQ_SUPPORT_DISABLED for the rest of the request.

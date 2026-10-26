@@ -15,9 +15,9 @@ export const keyPair = async (): Promise<CryptoKeyPair> => {
 export const publicKeyOf = async (pair: CryptoKeyPair) => base64(await crypto.subtle.exportKey("raw", pair.publicKey) as ArrayBuffer);
 
 // Independently spells the PHP signer's wire format, rather than importing the verifier.
-export const signed = async (pair: CryptoKeyPair, method: string, path: string, body = "", keyId = "", installationId = "installation-a") => {
+export const signed = async (pair: CryptoKeyPair, method: string, path: string, body = "", keyId = "", installationId = "installation-a", now = Date.now()) => {
   const digest = `sha-256=:${base64(await crypto.subtle.digest("SHA-256", encoder.encode(body)))}:`;
-  const timestamp = String(Math.floor(Date.now() / 1000));
+  const timestamp = String(Math.floor(now / 1000));
   const requestId = crypto.randomUUID();
   const canonical = ["gq-support-v1", method, path, keyId, installationId, timestamp, requestId, digest].join("\n");
   const signature = await crypto.subtle.sign("Ed25519", pair.privateKey, encoder.encode(canonical));
