@@ -95,7 +95,7 @@ The two queries on every site-admin screen come from `GQ_Support_Lifecycle::ensu
 | T1 | Anonymous page, PHP wall time | Report the median paired delta with a 95% bootstrap CI. After ten `main` runs, **fail** if the CI's lower bound exceeds max(1 ms, 3 × the observed `main` MAD); warn above 0.5 ms | DDEV: +0.08 ms and +0.57 ms across two runs | Statistical |
 | T2 | Eligible screen, PHP wall time | Same rule as T1 | not yet on a real stack | Statistical |
 | T3 | First open, click to focused field | Report the median and p95. Fail on a regression over 25% with a CI excluding 0, against the base in the same job | 123 ms (Playground) | Statistical |
-| T4 | 50 open/close cycles, heap after GC | Warn above 1 MB; investigate, do not fail | +0.55 to +0.62 MB | Report |
+| T4 | 50 open/close cycles, heap after GC | Warn above 1 MB; investigate, do not fail | +0.55 to +0.62 MB (DDEV with My requests, #49: +687 KB median, MAD 0.4 KB) | Report |
 
 **Why these numbers:**
 - **Byte budgets (B5, B7).** The launcher budgets leave about 40% headroom over the measured size. size-limit's own advice is to set limits at about the current value plus 25% ([size-limit](https://github.com/ai/size-limit)). The launcher is deliberately tiny and vanilla (ADR 0011), so its headroom is kept tight. The app budget is generous on purpose: #34 and #13 add the list, delivery states and `@wordpress/api-fetch`, and a hard ceiling is enough to catch an accidental bundled React or TanStack Query. That alone would be roughly 45 KB gz.
@@ -147,7 +147,8 @@ Layer 3 is `.github/workflows/benchmark.yml`, which runs `plugin/tests/performan
 - Every round runs each variant once, rotating the order: plugin off, base (on PRs) and head. Base is the PR's base tree, mounted as a second plugin directory and swapped in per request.
 - T1 and T2 use 50 rounds, read from the probe's `Server-Timing` header. T3 uses 20 rounds of a cold browser context.
 - The report also carries peak memory (M1, M2) for B2 and B6, the raw samples and the environment. It is uploaded as the `timing-<sha>` artifact and written to the job summary.
-- The rules live in `plugin/tests/performance/timing-stats.mjs`. Every metric has `promoted: false`, so no timing can fail the job. To promote T1 and T2, set `mainMad` from ten `main` artifacts. T3 is relative to the PR's base and needs no history. Then set `promoted: true` and record the thresholds here. T3's rule is the whole-CI rule: it fails only when the CI's lower bound exceeds 25% of the base median, which is stricter than "over 25% with a CI excluding 0". T4 (heap after 50 cycles) is not benchmarked yet.
+- The rules live in `plugin/tests/performance/timing-stats.mjs`. Every metric has `promoted: false`, so no timing can fail the job. To promote T1 and T2, set `mainMad` from ten `main` artifacts. T3 is relative to the PR's base and needs no history. Then set `promoted: true` and record the thresholds here. T3's rule is the whole-CI rule: it fails only when the CI's lower bound exceeds 25% of the base median, which is stricter than "over 25% with a CI excluding 0". T4 never fails: `warnAbove` marks head's median growth above 1 MB as a warning in the report, and the job stays green.
+- T4 uses 10 rounds. Each one loads the dashboard in a fresh context with the list route stubbed to a full first page of 20 own requests, in every delivery and status the list renders. It opens the panel, shows My requests and closes it once, so the app is mounted and the list loaded. Then it forces a GC (`HeapProfiler.collectGarbage`, twice) and reads `JSHeapUsedSize` from `Performance.getMetrics`. It runs 50 more cycles of open, My requests and close, waiting each time for the focused Description field, the twentieth item and the hidden dialog, then forces a GC and reads the heap again. On PRs, head is compared with base like T3, report-only.
 
 ## Alternatives considered
 
@@ -184,7 +185,17 @@ Layer 3 is `.github/workflows/benchmark.yml`, which runs `plugin/tests/performan
 - **Q1 (for #3 and #7).** Should the four small `gq_support_*` records be consolidated into one state record? The choice is between non-autoloaded (1 admin query) and autoloaded with a size cap under 1 KB (0 queries everywhere, but bytes on public requests). The measurements show the current layout costs 2 queries on every site-admin screen and 4 on eligible ones.
 - **Q2 (for #13).** When the panel reopens on My requests, does it refetch automatically or show the last list until refresh is pressed? The domain design says the list "loads when My requests is shown", which is ambiguous for reopen. B10 assumes no automatic refetch on reopen. **Resolved by #26:** the list loads once per page session, the first time My requests is shown; reopening or switching back to My requests shows the last list until refresh is pressed, and an accepted report joins it from its receipt.
 - **Q3 (for #19).** Should the counter benchmark run in the existing DDEV job or in a Playground job? Playground is faster to boot and gives exact counters, but it is not a production-like database or PHP runtime.
-- **Q4.** The T4 heap growth of about 0.6 MB over 50 cycles should be re-measured on the real app once #34 and #13 add state, to confirm there is no retained-tree leak.
+- **Q4.** The T4 heap growth of about 0.6 MB over 50 cycles should be re-measured on the real app once #34 and #13 add state, to confirm there is no retained-tree leak. **Resolved by #49: there is no retained-tree leak. The growth is bounded, and most of it is compiled code.** Measured on DDEV, 2026-10-26, with WordPress 7.1.3 and Chromium 153. Each cycle showed a stubbed list of 20 own Support requests. [`heap-cycles.mjs`](idle-performance-budgets/heap-cycles.mjs) reproduces it.
+  - The benchmark gives +687 KB median over 50 cycles (n = 10, MAD 0.4 KB). That is within the 1 MB warning.
+  - The growth is not a leak's straight line. Three runs gave about +525 KB after 10 cycles, +680 KB after 50, +765 KB after 100 and +965 KB after 200. Most of it comes in the first 10 cycles, then about 2 KB per cycle. With the list hidden (open and close only), the curve has the same shape, about 50 KB higher.
+  - After a forced GC, `Memory.getDOMCounters` shows no retained nodes (−6 to +1 across 200 cycles) and no added event listeners.
+  - A heap snapshot diff over 200 more cycles (+460 to +520 KB) has no React fibers, elements or app closures. The detached-node count stays at 4.
+  - About 350 KB of that diff is V8 compiled code, such as `InstructionStream` and `TrustedByteArray`, from optimizing hot paths. It stops growing once the code is optimized.
+  - The rest is bounded, and an 11 s idle shows it:
+    - The session check that runs on each open holds an `AbortSignal.timeout`. Those signals drop from 145 to 0 when their 10 s timers end.
+    - The resource-timing buffer stays at its 250-entry cap.
+    - DevTools network records grow by one per cycle. The benchmark's own CDP session keeps the Network domain on, so a Reporter's browser does not hold them. They count equally for base and head.
+  - A real leak would show as a steady rise in DOM nodes or app objects. On `perf` PRs, read T4 against base. Compiled code makes about 2 KB per cycle normal, so a rise of 100 KB or more against base deserves a snapshot diff.
 
 ## Reproducing
 

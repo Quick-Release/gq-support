@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// Interleaved timing benchmark, report-only (T1–T3 in docs/research/idle-performance-budgets.md).
+// Interleaved timing benchmark, report-only (T1–T4 in docs/research/idle-performance-budgets.md).
 // Run from the repository root against the DDEV test site that plugin/tests/integration/run.sh leaves:
 //   node plugin/tests/performance/timing-benchmark.mjs
 // Environment:
 //   GQ_BENCH_BASE          A built plugin tree to compare head with, such as `.bench-base/plugin` on a PR.
 //   GQ_BENCH_BASE_COMMIT   That tree's commit, for the report.
 //   GQ_BENCH_PHP_ROUNDS    PHP rounds (default 50). GQ_BENCH_BROWSER_ROUNDS: browser rounds (default 20).
+//   GQ_BENCH_HEAP_ROUNDS   Heap rounds of 50 open/close cycles each (default 10).
 //   GQ_BENCH_OUT           Output directory (default benchmark-results).
 // Every round runs each variant once, in a rotating order: plugin off, base (when given) and head,
 // on the same server. Results go to timing.json and the job summary. Only a broken harness or a
@@ -23,6 +24,8 @@ const wpConfig = join(testSite, 'wp-config.php');
 const base = process.env.GQ_BENCH_BASE ? resolve(root, process.env.GQ_BENCH_BASE) : null;
 const phpRounds = Number(process.env.GQ_BENCH_PHP_ROUNDS ?? 50);
 const browserRounds = Number(process.env.GQ_BENCH_BROWSER_ROUNDS ?? 20);
+const heapRounds = Number(process.env.GQ_BENCH_HEAP_ROUNDS ?? 10);
+const heapCycles = 50;
 const warmup = 5;
 const out = resolve(root, process.env.GQ_BENCH_OUT ?? 'benchmark-results');
 
@@ -101,7 +104,8 @@ function metadata(browser) {
       .filter(({ status }) => status.startsWith('active')).map(({ name }) => name),
     flags: FLAGS,
     variants,
-    samples: { warmup, phpRounds, browserRounds },
+    samples: { warmup, phpRounds, browserRounds, heapRounds, heapCycles },
+    myRequests: `${MY_REQUESTS.items.length} stubbed items, loaded once per page`,
   };
 }
 
@@ -162,6 +166,71 @@ async function sampleOpen(browser, storageState, variant) {
   }
 }
 
+// The stubbed list response: a full first page of the Reporter's own Support requests, in every delivery and status the list renders.
+const DELIVERIES = [['delivered', 'open'], ['delivered', 'closed'], ['accepted-pending', null], ['failed', null], ['outcome-unknown', null]];
+const MY_REQUESTS = {
+  items: Array.from({ length: 20 }, (_, i) => {
+    const [delivery, status] = DELIVERIES[i % DELIVERIES.length];
+    return {
+      id: `req_01J8Z6Q4M1ZC7X0000000000${String(i).padStart(2, '0')}`,
+      title: `Checkout button does nothing on step ${i + 1}`,
+      summary: i % 2 ? null : `Checkout fails on step ${i + 1}`,
+      description: `Steps to reproduce ${i + 1}: open the cart, press Checkout, and nothing happens. `.repeat(8),
+      created_at: new Date(Date.UTC(2026, 9, 1 + i, 10)).toISOString(),
+      delivery,
+      status,
+      status_change: i === 1 ? { change_id: '3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c01', status: 'closed', delivery: 'delivered' } : null,
+      own: true,
+    };
+  }),
+  next_cursor: 'cursor-2',
+};
+
+/**
+ * T4: JS heap growth across 50 open/close cycles that each show My requests, from a forced GC after
+ * the first open (app mounted, list loaded) to a forced GC after the last close. The list is stubbed,
+ * so every variant renders the same state; reopening reuses it, as the panel does (Q2).
+ */
+async function sampleHeap(browser, storageState, variant) {
+  const context = await browser.newContext({ storageState, ignoreHTTPSErrors: true });
+  try {
+    const page = await context.newPage();
+    await page.route(/(?:rest_route=.*gq-support|wp-json\/gq-support)\/v1\/requests/, (route) => (route.request().method() === 'GET'
+      ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MY_REQUESTS) })
+      : route.abort()));
+    await page.goto(`${site}/wp-admin/index.php?${QUERY[variant]}`);
+    const launcher = page.locator('.gq-support-launcher');
+    const dialog = page.getByRole('dialog', { name: 'Support' });
+    const tab = page.getByRole('tab', { name: 'My requests' });
+    const items = page.getByRole('tabpanel', { name: 'My requests' }).getByRole('listitem');
+    const cycle = async () => {
+      await launcher.click();
+      await page.locator('#gq-support-description:focus').waitFor();
+      await tab.click();
+      await items.nth(MY_REQUESTS.items.length - 1).waitFor();
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({ state: 'hidden' });
+    };
+    await page.waitForLoadState('networkidle');
+    await cycle();
+    await page.waitForLoadState('networkidle');
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const heap = async () => {
+      // Twice: the first collection can leave finalizer-held objects for the second.
+      await cdp.send('HeapProfiler.collectGarbage');
+      await cdp.send('HeapProfiler.collectGarbage');
+      const { metrics } = await cdp.send('Performance.getMetrics');
+      return metrics.find(({ name }) => name === 'JSHeapUsedSize').value;
+    };
+    const before = await heap();
+    for (let i = 0; i < heapCycles; i++) await cycle();
+    return (await heap()) - before;
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   const tearDown = await setUp();
   const browser = await chromium.launch();
@@ -169,6 +238,7 @@ async function main() {
     const samples = Object.fromEntries(['T1', 'M1', 'T2', 'M2'].map((id) => [id, Object.fromEntries(variants.map((variant) => [variant, []]))]));
     const opened = variants.filter((variant) => variant !== 'off');
     samples.T3 = Object.fromEntries(opened.map((variant) => [variant, []]));
+    samples.T4 = Object.fromEntries(opened.map((variant) => [variant, []]));
 
     const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const loginPage = await adminContext.newPage();
@@ -183,6 +253,11 @@ async function main() {
     for (let round = 0; round < browserRounds; round++) {
       for (const variant of order(round, opened)) samples.T3[variant].push(await sampleOpen(browser, storageState, variant));
     }
+    // One discarded sample per variant, as a warm-up.
+    for (const variant of opened) await sampleHeap(browser, storageState, variant);
+    for (let round = 0; round < heapRounds; round++) {
+      for (const variant of order(round, opened)) samples.T4[variant].push(await sampleHeap(browser, storageState, variant));
+    }
     await adminContext.close();
 
     const report = buildReport({ metadata: { ...metadata(browser), finishedAt: new Date().toISOString() }, samples });
@@ -191,6 +266,7 @@ async function main() {
     const summary = markdown(report);
     process.stdout.write(summary);
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+    if (report.warnings.length) console.warn(`Report-only timing warnings: ${report.warnings.join(', ')}`);
     if (report.failing.length) {
       console.error(`Promoted timing gates failed: ${report.failing.join(', ')}`);
       process.exitCode = 1;

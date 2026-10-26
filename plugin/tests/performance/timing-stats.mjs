@@ -1,4 +1,4 @@
-// Statistics and the gate rule for the interleaved timing benchmark (T1–T3 in
+// Statistics and the gate rule for the interleaved timing benchmark (T1–T4 in
 // docs/research/idle-performance-budgets.md). Pure functions; timing-benchmark.mjs collects the samples.
 
 /** T1/T2: max(1 ms, 3 × the MAD of the paired delta across `main` runs). */
@@ -11,6 +11,9 @@ const phpThreshold = ({ mainMad }) => Math.max(1, 3 * (mainMad ?? 0));
  *
  * `against` is the variant head is compared with: `off` (the plugin's own cost) or `base` (a PR's
  * regression). `threshold` gets the main MAD and the comparison variant's median.
+ *
+ * `warnAbove` is a limit on head's own median rather than on a delta: above it the report warns,
+ * and nothing ever fails on it.
  */
 export const METRICS = {
   T1: {
@@ -36,6 +39,13 @@ export const METRICS = {
     // A regression over 25% of the base median, by the same whole-CI rule.
     threshold: ({ againstMedian }) => 0.25 * againstMedian,
     promoted: false,
+  },
+  T4: {
+    label: 'Heap growth over 50 open/close cycles, after forced GC',
+    unit: 'B',
+    against: 'base',
+    threshold: null,
+    warnAbove: 1024 * 1024,
   },
   M1: { label: 'Anonymous public page, PHP peak memory', unit: 'B', against: 'off', threshold: null },
   M2: { label: 'Eligible dashboard, PHP peak memory', unit: 'B', against: 'off', threshold: null },
@@ -110,7 +120,7 @@ export const verdict = (ci95, threshold) => (ci95[0] > threshold ? 'regression' 
  * @param {typeof METRICS} [options.metrics]
  */
 export function buildReport({ metadata, samples, metrics = METRICS }) {
-  const report = { schema: 1, metadata, metrics: {}, failing: [] };
+  const report = { schema: 1, metadata, metrics: {}, failing: [], warnings: [] };
   for (const [id, variants] of Object.entries(samples)) {
     const metric = metrics[id];
     const comparisons = [];
@@ -132,6 +142,12 @@ export function buildReport({ metadata, samples, metrics = METRICS }) {
       variants: Object.fromEntries(Object.entries(variants).map(([variant, values]) => [variant, summarize(values)])),
       comparisons,
     };
+    if (metric.warnAbove != null && variants.head) {
+      const center = median(variants.head);
+      const result = center > metric.warnAbove ? 'warn' : 'within';
+      report.metrics[id].warning = { limit: metric.warnAbove, median: center, verdict: result };
+      if (result === 'warn') report.warnings.push(id);
+    }
   }
   return report;
 }
@@ -148,6 +164,7 @@ export function markdown(report) {
     Object.values(report.metrics).some((metric) => metric.comparisons.some(({ gate }) => gate?.promoted))
       ? 'Promoted metrics fail this job when the whole 95% CI of the delta exceeds the threshold; the rest are report-only.'
       : 'Every metric is **report-only** until ten `main` runs give its variance; no timing fails this job yet.',
+    ...(Object.values(report.metrics).some((metric) => metric.warning) ? ['Heap growth (T4) is never promoted: above its limit it only warns.'] : []),
     '',
     '| Metric | Variant | n | Median | p95 | SD | MAD |',
     '|---|---|---:|---:|---:|---:|---:|',
@@ -163,6 +180,13 @@ export function markdown(report) {
       const ci = `${format(delta.ci95[0], metric.unit)} to ${format(delta.ci95[1], metric.unit)}`;
       const status = gate ? `${gate.verdict}${gate.promoted ? '' : ' (report-only)'}` : 'report-only';
       lines.push(`| ${metric.label} | ${against} | ${format(delta.median, metric.unit)} | ${ci} | ${gate ? format(gate.threshold, metric.unit) : '—'} | ${status} |`);
+    }
+  }
+  const warnings = Object.values(report.metrics).filter((metric) => metric.warning);
+  if (warnings.length) {
+    lines.push('', '| Metric | Variant | Median | Warn above | Status |', '|---|---|---:|---:|---|');
+    for (const { label, unit, warning } of warnings) {
+      lines.push(`| ${label} | head | ${format(warning.median, unit)} | ${format(warning.limit, unit)} | ${warning.verdict} (report-only) |`);
     }
   }
   lines.push('', `Environment: ${Object.entries(metadata).filter(([key]) => !['commit', 'baseCommit'].includes(key)).map(([key, value]) => `${key} \`${typeof value === 'object' ? JSON.stringify(value) : value}\``).join(', ')}.`);
