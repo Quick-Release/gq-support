@@ -22,7 +22,7 @@ export const METRICS = {
     against: 'off',
     threshold: phpThreshold,
     promoted: true,
-    // Ten `main` runs, a37484f back to daa8a79 (500 rounds): threshold 2.565 ms.
+    // Ten `main` runs, a37484f back to daa8a79 (500 rounds); the research doc has the thresholds.
     mainMad: 0.855,
   },
   T2: {
@@ -31,7 +31,7 @@ export const METRICS = {
     against: 'off',
     threshold: phpThreshold,
     promoted: true,
-    // The same ten runs: threshold 2.67 ms. The plugin's own median cost here is about 0.94 ms.
+    // The same ten runs.
     mainMad: 0.89,
   },
   T3: {
@@ -89,9 +89,9 @@ export function summarize(values) {
  * @param {string} id The metric, `T1` or `T2`.
  */
 export function mainMad(reports, id) {
-  const deltas = reports.flatMap(({ samples }, run) => {
+  const deltas = reports.flatMap(({ metadata, samples }, run) => {
     const { off, head } = samples[id] ?? {};
-    if (!off?.length || off.length !== head?.length) throw new Error(`Run ${run} has no ${id} head and off samples paired by round`);
+    if (!off?.length || off.length !== head?.length) throw new Error(`Run ${run} (${metadata?.commit ?? 'unknown commit'}) has no ${id} head and off samples paired by round`);
     return head.map((value, round) => value - off[round]);
   });
   return summarize(deltas).mad;
@@ -183,7 +183,7 @@ export function markdown(report) {
     `Commit \`${metadata.commit ?? 'unknown'}\`${metadata.baseCommit ? ` against base \`${metadata.baseCommit}\`` : ''}.`,
     Object.values(report.metrics).some((metric) => metric.comparisons.some(({ gate }) => gate?.promoted))
       ? 'Promoted metrics fail this job when the whole 95% CI of the delta exceeds the threshold; the rest are report-only.'
-      : 'Every metric is **report-only** until ten `main` runs give its variance; no timing fails this job yet.',
+      : 'Every metric is **report-only**: no timing fails this job.',
     ...(Object.values(report.metrics).some((metric) => metric.warning) ? ['Heap growth (T4) is never promoted: above its limit it only warns.'] : []),
     '',
     '| Metric | Variant | n | Median | p95 | SD | MAD |',

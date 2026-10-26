@@ -1,4 +1,4 @@
-// The timing benchmark's statistics, its report-only gate rule (T1–T3) and the T4 heap warning.
+// The timing benchmark's statistics, its gate rule (T1–T3, promoted) and the T4 heap warning.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { METRICS, buildReport, compare, mainMad, markdown, summarize, verdict } from './timing-stats.mjs';
@@ -55,9 +55,10 @@ const samples = (headOffset) => ({
   T2: { off: noisy(20), head: noisy(20) },
 });
 
+const t1ReportOnly = { ...METRICS, T1: { ...METRICS.T1, promoted: false } };
+
 test('reports a regression without failing while the metric is report-only', () => {
-  const reportOnly = { ...METRICS, T1: { ...METRICS.T1, promoted: false } };
-  const report = buildReport({ metadata: { commit: 'abc' }, samples: samples(5), metrics: reportOnly });
+  const report = buildReport({ metadata: { commit: 'abc' }, samples: samples(5), metrics: t1ReportOnly });
   const plugin = report.metrics.T1.comparisons.find((comparison) => comparison.against === 'off');
   assert.equal(plugin.gate.verdict, 'regression');
   assert.equal(plugin.gate.promoted, false);
@@ -92,8 +93,7 @@ test('the Markdown report names every metric and marks unpromoted ones report-on
   assert.match(text, /abc1234/);
   assert.match(text, new RegExp(METRICS.T1.label));
   assert.match(text, new RegExp(METRICS.T2.label));
-  const reportOnly = { ...METRICS, T1: { ...METRICS.T1, promoted: false } };
-  assert.match(markdown(buildReport({ metadata: {}, samples: samples(0), metrics: reportOnly })), /within \(report-only\)/);
+  assert.match(markdown(buildReport({ metadata: {}, samples: samples(0), metrics: t1ReportOnly })), /within \(report-only\)/);
 });
 
 const MB = 1024 * 1024;
@@ -139,11 +139,11 @@ test('T1–T3 are promoted, T1 and T2 with the main MAD from ten main runs', () 
 });
 
 test('a promoted T3 fails only when the whole CI lies above 25% of the base median', () => {
-  const T3 = (shift) => buildReport({ metadata: {}, samples: { T3: { base: noisy(20), head: noisy(20, shift) } } }).failing;
-  assert.deepEqual(T3(0), []);
+  const failingAt = (shift) => buildReport({ metadata: {}, samples: { T3: { base: noisy(20), head: noisy(20, shift) } } }).failing;
+  assert.deepEqual(failingAt(0), []);
   // 4 ms over a 20 ms base is 20%: the CI excludes 0 but not the 5 ms threshold.
-  assert.deepEqual(T3(4), []);
-  assert.deepEqual(T3(10), ['T3']);
+  assert.deepEqual(failingAt(4), []);
+  assert.deepEqual(failingAt(10), ['T3']);
 });
 
 test('the Markdown report says which metrics fail the job', () => {
