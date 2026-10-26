@@ -33,6 +33,9 @@ sub_key=$(wp --url="$subsite_url" gq-support status --format=json)
 for scenario in no-remote-calls interrupted-setup test-connection disconnect no-key-exposure clone; do
   wp --url="$subsite_url" eval-file plugin/tests/integration/connection.php "$scenario"
 done
+for source in generated constants; do
+  wp --url="$subsite_url" eval-file plugin/tests/integration/key-custody.php "$source"
+done
 [[ "$main_key" == "$(wp gq-support status --format=json)" ]]
 wp site delete "$subsite_id" --yes >/dev/null
 wp eval-file plugin/tests/integration/connection.php uninstall

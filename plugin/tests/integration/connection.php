@@ -316,9 +316,9 @@ switch ( $gq_support_scenario ) {
 
 	case 'no-key-exposure':
 		// Test 9: the key never appears in REST, Site Health or the browser bootstrap.
-		$gq_support_connect();
-		$gq_support_stored = get_option( 'gq_support_signing_key' );
-		$gq_support_secret = $gq_support_stored['active']['secret'] ?? '';
+		$gq_support_service = $gq_support_connect();
+		$gq_support_stored  = get_option( 'gq_support_signing_key' );
+		$gq_support_secret  = $gq_support_stored['active']['secret'] ?? '';
 		if ( '' === $gq_support_secret ) {
 			$gq_support_fail( 'No active key was stored.' );
 		}
@@ -353,6 +353,7 @@ switch ( $gq_support_scenario ) {
 		define( 'GQ_SUPPORT_KEY_ID', 'key_from_config' );
 		// phpcs:enable
 		$gq_support_service            = $gq_support_connect();
+		$gq_support_enrollment_calls   = $gq_support_service->calls;
 		$gq_support_service->calls     = array();
 		$gq_support_service->responder = static fn() => GQ_Support_Test_Service::json( 200, array( 'mapping_state' => 'active' ) );
 		$gq_support_enrolled_key       = base64_encode( sodium_crypto_sign_publickey( $gq_support_keypair ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode

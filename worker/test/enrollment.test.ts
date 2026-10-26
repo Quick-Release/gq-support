@@ -178,6 +178,31 @@ describe("installation enrollment at the Worker boundary", () => {
     expect((await enroll(code, pair)).status).toBe(200);
   });
 
+  it("keeps the active credential when a rotation cannot commit, and permits retry", async () => {
+    const pair = await keyPair(), next = await keyPair();
+    const { key_id: keyId } = await (await enroll(await operator("enroll"), pair)).json() as { key_id: string };
+    const code = await operator("enroll");
+    const body = JSON.stringify({ code, installation_id: "installation-a", origin: "https://shop.example",
+      public_key: Buffer.from(await crypto.subtle.exportKey("raw", next.publicKey)).toString("base64") });
+    const db = stage.databases.shared;
+    let transactions = 0;
+    const unavailable = {
+      prepare: db.prepare.bind(db),
+      batch: <T>(statements: Parameters<typeof db.batch>[0]) => {
+        // Let housekeeping finish, then fail the credential transaction after
+        // its writes. Real D1 must roll back revocation AND code consumption.
+        if (++transactions === 1) return db.batch<T>(statements);
+        return db.batch<T>([...statements, db.prepare("SELECT * FROM missing_rotation_failure_fixture")]);
+      },
+    };
+    const response = await handleRequest(await signed(next, "POST", "/v1/enroll", body), unavailable, mappings);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ code: "service_unavailable", message: "Service unavailable." });
+    expect((await send(await signed(pair, "GET", "/v1/installation", "", keyId))).status).toBe(200);
+    expect((await enroll(code, next)).status).toBe(200);
+    expect((await send(await signed(pair, "GET", "/v1/installation", "", keyId))).status).toBe(403);
+  });
+
   it("fails closed when the rate counter or final replay database is unavailable", async () => {
     const pair = await keyPair();
     const { key_id: keyId } = await (await enroll(await operator("enroll"), pair)).json() as { key_id: string };

@@ -71,6 +71,25 @@ async function returnToTab(page: Page) {
 const requestsPanel = (page: Page) => page.getByRole('tabpanel', { name: 'My requests' });
 const showRequests = (page: Page) => page.getByRole('tab', { name: 'My requests' }).click();
 
+test('Submitted text keeps HTML, script and malicious Markdown inert', async ({ page }) => {
+  const title = '<img src=x onerror="window.supportInjected=true">';
+  const description = '<script>window.supportInjected=true</script> [open](javascript:alert(1)) ![image](https://attacker.example/track)';
+  const unexpected: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('attacker.example')) unexpected.push(request.url());
+  });
+  await stubReads(page, () => page1([resource({ title, summary: title, description })]));
+  await logIn(page);
+  await openPanel(page);
+  await showRequests(page);
+  const panel = requestsPanel(page);
+  await panel.getByRole('button', { name: new RegExp('window.supportInjected=true') }).click();
+  await expect(panel.getByText(description, { exact: true })).toBeVisible();
+  await expect(panel.locator('script, img, a')).toHaveCount(0);
+  expect(await page.evaluate(() => Reflect.get(window, 'supportInjected'))).toBeUndefined();
+  expect(unexpected).toEqual([]);
+});
+
 test('New report makes no read; My requests lists own requests that expand in place', async ({ page }) => {
   const reads = await stubReads(page, () => page1([
     resource({ title: 'Checkout button does nothing', summary: 'Checkout button does nothing', description: 'Clicking <b>Checkout</b> does nothing.' }),

@@ -4,7 +4,7 @@ import create from "../../contract/fixtures/create.json";
 import resources from "../../contract/fixtures/resources.json";
 import { handleRequest } from "../src/installation-api.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
-import { harness, signed, type Installation } from "./installation-client.ts";
+import { harness, publicKeyOf, signed, type Installation } from "./installation-client.ts";
 import { localStage } from "./local-d1.ts";
 
 // Isolation tests B and C (docs/research/cloudflare-isolation-and-alchemy-provisioning.md)
@@ -301,6 +301,31 @@ describe("resource scope", () => {
     expect(await hidden.json()).toEqual(await unknown.json());
   });
 
+  it("G: stores public verification keys but no private signing material in service tables or projections", async () => {
+    const privateKey = await crypto.subtle.exportKey("jwk", production.pair.privateKey);
+    if (!("d" in privateKey) || !privateKey.d) throw new Error("Expected an exportable Ed25519 private key");
+    const privateDer = Buffer.from(await crypto.subtle.exportKey("pkcs8", production.pair.privateKey));
+    const needles = [privateKey.d, privateDer.toString("base64"), privateDer.toString("hex"),
+      Buffer.from(privateKey.d, "base64url").toString("base64")];
+    // D1's protected _cf_METADATA belongs to the runtime, not service storage.
+    const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*'").all<{ name: string }>();
+    const records = [];
+    for (const { name } of tables.results) {
+      records.push((await db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()).results);
+    }
+    const stored = JSON.stringify(records);
+    // The public key is intentional service state (ADR 0012), never a false positive.
+    expect(stored.includes(await publicKeyOf(production.pair))).toBe(true);
+    const exposed = JSON.stringify([
+      await (await list(production)).json(), await (await read(production, mine)).json(),
+      await clients.operator("status", "acme-shop/production"), logged,
+    ]);
+    for (const needle of needles) {
+      expect(stored.includes(needle)).toBe(false);
+      expect(exposed.includes(needle)).toBe(false);
+    }
+  });
+
   it("lets an attested site grant read every request in its own Slot only", async () => {
     expect((await ids(await list(production, REPORTER_1, "site"))).sort()).toEqual([mine, theirs].sort());
     expect((await read(production, theirs, REPORTER_1, "site")).status).toBe(200);
@@ -377,6 +402,34 @@ describe("resource scope", () => {
     expect(await rows("support_request")).toBe(3);
   });
 
+  it("rejects tampering of every signed component before accepting a create", async () => {
+    const body = JSON.stringify({ submission_id: submissionId(7), description: "Private report", reporter_subject: REPORTER_1, scope: "mine" });
+    const mutations: ((request: Request) => Request)[] = [
+      request => new Request(request.url + "?scope=site", request),
+      request => new Request(request.url.replace("/requests", `/requests/${mine}/status`), request),
+      request => new Request(request, { body: body.replace("Private", "Forged") }),
+      request => { request.headers.set("GQ-Support-Timestamp", String(Math.floor(Date.now() / 1000) + 1)); return request; },
+      request => { request.headers.set("GQ-Support-Request-Id", crypto.randomUUID()); return request; },
+      request => { request.headers.set("GQ-Support-Key-Id", "unknown-key"); return request; },
+      request => { request.headers.set("GQ-Support-Signature", Buffer.alloc(64).toString("base64")); return request; },
+    ];
+    for (const mutate of mutations) {
+      const request = await signed(production.pair, "POST", "/v1/requests", body, production.keyId, production.installationId);
+      const response = await clients.send(mutate(request));
+      expect(response.status).toBe(403);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+    }
+    for (const offset of [-301_000, 301_000]) {
+      const request = await signed(production.pair, "POST", "/v1/requests", body, production.keyId, production.installationId, Date.now() + offset);
+      expect((await clients.send(request)).status).toBe(403);
+    }
+    // Empty body on both sides isolates the method from body/digest tampering.
+    const post = await signed(production.pair, "POST", "/v1/requests", "", production.keyId, production.installationId);
+    expect((await clients.send(new Request(post.url, { method: "GET", headers: post.headers }))).status).toBe(403);
+    expect((await ids(await list(production, REPORTER_1, "site"))).sort()).toEqual([mine, theirs].sort());
+    expect((await submit(production, { submission_id: submissionId(7), description: "Private report" })).status).toBe(202);
+  });
+
   it("validates list pagination and returns newest first", async () => {
     expect(await ids(await list(production, REPORTER_1, "site", { per_page: "1" }))).toHaveLength(1);
     const first = await (await list(production, REPORTER_1, "site", { per_page: "1" })).json() as { items: { id: string }[]; next_cursor: string };
@@ -392,8 +445,13 @@ describe("resource scope", () => {
   });
 
   it("has no comment, receipt or attachment routes", async () => {
-    for (const path of [`/v1/requests/${mine}/comments`, `/v1/requests/${mine}/attachments`, "/v1/receipts", `/v1/requests/${mine}/receipt`]) {
-      expect((await production.send("GET", `${path}?${query({ reporter_subject: REPORTER_1, scope: "site" })}`)).status).toBe(404);
+    for (const path of [`/v1/requests/${mine}/comments`, `/v1/requests/${mine}/attachments`, "/v1/receipts", `/v1/requests/${mine}/receipt`, `/v1/requests/${mine}/cache`, "/v1/issues/42", "/v1/attachments/guessed?signature=forged"]) {
+      for (const installation of [production, staging, globex]) {
+        const response = await installation.send("GET", path);
+        expect(response.status).toBe(404);
+        expect(response.headers.get("Cache-Control")).toBe("no-store");
+        expect(await response.json()).toEqual({ code: "not_found" });
+      }
     }
   });
 });

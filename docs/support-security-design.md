@@ -92,6 +92,8 @@ Use generic but actionable client errors and opaque correlation IDs in safe oper
 
 ## Implementation-ready security tests
 
+Executable coverage and CI commands: [adversarial regression gates](security-regression-tests.md).
+
 Run tests at both REST and Worker boundaries, with two Reporters on installation A, installation B belonging to the same Client and sharing the project repository, and installation C belonging to another Client; include multisite sites with overlapping numeric WP user IDs.
 
 1. Without login/nonce, with stale/invalid nonce, or after logout: all Reporter routes deny; `permission_callback` is present on each route; no downstream Worker call. A valid nonce without the operation's capability also denies.
