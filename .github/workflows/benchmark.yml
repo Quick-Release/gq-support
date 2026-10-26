@@ -1,6 +1,6 @@
 name: Timing benchmark
 
-# Report-only timings (T1–T3 in docs/research/idle-performance-budgets.md). Every `main` run adds
+# Report-only timings (T1–T4 in docs/research/idle-performance-budgets.md). Every `main` run adds
 # to the variance history that promotes them to gates; PRs run only when labelled `perf`.
 on:
   push:

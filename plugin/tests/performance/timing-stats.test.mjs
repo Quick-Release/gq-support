@@ -1,4 +1,4 @@
-// The timing benchmark's statistics and its report-only gate rule (T1–T3).
+// The timing benchmark's statistics, its report-only gate rule (T1–T3) and the T4 heap warning.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { METRICS, buildReport, compare, markdown, summarize, verdict } from './timing-stats.mjs';
@@ -92,4 +92,33 @@ test('the Markdown report names every metric and says it is report-only', () => 
   assert.match(text, new RegExp(METRICS.T1.label));
   assert.match(text, new RegExp(METRICS.T2.label));
   assert.match(text, /report-only/);
+});
+
+const MB = 1024 * 1024;
+const heap = (median) => Array.from({ length: 10 }, (_, i) => median + (i % 2 ? 4096 : -4096));
+
+test('T4 warns when head grows the heap by more than 1 MB, and never fails', () => {
+  const report = buildReport({ metadata: {}, samples: { T4: { base: heap(0.5 * MB), head: heap(1.5 * MB) } } });
+  assert.deepEqual(report.metrics.T4.warning, { limit: MB, median: 1.5 * MB, verdict: 'warn' });
+  assert.deepEqual(report.warnings, ['T4']);
+  assert.deepEqual(report.failing, []);
+  // Head is still compared with base, report-only.
+  const [comparison] = report.metrics.T4.comparisons;
+  assert.equal(comparison.against, 'base');
+  assert.equal(comparison.gate, undefined);
+});
+
+test('T4 within 1 MB has no warning, with or without a base', () => {
+  const report = buildReport({ metadata: {}, samples: { T4: { head: heap(0.6 * MB) } } });
+  assert.equal(report.metrics.T4.warning.verdict, 'within');
+  assert.deepEqual(report.warnings, []);
+  assert.deepEqual(report.metrics.T4.comparisons, []);
+});
+
+test('the Markdown report shows T4 and its warning status', () => {
+  const warned = markdown(buildReport({ metadata: {}, samples: { T4: { head: heap(1.5 * MB) } } }));
+  assert.match(warned, /only warns/);
+  assert.match(warned, new RegExp(`\\| ${METRICS.T4.label} \\| head \\| 1536\\.0 KB \\| 1024\\.0 KB \\| warn \\(report-only\\) \\|`));
+  const within = markdown(buildReport({ metadata: {}, samples: { T4: { head: heap(0.5 * MB) } } }));
+  assert.match(within, /\| head \| 512\.0 KB \| 1024\.0 KB \| within \(report-only\) \|/);
 });
