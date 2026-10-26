@@ -4,7 +4,7 @@ Tags: support, issue-tracking, bug-report
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.1.9
+Stable tag: 0.1.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,6 +15,11 @@ Adds an in-dashboard support widget for authenticated users to submit reports an
 This plugin is under active development. Authorized Reporters on a connected installation see a Support launcher on supported admin screens; sending reports is not available yet.
 
 == Changelog ==
+
+= 0.1.10 =
+* Let Reporters, and Support managers within their installation, close and reopen a delivered Support request; GitHub stays authoritative for its status.
+* Keep privacy export and erasure available while support is disabled.
+* Add Report context hooks and a local Site Health status.
 
 = 0.1.9 =
 * Let Reporters review and remove the WordPress version, plugin version and originating screen sent with a Support request.

@@ -2,8 +2,11 @@ name: WordPress runtime cell
 
 # One cell of .github/runtime-matrix.json on a fresh DDEV site: scripts/ci/run-cell.sh runs the
 # lifecycle integration, records and verifies the actual runtime, then the cell's browser suite,
-# multisite and Plugin Check. ci.yml calls it for pull-request cells; compatibility.yml for
-# nightly, pre-release and canary cells.
+# multisite and Plugin Check. A cell pinning `gqDesign` first installs that real GETQUICK Design
+# release from the private registry, with the login of the gq-design-sandbox environment. ci.yml
+# calls it for pull-request cells; compatibility.yml for nightly, pre-release and canary cells;
+# release-plugin.yml with `package`, to run the cell on the release candidate ZIP installed by
+# WordPress instead of the checkout.
 on:
   workflow_call:
     inputs:
@@ -11,6 +14,16 @@ on:
         description: One entry of `node scripts/ci/runtime-matrix.mjs cells`, as JSON
         required: true
         type: string
+      package:
+        description: Name of an artifact holding gq-support.zip and its manifest (scripts/ci/release-package.mjs)
+        default: ""
+        type: string
+    # Callers pass it by name; it exists only in gq-design-sandbox, so only this job's environment
+    # gives it a value. Without the name it would resolve empty here.
+    secrets:
+      COMPOSER_AUTH:
+        description: GETQUICK registry login for a cell that pins `gqDesign` (scripts/ci/install-gq-design.sh)
+        required: false
 
 permissions:
   contents: read
@@ -19,10 +32,17 @@ jobs:
   cell:
     name: DDEV
     runs-on: ubuntu-latest
+    # The one environment with a secret: the GETQUICK registry login of a cell that pins a real
+    # GETQUICK Design release (`gqDesign`). Every other cell runs the fixture outside it. Pull
+    # requests from forks never receive the secret, so their real-release cell fails, closed.
+    environment: ${{ fromJSON(inputs.cell).gqDesign && 'gq-design-sandbox' || '' }}
     # A hung site or browser fails the cell instead of holding the required check open.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # A package run upgrades from the previous release's tag (plugin/tests/integration/package.sh).
+          fetch-depth: ${{ inputs.package != '' && '0' || '1' }}
 
       - uses: ddev/github-action-setup-ddev@fdf2f5c97943bae638f31df6df86f1defa6210c0 # v1.12.1
         with:
@@ -39,9 +59,26 @@ jobs:
           cache: pnpm
 
       - name: Build the Reporter app
+        if: inputs.package == ''
         run: |
           pnpm install --frozen-lockfile
           pnpm build:app
+
+      # The candidate is never rebuilt here: these are the bytes the release publishes.
+      - name: Install the test tools
+        if: inputs.package != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the release candidate
+        if: inputs.package != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.package }}
+          path: package-zip
+
+      - name: Verify the candidate's recorded digest
+        if: inputs.package != ''
+        run: node scripts/ci/release-package.mjs verify package-zip
 
       - name: Install the Playwright engine
         if: fromJSON(inputs.cell).browser
@@ -55,16 +92,25 @@ jobs:
           DDEV_REDIS: ${{ fromJSON(inputs.cell).tools['ddev-redis'] }}
         run: ddev add-on get ddev/ddev-redis --version "$DDEV_REDIS"
 
+      # The login reaches only this step; the cell runs without it (scripts/ci/install-gq-design.sh).
+      - name: Install the real GETQUICK Design
+        if: fromJSON(inputs.cell).gqDesign
+        env:
+          COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
+          GQ_DESIGN: ${{ fromJSON(inputs.cell).gqDesign }}
+        run: scripts/ci/install-gq-design.sh "$GQ_DESIGN"
+
       - name: Run the cell
         env:
           CELL_ID: ${{ fromJSON(inputs.cell).id }}
+          GQ_SUPPORT_PLUGIN_ZIP: ${{ inputs.package != '' && 'package-zip/gq-support.zip' || '' }}
         run: scripts/ci/run-cell.sh "$CELL_ID"
 
       - name: Keep the runtime report
         if: always()
         uses: ./.github/actions/upload-scanned-artifact
         with:
-          name: runtime-${{ fromJSON(inputs.cell).id }}
+          name: ${{ inputs.package != '' && 'package-' || '' }}runtime-${{ fromJSON(inputs.cell).id }}
           path: runtime-results/
           if-no-files-found: ignore
           retention-days: 30
@@ -75,7 +121,7 @@ jobs:
         if: always() && fromJSON(inputs.cell).suite
         uses: ./.github/actions/upload-scanned-artifact
         with:
-          name: playwright-results-${{ fromJSON(inputs.cell).id }}
+          name: ${{ inputs.package != '' && 'package-' || '' }}playwright-results-${{ fromJSON(inputs.cell).id }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 30

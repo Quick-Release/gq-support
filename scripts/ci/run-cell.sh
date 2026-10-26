@@ -3,8 +3,13 @@
 # CI does: lifecycle integration, recorded and verified runtime, browser suite, multisite, Plugin Check.
 # Needs a fresh site (WordPress and database versions are fixed when the site is created), a built
 # app and, for browser cells, the cell's Playwright engine. The object-cache cell also needs the
-# ddev-redis add-on in .ddev. Runtime reports land in runtime-results/.
+# ddev-redis add-on in .ddev, and a cell pinning a real GETQUICK Design release needs the registry
+# login in COMPOSER_AUTH unless scripts/ci/install-gq-design.sh already installed it. Runtime
+# reports land in runtime-results/.
+# GQ_SUPPORT_PLUGIN_ZIP (repository-relative) runs the cell on a release ZIP installed by WordPress
+# instead of the plugin/ checkout, adding its uninstall and previous-release upgrade (package.sh).
 #   scripts/ci/run-cell.sh minimum
+#   GQ_SUPPORT_PLUGIN_ZIP=package-zip/gq-support.zip scripts/ci/run-cell.sh stable
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # An assignment keeps a failed lookup fatal; eval of a failed substitution would not be.
@@ -25,7 +30,7 @@ record() {
 
 echo "::group::Lifecycle integration: $CELL_NAME"
 WP_VERSION=$CELL_WORDPRESS GQ_SUPPORT_PHP_VERSION=$CELL_PHP GQ_SUPPORT_DATABASE=$CELL_DATABASE \
-  GQ_SUPPORT_REDIS_CACHE_VERSION=$CELL_REDIS_CACHE bash plugin/tests/integration/run.sh
+  GQ_SUPPORT_REDIS_CACHE_VERSION=$CELL_REDIS_CACHE GQ_SUPPORT_DESIGN_VERSION=$CELL_GQ_DESIGN bash plugin/tests/integration/run.sh
 woocommerce=()
 [[ "$CELL_WOOCOMMERCE" == latest ]] || woocommerce=(--version="$CELL_WOOCOMMERCE")
 if [[ -n "$CELL_WOOCOMMERCE" ]]; then wp plugin install woocommerce "${woocommerce[@]}" --force; fi
@@ -38,6 +43,12 @@ if [[ -n "$CELL_SUITE" ]]; then
   GQ_SUPPORT_BROWSER_SUITE=$CELL_SUITE GQ_SUPPORT_BROWSER=$CELL_BROWSER pnpm test:browser
   # Leave the multisite lifecycle checks the same site they had before.
   if [[ -n "$CELL_WOOCOMMERCE" ]]; then wp plugin deactivate woocommerce; fi
+  echo '::endgroup::'
+fi
+
+if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" ]]; then
+  echo '::group::Installed package uninstall and upgrade'
+  bash plugin/tests/integration/package.sh single
   echo '::endgroup::'
 fi
 
@@ -58,6 +69,13 @@ if [[ -n "$CELL_PLUGIN_CHECK" ]]; then
   wp plugin check gq-support \
     --exclude-directories=tests,app,vendor \
     --exclude-files=composer.json,composer.lock,phpstan.neon.dist,.phpcs.xml.dist
+  echo '::endgroup::'
+fi
+
+# Last: it deletes the installed copy.
+if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" && -n "$CELL_MULTISITE" ]]; then
+  echo '::group::Installed package network uninstall'
+  bash plugin/tests/integration/package.sh network
   echo '::endgroup::'
 fi
 echo "Cell $CELL_NAME passed."

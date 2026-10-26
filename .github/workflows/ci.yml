@@ -250,16 +250,18 @@ jobs:
       - name: Size gate and its negative controls
         run: pnpm test:size
 
-      # The built assets are the only package files the history scan cannot see; a release scans
-      # the package again before it is published.
-      - name: Secret scan of the assembled package
+      # The built assets are the only package files the history scan cannot see. Packing runs the
+      # release ZIP verification, secret scan included, at the plugin header's version; a release
+      # packs and verifies again at the requested version, then tests the installed ZIP.
+      - name: Package and verify the installable ZIP
         run: |
           scripts/assemble-plugin-package.sh package-dist
-          scripts/ci/gitleaks.sh dir --verbose package-dist
+          node scripts/ci/release-package.mjs pack package-dist package-zip
 
   wordpress:
     # The pull-request cells of .github/runtime-matrix.json: WordPress 6.5.0 on PHP 8.0 and the
-    # current endpoint, single site then multisite, plus PHP 8.1–8.3 integration.
+    # current endpoint, single site then multisite, PHP 8.1–8.3 integration, and the real
+    # GETQUICK Design release in the gq-design-sandbox environment (wordpress-lane.yml).
     name: ${{ matrix.cell.name }}
     needs: plan
     if: contains(needs.plan.outputs.suites, '"wordpress"')
@@ -271,6 +273,9 @@ jobs:
     uses: ./.github/workflows/wordpress-lane.yml
     with:
       cell: ${{ toJSON(matrix.cell) }}
+    # Only a name here: the value comes from the lane job's gq-design-sandbox environment.
+    secrets:
+      COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
 
   # Manual runs only (workflow_dispatch `simulate`): prove `Required validation` fails on each case.
   simulation:

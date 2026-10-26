@@ -15,15 +15,23 @@ test('a shared contract fixture runs the WordPress and Worker suites', () => {
 
 test('signing code on either side runs both languages', () => {
   assert.deepEqual(suites(['worker/src/signature.ts']), ['lint', 'wordpress', 'worker']);
-  assert.deepEqual(suites(['plugin/includes/class-gq-support-signer.php']), ['php', 'wordpress', 'worker']);
+  assert.deepEqual(suites(['plugin/includes/class-gq-support-signer.php']), ['php', 'size', 'wordpress', 'worker']);
 });
 
 test('Worker-only code runs only the Worker suite and lint', () => {
   assert.deepEqual(suites(['worker/src/intake.ts', 'docs/support-api-contract.md']), ['lint', 'worker']);
 });
 
-test('plugin PHP runs static analysis and the WordPress matrix', () => {
-  assert.deepEqual(suites(['plugin/includes/class-gq-support-access.php']), ['php', 'wordpress']);
+test('shipped plugin PHP runs static analysis, the WordPress matrix and the package verification', () => {
+  assert.deepEqual(suites(['plugin/includes/class-gq-support-access.php']), ['php', 'size', 'wordpress']);
+  assert.deepEqual(suites(['plugin/gq-support.php']), ['php', 'size', 'wordpress']);
+  assert.deepEqual(suites(['plugin/tests/integration/access.php']), ['php', 'wordpress']);
+});
+
+test('other shipped package files run the package verification and the WordPress matrix', () => {
+  assert.deepEqual(suites(['plugin/readme.txt']), ['size', 'wordpress']);
+  assert.deepEqual(suites(['plugin/languages/gq-support-pt_PT.mo']), ['size', 'wordpress']);
+  assert.deepEqual(suites(['plugin/composer.json']), ['php', 'size', 'wordpress']);
 });
 
 test('app source runs lint, the WordPress matrix and the size gate', () => {

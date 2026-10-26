@@ -384,10 +384,10 @@ fails only in GitHub's delivery log and produces no receiver signal. Freshness
 falls back to the sweep in both cases. A literal wrong-URL rehearsal is not
 scripted. GitHub's delivery log is its only evidence.
 
-Two criteria cannot be fully met by this tooling alone. "Webhook `5xx` or `401`
+Two criteria could not be met by this tooling alone. "Webhook `5xx` or `401`
 alerts fire" needs #20's alert routing: until then a run can show only the
 `401` delivery statuses and the structured rejection log lines. "At once with
-webhooks" for a suspension needs #40, below. Lags are local clock minus
+webhooks" for a suspension is #40's (step 4). Lags are local clock minus
 GitHub's `updated_at`, so run the probe on an NTP-synchronised machine; any
 skew adds directly to every lag.
 
@@ -411,9 +411,9 @@ Procedure (from `worker/`, Operator credentials for staging):
    and immediately start `watch-suspension --state <file> --timeout-minutes 20`.
    It passes when the mapping shows `suspended` within one sweep and
    `createRefused` is `true`: the probe's next submission gets
-   `403 gq_support_not_configured`, which WordPress shows on the form. "At once with webhooks" needs
-   #40's `public`/`repository` handlers; the current allowlist has only issue
-   actions. Make the sandbox private again (`-f visibility=private`). After a passing sweep, run
+   `403 gq_support_not_configured`, which WordPress shows on the form. With #40's lifecycle handlers the
+   `public` and `repository.publicized` deliveries suspend it at once, so the
+   expected lag is GitHub's delivery time, not a sweep. Make the sandbox private again (`-f visibility=private`). After a passing sweep, run
    `unsuspend gq-support-sandbox/staging <actor> verified-private`.
 5. Record the results below, and revoke the probe Slot.
 

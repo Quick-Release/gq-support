@@ -21,6 +21,10 @@ on:
         description: Space-separated tiers to run (pr, scheduled, canary)
         default: pr scheduled
         type: string
+    # Passed through by name to the real-design cell (wordpress-lane.yml).
+    secrets:
+      COMPOSER_AUTH:
+        required: false
 
 permissions:
   contents: read
@@ -69,6 +73,9 @@ jobs:
     uses: ./.github/workflows/wordpress-lane.yml
     with:
       cell: ${{ toJSON(matrix.cell) }}
+    # Only a name here: the value comes from the lane job's gq-design-sandbox environment.
+    secrets:
+      COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
 
   scheduled:
     name: ${{ matrix.cell.name }}

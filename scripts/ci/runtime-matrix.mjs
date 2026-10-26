@@ -58,6 +58,7 @@ export function cellName(cell) {
   if (cell.browser) parts.push(`${cell.browser} ${cell.suite}`);
   if (cell.multisite) parts.push(cell.multisite === 'subdomain' ? 'subdomain multisite' : 'multisite');
   if (cell.objectCache) parts.push('object cache');
+  if (cell.gqDesign) parts.push(`GETQUICK Design ${cell.gqDesign}`);
   return `${cell.id}: ${parts.join(', ')}`;
 }
 
@@ -103,7 +104,7 @@ export function checkPolicy(manifest, sources) {
     if (!cell.browser !== !cell.suite || (cell.suite && !SUITES.includes(cell.suite))) failures.push(`${cell.id} needs both a browser and a suite (${SUITES.join(' or ')}), or neither`);
     if (cell.multisite && !TOPOLOGIES.includes(cell.multisite)) failures.push(`${cell.id} has unknown multisite topology ${cell.multisite}`);
     if (cell.tier === 'canary') continue;
-    for (const key of ['wordpress', 'woocommerce', 'pluginCheck']) {
+    for (const key of ['wordpress', 'woocommerce', 'pluginCheck', 'gqDesign']) {
       if (key in cell && !EXACT.test(cell[key])) failures.push(`${cell.id} pins ${key} "${cell[key]}"; blocking cells need an exact x.y.z release`);
     }
     if (phpId(cell.php) < phpId(php.minimum) || phpId(cell.php) > phpId(php.maximum)) failures.push(`${cell.id} runs PHP ${cell.php}, outside the supported ${php.minimum}–${php.maximum}`);
@@ -118,6 +119,8 @@ export function checkPolicy(manifest, sources) {
   };
   boundary(`WordPress ${floor}.0 on PHP ${php.minimum}`, (cell) => cell.wordpress === `${floor}.0` && cell.php === php.minimum);
   boundary(`WordPress ${testedUpTo} on PHP ${php.maximum}`, (cell) => EXACT.test(cell.wordpress) && minor(cell.wordpress) === testedUpTo && cell.php === php.maximum);
+  // Every other cell runs the one-line fixture that plugin/tests/integration/run.sh writes.
+  if (!pr.some((cell) => cell.gqDesign && cell.suite)) failures.push('no pull-request browser cell installs the real GETQUICK Design (gqDesign)');
   const [major, lowest] = php.minimum.split('.').map(Number);
   for (let next = lowest; next <= Number(php.maximum.split('.')[1]); next++) {
     if (!pr.some((cell) => cell.php === `${major}.${next}`)) failures.push(`PHP ${major}.${next} has no pull-request cell`);
@@ -164,6 +167,11 @@ export function verifyRuntime(cell, report, { topology = 'single' } = {}) {
       failures.push(`database ${server || 'unknown'} ran; the cell declares ${label}`);
     }
   }
+  // The fixture defines GETQUICK_DESIGN_VERSION "test" and no classes; the real release loads its
+  // classes through the Composer autoloader, as on a Bedrock site.
+  const designVersion = report.design?.version ?? 'missing';
+  if (designVersion !== (cell.gqDesign ?? 'test')) failures.push(`GETQUICK Design ${designVersion} ran; the cell declares ${cell.gqDesign ?? 'the test fixture'}`);
+  else if (cell.gqDesign && !report.design.classes) failures.push(`GETQUICK Design ${designVersion} is active but its classes did not load: check its Composer autoloader`);
   if (Boolean(cell.objectCache) !== Boolean(report.objectCache)) failures.push(`persistent object cache is ${report.objectCache ? 'on' : 'off'}; the cell declares it ${cell.objectCache ? 'on' : 'off'}`);
 
   return failures;
@@ -246,6 +254,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       multisite: cell.multisite,
       plugin_check: cell.pluginCheck,
       redis_cache: cell.objectCache ? manifest.tools['redis-cache'] : '',
+      gq_design: cell.gqDesign,
     };
     const quote = (value) => `'${String(value ?? '').replaceAll("'", `'\\''`)}'`;
     process.stdout.write(Object.entries(fields).map(([key, value]) => `CELL_${key.toUpperCase()}=${quote(value)}\n`).join(''));
@@ -270,8 +279,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       .sort()
       .map((file) => ({ report: file.replace(/\.json$/, ''), ...JSON.parse(readFileSync(join(dir, file), 'utf8')) }));
     writeFileSync(join(dir, 'resolved-matrix.json'), `${JSON.stringify(reports, null, 2)}\n`);
-    const rows = reports.map((r) => `| ${r.report} | ${r.php} | ${r.wordpress} | ${r.database?.server ?? '—'} | ${r.react ?? '—'} | ${r.woocommerce ?? '—'} | ${r.objectCache ? 'on' : 'off'} | ${r.toolchain?.browser || '—'} (${r.toolchain?.playwright ?? '—'}) |`);
-    summarize('Resolved runtime matrix', reports.length === 0 ? 'No runtime reports: no WordPress cell recorded its runtime.' : ['| Report | PHP | WordPress | Database | React | WooCommerce | Object cache | Browser |', '|---|---|---|---|---|---|---|---|', ...rows].join('\n'));
+    const rows = reports.map((r) => `| ${r.report} | ${r.php} | ${r.wordpress} | ${r.database?.server ?? '—'} | ${r.react ?? '—'} | ${r.woocommerce ?? '—'} | ${r.design?.version ?? '—'} | ${r.objectCache ? 'on' : 'off'} | ${r.toolchain?.browser || '—'} (${r.toolchain?.playwright ?? '—'}) |`);
+    summarize('Resolved runtime matrix', reports.length === 0 ? 'No runtime reports: no WordPress cell recorded its runtime.' : ['| Report | PHP | WordPress | Database | React | WooCommerce | GETQUICK Design | Object cache | Browser |', '|---|---|---|---|---|---|---|---|---|', ...rows].join('\n'));
   } else if (command === 'discover') {
     const upstream = await fetchUpstream();
     const drift = pinDrift(manifest, upstream);
