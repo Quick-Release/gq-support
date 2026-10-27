@@ -1,7 +1,8 @@
 # External incident observation for MVP #20
 
-Research/design only, 2026-10-27. **Disabled; no observer, heartbeat, sender,
-scheduler, credentials or live proof supplied. #20 and #29 remain open.**
+Design plus offline protocol implementation, 2026-10-27. **Disabled; no running
+observer, heartbeat producer, sender, scheduler, credentials or live proof supplied.
+#20 and #29 remain open.**
 Recommendation: use GitHub Actions outside the support Worker for bounded HTTP
 and workflow observations; add an explicit Cron progress contract before claiming
 missing-work coverage. Keep Discord as the main route. Begin with read-only
@@ -222,14 +223,72 @@ Required decoder/evaluator vectors for the next offline slice:
 | Crash before/after dispatch, lost response, concurrent sender, recovery racing failure | retain durable uncertain ownership; no automatic resend/recovery/reset |
 | Oversized body/row count, injected PII/unknown fields, redirect to private host | bounded rejection without logging payload or following redirect |
 
-No executable prototype is included: adapters, transport and durable custody are
-unwired. These are acceptance vectors, not passing tests or a functional monitor.
-A pure evaluator can be implemented next without live permission; no Worker entry
-stub or enabled workflow belongs in that slice.
+The offline protocol slice below exercises these vectors with fake provenance;
+transport and durable custody remain unwired. It is not a functional monitor.
+No Worker entry stub or enabled workflow is included.
+
+## Implemented offline slice — 2026-10-27
+
+Stack base verified from PR121 metadata: actual head ref
+`t3/external-incident-observer`, pinned `e961cfefae6dd1452b20b3e28b63dda3564b371f`.
+The dedicated implementation branch is `t3/offline-observer-evaluator`; no source
+branch rewrite or other checkout was used.
+
+[Protocol and exact limits](../../worker/tools/observer/README.md),
+[pure evaluator/decoders](../../worker/tools/observer/protocol.ts),
+[selected GraphQL projection](../../worker/tools/observer/analytics-wire.ts) and
+[fixture tests](../../worker/tools/observer/protocol.test.ts) implement strict
+normalized input decoding and the eight fixed classes. Trusted private context
+pins account/stage/candidate/activation/generation and exact workflow expectations;
+response fields cannot authenticate themselves. Public output is at most 2 KiB
+and excludes private identities, topology, raw content and error causes.
+
+Snapshot/heartbeat/readiness wire contracts remain **proposed, with no producer**.
+Workflow/deployment JSON is explicitly a normalized projection, not a fabricated
+complete provider response. Only the selected documented analytics envelope has a
+wire projection; its output still requires independently trusted provenance.
+It never infers complete coverage from HTTP 200 or absent GraphQL errors. No new
+API facts or live observations are claimed. All deadlines remain proposals,
+including an explicit 15-minute HTTP pair window in this offline slice.
+
+The bounded in-memory carry preserves failure watermarks and unresolved Cron/run
+identities; it supplies no custody or receipt proof. Missing/unknown input cannot
+recover incidents. Old successful attempts cannot erase failed attempts. A fresh
+complete successful retry can resolve a retained attempt only under the stricter
+rules in the module README. Sampled zero analytics cannot resolve prior errors;
+no affirmative analytics recovery contract exists yet. A negative receipt model
+keeps uncertain dispatch blocked and human acknowledgment unknown; no journal,
+send, reset or authenticated reconciliation implementation exists.
+
+Validation: **77 protocol tests** pass under Node **26.12.1**, Vitest **5.0.5**,
+`maxWorkers: 1`, isolated from D1/global Worker setup. Five fixed broken variants
+are detected by real assertion failures: empty-as-healthy, completion-from-start,
+stale recovery, duplicate failure count and unknown-receipt reset. The first real
+red-to-green regression caught older snapshot observations clearing a newer
+failure. Affected ESLint and Worker TypeScript checks pass; all 114 CI-script
+policy tests, runtime/workflow policy, redacted secret scans and whitespace checks
+pass. These are offline
+fixtures and hygiene checks, not live source/transport or operational proof.
+HTTP/TLS/redirect/private-host enforcement and streaming byte limits are unwired;
+protocol byte limits apply before JSON decoding of supplied byte arrays.
+
+Minimum next CODE slice is still the producer: preserve controller scheduled UTC
+minute; persist bounded start and settled per-phase terminal results plus drain;
+retain attempt/coverage/overflow and maintenance generations; add a separately
+scoped authenticated aggregate snapshot and data-free readiness before support
+admission. Test actual scheduled callback failures/containment/binding loss and
+out-of-order/concurrent writes, without altering restore/provider ownership.
+Only after that come trusted wire adapters, LIVE identity/scope/schema/lag/sampling
+proof and separately authorized drills. Durable journal/runner survival and human
+receipt proof remain separate prerequisites before sending or scheduling.
+
+The parent choice between temporary GitHub failed-run visibility and independent
+fallback remains **pending**. Neither is approved by config, tests or this code.
+No operational authority is added; #20 and #29 remain open.
 
 ## Subsequent implementation and live acceptance checklist
 
-1. **Offline observer protocol (no policy/credentials needed):** strict decoders,
+1. **Offline observer protocol (implemented above; no policy/credentials needed):** strict decoders,
    expectation joins and finite evaluator in an isolated tool, fake clock/HTTP only.
    Pass the vectors above and leak canaries; negative controls must fail on
    empty-as-healthy, completion-from-start, stale recovery and unknown resend.
@@ -283,12 +342,13 @@ proposal, the parent may ask only whether that limitation is acceptable for the
 pilot, or which existing independent destination/coverage and acknowledgment
 window to approve. Do not invent one, enroll a vendor, or send a test now.
 
-## Publication validation
+## Original design publication validation
 
 Docs-only diff against pinned PR120: 62 local documentation links/anchors checked;
 `git diff --check`, `scripts/ci/gitleaks.sh dir docs`, workflow policy and runtime
 matrix policy passed. Affected-suite classification is empty for these Markdown
 paths; JS lint/types and Worker tests are not affected and were not rerun. No
-protocol executable/tests were added. These checks establish documentation hygiene,
+protocol executable/tests were added in that original docs-only publication.
+These checks establish documentation hygiene,
 not live observation, alert delivery or readiness. Current GitHub issue metadata
 confirms #20 and #29 OPEN; hosted PR checks/reviews remain uninspected.

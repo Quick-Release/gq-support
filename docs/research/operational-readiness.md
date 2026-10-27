@@ -376,6 +376,14 @@ implements/enables no live observer or sender and verifies no live setting. Its
 proposed windows are not approved SLOs; Discord remains the main route, with no
 approved fallback or acknowledgment/escalation policy. Read it alongside the
 [integration readiness gates](mvp-integration-readiness.md#remaining-code-and-live-gates).
+The [offline protocol slice](external-incident-observer.md#implemented-offline-slice--2026-10-27)
+adds 77 passing isolated fake-provenance tests and five detected broken variants,
+with affected lint/types checks. It implements no HTTP transport, actual producer,
+scheduler, journal or sender. Snapshot/heartbeat/readiness contracts remain
+proposed; the next minimum CODE slice is scheduled start/settled phase evidence
+and scoped snapshot/readiness reads. LIVE identity/scope/coverage/sampling/lag,
+durable custody and receipt proof remain open. The parent fallback choice is
+pending; temporary GitHub visibility is not approved.
 Historical “no routing implementation” and direct-deploy statements above describe
 the original main assessment, not the newer unmerged candidate. #20/#29 stay open.
 
