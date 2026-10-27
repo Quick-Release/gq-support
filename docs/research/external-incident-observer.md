@@ -958,3 +958,141 @@ and cannot start another dispatch. Two new readiness/snapshot cases reproduced
 zero cancellations before correction and now require exactly one. All 216
 offline observer tests, eight negative controls, typecheck and affected lint pass.
 No runtime source, live TLS/DNS/account evidence or operational authority changed.
+
+## Authenticated digest-only review loader CODE slice
+
+Stacked on #126 head `5d1e3bb4a92be30f9e6bb5d6fd59c0113f8addd3`,
+`worker/tools/observer/review-loader.ts` now implements a bounded trusted-launcher
+library and exact-record handoff. This supersedes the earlier **loader code absent**
+status only; real private delivery, external attestation and durable replay refusal
+are still absent. No review record exists or is granted by this task.
+
+Quick-Release/gq-support is PUBLIC, with default branch main. Proposed approval is
+one exact #20 comment containing only `approve-observer-read sha256:` and 64 lowercase
+hex characters, without whitespace or other text. It binds all exact private
+manifest bytes; no private target/account/deployment/version/generation or credential
+material may enter public GitHub text/artifacts. This grammar and a maximum five-minute
+session window are implementation proposals for review, not policy approval or an SLO.
+
+The [full library contract](../../worker/tools/observer/README.md#authenticated-digest-only-review-loader-this-slice)
+specifies exact manifest keys, independent stage/head/session/nonce/window/hash pins,
+optional exact #125 JSON text and the precise API routes, fields and bounds.
+Only source-reviewed numeric vvaz/gmarques IDs are accepted, using the existing
+deployment verifier's custody pattern. No live numeric IDs are configured in the
+repo and none were invented; test IDs are synthetic. vvaz OR gmarques has equal
+existing authority, with no hierarchy or new grant.
+
+Current official GitHub docs were checked for
+[exact comment GET/response fields](https://docs.github.com/en/rest/issues/comments#get-an-issue-comment),
+[user identity](https://docs.github.com/en/rest/users/users#get-a-user) and
+[repository permission](https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user).
+The verifier checks exact comment ID, repository/issue URLs, author numeric ID,
+login and User type, raw body and creation/update timestamps. It independently
+checks current actor identity and repository write/admin legacy permission
+(maintain maps to write). It does not use `author_association`, a local JSON reviewer,
+an approved flag, fake verifier callback, list/latest comment, environment approval
+or invented GitHub fields as proof. It follows no response links. No repository
+permission change or broader token scope is requested by this slice.
+
+The session consumes before all validation and awaits, then copies inputs.
+Its closure authenticates initially, reauthenticates immediately before **both**
+fixed #126 Worker GETs, checks cancellation and all time pins after async checks,
+then dispatches without another await. Exact-comment rereads occur after identity
+and permission checks. Final verification withholds results if approval changes
+while observer I/O is pending; any verification failure is terminal even through
+#126's error catch. Editing or deleting the exact selected record revokes it;
+other comments are deliberately neither listed nor interpreted. A new record is
+never automatically substituted. This concrete handoff does not expose a reusable
+boolean/capability that #126 could retain as stale authority. It observes current
+API state; it cannot atomically lock GitHub and Worker dispatch or discover hidden
+edit history beyond documented timestamps/current body. A change after its last
+observation remains an external race, not a claimed cross-provider transaction.
+
+Bounds: cooperative ten-second total session, at most sixteen GitHub GETs,
+32 KiB and 1024 chunks per response (512 KiB total GitHub data), no retries.
+Redirects, nonexact final URL, pagination links, compression, cookies, malformed
+JSON/UTF-8, unknown permissions and non-200 replies refuse. Refused/late streams
+are cancelled; noncooperative remote termination is not proved. GitHub and snapshot
+credentials have distinct custody and fixed destinations. No ambient fetch/auth,
+gh/profile/env discovery, RPC, raw errors, credential logs or artifacts are added.
+Only existing finite ≤2 KiB `result.public` is publishable. Private snapshot/carry
+remain in trusted launcher memory and never become public state.
+
+Optional #125 custody binds the authenticated actor and SHA-256 of the exact API
+comment URL, plus all existing snapshot byte/observation/time and target pins.
+That approval proves the actor approved those private bytes, not that Cloudflare
+owns the origin/account/deployment or that activation/continuity assertions are
+true. The actor's target and activation attestation duty remains explicit external
+evidence. No independent Cloudflare source was implemented or verified. There is
+no manifest-authority=healthy implication, deploy/send/restore/credential-broadening
+authority or incident recovery. Continuous progress-storage witness is unavailable;
+private actual-wire coverage/continuity stay unknown and absent records are not
+nonexecution. Existing old-failure/candidate/generation pins and eight-class verdict
+semantics remain intact.
+
+The object is one-use in process only. Constructing a new object/restarting can
+reissue authority; no durable replay claim, cache or artifact is substituted for
+the prerequisite launcher-owned replay journal. Real private delivery remains
+parent-owned: retain exact bytes and external supporting evidence privately,
+accessible to the trusted launcher and approving actor; separately supply reviewed
+identity IDs, fresh pins and the selected exact digest record. No private store or
+provider was invented. An operator may later create the digest-only record; this
+library cannot post it, and this task did not create approval.
+
+Remaining CODE: private authenticated delivery plus independent target-attestation
+source, durable replay/unresolved journal, continuous storage witness and late-I/O
+fencing, remaining provider telemetry adapters, scheduler and sender. Remaining
+LIVE: actual records, identities, custody/scope/permissions and supporting evidence,
+runner/exclusions, Test F/drills, transport receipts and human acknowledgment.
+Remaining POLICY: independent parent fallback decision. #20/#29 stay open and no
+production enablement occurs. Configured runtime 2026-10-17 remains unproven under
+test date 2026-09-16; production configuration is unchanged.
+
+Smallest next safe slice: parent-owned private delivery and retained-byte/attestation
+custody design, with durable session consumption specified before any enabled flow.
+No live observer or approval acquisition is a prerequisite to reviewing this code.
+
+### Review-loader offline validation
+
+Node 26.12.1 was selected from the supplied absolute installation, using one
+Vitest worker and the isolated observer configuration (no Worker global setup).
+Dependencies linked from the offline frozen cache, with scripts disabled and zero
+downloads. Results:
+
+```sh
+pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts --maxWorkers=1
+# 292 tests / 4 files: original 216 plus 76 loader cases
+node worker/tools/observer/negative-controls.mjs
+node worker/tools/observer/transport-negative-controls.mjs
+node worker/tools/observer/review-negative-controls.mjs
+# original eight plus two loader broken copies detected by real failing assertions
+pnpm --filter gq-support-worker typecheck
+pnpm exec eslint worker/tools/observer --max-warnings=0
+node scripts/ci/runtime-matrix.mjs policy
+node scripts/ci/workflow-policy.mjs
+scripts/ci/gitleaks.sh dir worker
+scripts/ci/gitleaks.sh dir docs
+git diff --check 5d1e3bb4a92be30f9e6bb5d6fd59c0113f8addd3
+```
+
+Loader vectors use GitHub-shaped response envelopes and runtime-generated canaries.
+They cover spoofed manifest authority, wrong repo/issue/ID/login/type, independent
+identity/permission mismatch, strict grammar/hash/session/nonce/stage/head/purpose/
+window pins, expired/future/edited/deleted records, revalidation after revoke and
+before the nested snapshot request. Cancellation and expiry after the final
+async dispatch check, pending verification/body timeouts, byte/chunk/redirect/header/
+malformed response bounds, late-response disposal, immutable copies, concurrent use,
+failed-auth/token/snapshot one-shots, both equal-authority actors, optional #125
+actor/record/target/byte pins and real #126 decoder/evaluator plus endpoint refusal.
+The original 216 vectors and eight negative controls preserve all #125/#122 and
+deadline-disposal regressions, including the existing local 240-cell integration.
+No live HTTP/TLS/DNS/account/ownership claim follows from injected HTTP.
+
+Types, affected lint, policy checks, both secret scans and whitespace pass. No full
+Worker suite is needed for this isolated launcher library; production source behavior
+is untouched (the #125 source comment now points to the implemented loader). No
+approval record, GitHub comment/review/message, credential acquisition/profile,
+account/State/settings operation, deployment/drill/send/merge, DDEV/browser, CI poll
+or watch is part of validation. Publication uses `GQ_SUPPORT_SKIP_PRE_PUSH=1`;
+hosted checks/reviews are uninspected. No scheduler, sender, journal or entry point
+was enabled.

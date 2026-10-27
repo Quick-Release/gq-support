@@ -424,3 +424,32 @@ continuous storage witness, scheduler, durable journal/sender, fallback policy a
 all LIVE manifests/permissions/runner/exclusion/credentials/approvals/Test F/drills/
 receipt remain outstanding. #20/#29 stay open. Configured 2026-10-17 compatibility
 remains unproven by installed workerd testing at 2026-09-16.
+
+### Observer authenticated review-loader CODE delta
+
+The [digest-only review loader](../../worker/tools/observer/README.md#authenticated-digest-only-review-loader-this-slice)
+adds exact public #20 comment authentication using reviewed numeric vvaz OR gmarques
+identity/current permission and all private manifest bytes. There is no new authority
+or hierarchy and no approval exists or is granted. Public GitHub receives only a
+digest; real private manifest delivery and identity metadata remain parent-owned.
+A one-use closure revalidates after async checks immediately before #126 dispatch,
+withholds results after revoked/expired pending I/O and keeps GitHub and snapshot
+credentials at separate fixed destinations. Grammar/windows are review proposals.
+
+Actor approval of bytes does not verify Cloudflare target ownership, activation,
+continuity, health or recovery. These require explicit external attestation and an
+independently validated source; continuous storage witness remains absent. Private
+actual-wire coverage stays unknown and missing records do not prove nonexecution.
+The per-object process-local one-shot does not prove durable replay refusal, even
+if a caller constructs another object; a journal remains an enablement prerequisite.
+The existing trusted-input #126 library remains available, but future approved flows
+must use the authenticated handoff. No scheduler/sender/journal/live entry point,
+private store, broader grant, deployment or production change was added.
+
+Remaining CODE: private delivery/target attestation, durable replay/unresolved
+journal, continuity witness, provider telemetry adapters and scheduler/sender.
+Remaining LIVE and parent fallback POLICY remain outstanding, including real
+records/credentials/scope/evidence, runner/exclusions, Test F/drills, receipts and
+human acknowledgment. #20/#29 remain open; configured 2026-10-17 remains unproven
+under test date 2026-09-16. See the [design](external-incident-observer.md#authenticated-digest-only-review-loader-code-slice)
+for exact limits and the next safe parent-owned slice.

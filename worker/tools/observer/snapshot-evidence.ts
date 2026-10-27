@@ -21,11 +21,12 @@ interface Manifest extends Pins {
   activatedAt: number; validFrom: number; validTo: number; issued: number; evidenceObserved: number;
   reviewer: "vvaz" | "gmarques"; record: string; snapshotSha256: string; observation: number; readAt: number; notification: "enabled" | "disabled"; exclusions: Exclusion[];
 }
-/** Supplied OUTSIDE the response/manifest by a future private reviewed loader.
+/** Supplied OUTSIDE the response/manifest by a private authenticated review loader.
  * The digest is integrity, not authentication. That loader must independently
  * authenticate the actor/record, actual business activation, current deployment,
  * single version, generation, notification mode and exclusion authorization.
- * No such loader/attestation collection is implemented here. */
+ * review-loader.ts authenticates approval of private bytes; independent live
+ * attestation collection/validation is still not implemented. */
 export interface SnapshotReviewCustody extends Pins {
   sha256: string; reviewer: "vvaz" | "gmarques"; record: string;
 }
