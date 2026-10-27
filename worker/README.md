@@ -436,3 +436,21 @@ URL/release removal when disabled. The existing App-secret custody owns that
 transition before final App verification and output. Reviewed live manifests,
 permissions, runner/exclusion proof, private delivery and candidate approval
 remain required; no live deployment or drill is authorized by this candidate.
+
+## Configured-date local runtime gate
+
+With Node 26.12.1 first in PATH:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter gq-support-worker test:configured-runtime
+```
+
+This mandatory Worker CI step uses exact development workerd `1.20261027.1`
+through Miniflare's documented executable override. It builds the actual Alchemy
+Worker, starts at the unchanged configured `2026-10-17` date, exercises native
+observer auth and local D1, and rejects an intentional September-date fallback.
+Normal fixture tests retain their previous runtime/date behavior. No account or
+credentials are required. See [reproduction, pins, checks and limits](../docs/research/configured-runtime-validation.md).
+This is local runtime evidence only; parent fallback and persistent custody proof,
+#20/#29 and operational enablement remain pending.

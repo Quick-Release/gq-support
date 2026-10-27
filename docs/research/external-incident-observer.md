@@ -1140,3 +1140,15 @@ real-descriptor regression reproduced the leak, then passed five consecutive
 post-close failures with no leaked descriptors, no ambiguous-close retries and
 no network dispatch. All 339 observer tests, Worker typecheck and affected lint
 pass. This does not prove persistent runner/storage or host-loss durability.
+
+## Configured runtime validation follow-up
+
+The [configured-date gate and reproduction record](configured-runtime-validation.md)
+now supersede this document's historical local startup gap: actual workerd runs
+the unchanged configured **2026-10-17** date using the narrowly pinned gate-only
+executable override. Existing September fixture evidence remains distinct.
+The real Alchemy Worker build, local D1 snapshot, native auth, binding-free
+readiness, generation fencing and containment execute locally; the deliberate
+September-date control is rejected. This supplies no live provider/TLS/account
+or operational evidence. Parent fallback and persistent custody proof remain
+pending independently; #20/#29 remain open and no production enablement follows.

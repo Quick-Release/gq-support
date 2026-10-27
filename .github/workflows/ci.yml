@@ -220,6 +220,8 @@ jobs:
         run: pnpm exec alchemy deploy --help
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Validate configured Worker runtime (local only)
+        run: pnpm test:configured-runtime
 
   size:
     # Budgets B5 and B7 in docs/research/idle-performance-budgets.md. The counter gate

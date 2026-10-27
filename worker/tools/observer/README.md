@@ -479,3 +479,16 @@ new suite exercises actual file reads/unlinks/exclusive claims/fsync and indepen
 child processes contending/restarting in ephemeral home-directory test storage;
 real fs operation seams inject open/write/fsync and descriptor-metadata failures
 without requiring privileged chown or a host crash. Only fake HTTP is injected.
+
+## Configured-date local validation update
+
+The [configured-runtime gate](../../../docs/research/configured-runtime-validation.md)
+now supplies local startup and behavior evidence at the unchanged **2026-10-17**
+production date. Run `pnpm --filter gq-support-worker test:configured-runtime`
+from the repo root with Node 26.12.1. Exact gate-only workerd `1.20261027.1`
+executes the real Alchemy Worker build and local D1; the September-date negative
+control is refused. Historical September fixture results remain distinct.
+This does not provide live provider/TLS/account/DNS proof, parent fallback policy
+or persistent custody/storage proof. Those remain pending independently, along
+with operational approvals/Test F/drills/receipt/human acknowledgment and #20/#29.
+No production enablement or global MVP-ready claim follows.
