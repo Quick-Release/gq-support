@@ -168,7 +168,12 @@ started it before staging the new shared compatibility module. The confinement
 harness intentionally copies tracked source only; its children could not import
 that file. Staging it resolved a focused real-four-resource graph case (**1
 passed**, 21 filtered cases). The unchanged remaining **281 tests / 12 files**
-passed; both affected files were rerun without filters. This setup failure is
+passed; both affected files were rerun without filters: **70 passed / 2 files**,
+417.67 seconds. Thus all **351 unique selected tests / 14 files** pass across
+the unaffected run and corrected recheck. This covers both stages and all four
+Discord/observer mode pairs, retained same-plan apply and custody, final dispatch
+authentication, both-D1 retention, native bundles, confinement/bounds and runtime
+failure/progress observers. This setup failure is
 separate from the configured-runtime RED above.
 
 The gate's real Worker build passed; the Alchemy CLI startup check passed at
