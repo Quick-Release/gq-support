@@ -1152,3 +1152,39 @@ readiness, generation fencing and containment execute locally; the deliberate
 September-date control is rejected. This supplies no live provider/TLS/account
 or operational evidence. Parent fallback and persistent custody proof remain
 pending independently; #20/#29 remain open and no production enablement follows.
+
+## Exact tracked Actions wire CODE slice, stacked on #129
+
+The [adapter contract](../../worker/tools/observer/README.md#exact-tracked-github-actions-wire-adapter-stacked-on-129)
+now decodes official workflow and exact run-attempt object envelopes with independent
+expectation/ref/repository identity joins. At most 20 tracked expectations, including
+outstanding runs older than 24h, cost <=3 metadata + <=20 exact GETs; there is no list,
+discovery, replacement or age eviction. Bounds are 64 KiB/body, 512 KiB total,
+1024 chunks/body and 10 seconds clipped to expiry. No retry or enabled entry point.
+The [official API research](github-actions-tracked-runs.md) records version
+2026-03-10, Actions:read and public unauthenticated limits, without claiming a
+configured token or live entitlement/lag/identity/permission proof.
+
+Exact terminal failures reach the real evaluator and private carry even after a
+later unresolved source. Old newly observed failures cannot hide below a recovered
+watermark. Success remains workflow evidence only; cancellation, waiting, skipped,
+missing/denied and partial observations never become healthy readiness. Only an
+approved exact higher-attempt retry with complete affirmative source proof can
+recover under the existing protocol. Display/title/job/run-path text supplies no
+stage/pipeline authority. Raw responses/URLs/headers/IDs/errors/secrets stay private.
+
+The explicit dedicated Actions-read token/context are injection seams, not real
+custody/approval. #127/#128's credential bundle and purpose are unchanged; broader
+read scope requires a future explicit prerequisite and separate review. No
+notification/deployment authority, Actions write grant, scheduler/workflow/CLI,
+sender, retry, remote settings/State or production enablement was added. #129's
+configured-date gate remains separate local evidence (two cases, reviewed zero
+findings), with runtime/CI pins unchanged and no live proof added here.
+
+Remaining untracked discovery, Cloudflare adapters, continuous storage witness,
+durable failure storage, notification journal/sender, persistent runner/private
+LIVE inputs/source approvals/permissions/attestation, Test F/drills/receipt/human
+acknowledgment and parent fallback policy remain open. #20/#29 stay open. Next
+smallest safe slice: offline Actions-read purpose/credential delivery through the
+existing one-shot custody path, binding tracked refs/identities and scope, with
+explicit separate review before any execution is enabled.

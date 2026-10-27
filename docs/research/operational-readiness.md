@@ -523,3 +523,24 @@ continuous evidence carry or recovery semantics. #20/#29 remain open; receipt/hu
 acknowledgment and parent fallback policy remain unverified. Actual-wire continuity
 and health remain unknown. Configured 2026-10-17 runtime is still unproven under
 2026-09-16 tests. Production remains disabled; no live proof was attempted.
+
+### Exact tracked Actions wire adapter, offline only
+
+The [bounded adapter](../../worker/tools/observer/README.md#exact-tracked-github-actions-wire-adapter-stacked-on-129)
+adds official workflow/exact-attempt joins for <=20 tracked expectations, with
+<=23 fixed GETs, 64 KiB/body, 512 KiB total, 1024 chunks/body and 10 seconds clipped
+to explicit expiry. Old outstanding runs are directly observable beyond 24h;
+untracked discovery remains absent. Fake HTTP/evaluator evidence does not prove
+live repo identity, entitlement, lag, permission or readiness. Existing private
+custody/read approval/failure carry controls are retained. Dedicated Actions:read
+scope/purpose delivery needs future explicit review; the current bundle and #127
+approval are not broadened or deployment/notification authority.
+
+Cloudflare adapters, continuous storage witness/durable carry, durable notification
+journal/sender, persistent runner/storage proof, genuine private LIVE inputs and
+approvals, source permissions/target attestation, Test F/drills/receipt and human
+acknowledgment remain outstanding. Parent fallback policy remains pending. #20/#29
+remain open; production remains disabled. #129 configured-date local validation
+(two passing cases, reviewed zero findings) is separate and unchanged; no live
+proof or runtime/CI change is added. Next safe slice is the offline separate
+Actions-read purpose/custody handoff, binding exact private refs/identities.
