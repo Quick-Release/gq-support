@@ -83,14 +83,18 @@ export function validateActionsInput(i: ActionsInput): void {
 /** <=3 metadata GETs + <=20 exact attempt GETs, sequential, no list/discovery or
  * retry. Complete means these exact expectations only; never service readiness.
  * Trusted injected context is NOT authenticated custody or human approval. */
-export async function observeGitHubActions(input: ActionsInput, io: TransportIO): Promise<ActionsResult> {
+export async function observeGitHubActions(input: ActionsInput, io: TransportIO & {
+  /** Trusted launcher sink; only validated normalized reads, never raw replies.
+   * Synchronous delivery retains failure evidence before the next network await. */
+  onEvidence?: (read: Read) => void;
+}): Promise<ActionsResult> {
   const empty: ActionsResult = { public: { coverage: "unknown", verdict: null }, reads: [] };
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined, stop: (() => void) | undefined;
   let signal: AbortSignal | undefined, stopped = false;
   try {
     // Snapshot all private mutable inputs and function references before awaits.
-    const i = structuredClone(input), c = i.context, transport = io.fetch, clock = io.now;
+    const i = structuredClone(input), c = i.context, transport = io.fetch, clock = io.now, onEvidence = io.onEvidence;
     signal = io.signal;
     validateActionsInput(i);
     const started = finiteInt(clock()); let last = started;
@@ -168,6 +172,7 @@ export async function observeGitHubActions(input: ActionsInput, io: TransportIO)
         reads.push({ source: "workflow", observed: i.observation, at, from: normalized.created, to: normalized.updated,
           account: c.account, stage: c.stage, candidate: c.candidate, generation: c.generation,
           status: "ok", coverage: "complete", pages: 0, body: encode(normalized) });
+        onEvidence?.(structuredClone(reads[reads.length - 1]));
       }
       check();
     } catch { complete = false; stopped = true; controller.abort(); }

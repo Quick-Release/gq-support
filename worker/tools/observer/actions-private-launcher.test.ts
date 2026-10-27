@@ -361,3 +361,27 @@ it("copies manifest bytes, policy, tokens and transport functions before asynchr
   resolve(await original(`${root}/issues/comments/789`));
   expect(incident(await p)).toBe("incident"); expect(source).toHaveBeenCalledTimes(2); expect(f.io.source).not.toHaveBeenCalled();
 });
+
+it("retains a validated first failure when cancellation wins while the next source request never settles", async () => {
+  const f = actionsFixture();
+  const first = f.manifest.tracked[0];
+  const second = { ...first, identity: "c".repeat(64), expectation: { ...first.expectation, run: first.expectation.run + 1 } };
+  const manifest = { ...f.manifest, context: { ...f.manifest.context, expected: [first.expectation, second.expectation] }, tracked: [first, second] };
+  const bytes = encode(manifest), pins = { ...f.pins, sha256: hash(bytes) };
+  f.comment.body = actionsReadCommand(pins.sha256);
+  f.source.mockImplementation(async url => {
+    if (String(url).includes("/workflows/")) return f.response(String(url), f.workflow);
+    if (String(url).includes(`/runs/${first.expectation.run}/`)) return f.response(String(url), f.run);
+    f.controller.abort();
+    return new Promise<Response>(() => {});
+  });
+  const session = createActionsReadSession(f.policy, pins, f.githubToken);
+  const result = await session.observe({ manifest: bytes, commentId: 789, actionsReadToken: f.actionsReadToken }, f.io);
+  expect(f.source).toHaveBeenCalledTimes(3);
+  expect(result.public).toEqual({ coverage: "unknown", verdict: null });
+  expect(result.state?.workflowFailures).toEqual([first.expectation]);
+  expect(result.state?.cells[4].active).toBe(true);
+  const calls = f.github.mock.calls.length;
+  await session.observe({ manifest: bytes, commentId: 789, actionsReadToken: f.actionsReadToken }, f.io);
+  expect(f.github).toHaveBeenCalledTimes(calls); expect(f.source).toHaveBeenCalledTimes(3);
+});

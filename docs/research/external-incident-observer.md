@@ -1228,3 +1228,20 @@ enabled entry point or new operational policy. Next safe slice is parent review 
 these proposed contracts and custody duties before any real enabled use. #129 local
 configured-date proof remains separate and valid; no live performance, entitlement,
 custody or Cloudflare ownership claim follows from this work.
+
+### Actions custody review correction: retain failures during cancellation
+
+Independent review found no Standards issues and one P1 Spec defect: an outer
+cancellation could beat adapter settlement and discard an already validated
+failure. The adapter now synchronously delivers each normalized read to an
+invocation-local trusted sink before awaiting the next request. Custody captures
+that private evidence incrementally and reconstructs only partial failure carry
+on refusal; public authority stays withheld and late evidence after stop is
+ignored. No raw response or reusable request authority reaches the sink.
+
+The regression reproduced an empty failure list after a valid first failure and
+a second never-settling source request that triggered cancellation. It now proves
+retained failure ownership, null public verdict and no subsequent/replayed calls.
+All 530 observer tests, Worker typecheck, affected lint and relevant negative
+controls pass. This is private in-memory carry, not durable incident persistence,
+notification receipt or LIVE proof.

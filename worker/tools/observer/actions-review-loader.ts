@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { exact, finiteInt, release } from "../../src/observer-snapshot.ts";
 import type { ApprovalPolicy } from "../../deploy/github-candidate-approval.ts";
 import { observeGitHubActions, validateActionsInput, type ActionsResult, type TrackedRun } from "./github-actions.ts";
-import { decodeBatch, evaluate, type Context, type State } from "./protocol.ts";
+import { decodeBatch, evaluate, type Context, type State, type Read } from "./protocol.ts";
 
 const root = "https://api.github.com/repos/Quick-Release/gq-support";
 const budget = 10_000, window = 5 * 60_000, maxBytes = 32_768;
@@ -62,7 +62,8 @@ export function createActionsReadSession(policy: Pick<ApprovalPolicy, "approvers
     let timer: ReturnType<typeof setTimeout> | undefined, stop: (() => void) | undefined;
     let signal: AbortSignal | undefined;
     let stopped = false;
-    let retained: ActionsResult | undefined, context: Context | undefined, previousState: State | undefined;
+    const retained: Read[] = [];
+    let context: Context | undefined, previousState: State | undefined;
     try {
       // Copy every mutable input and capture all custody functions before awaits.
       if (!(request.manifest instanceof Uint8Array) || request.manifest.byteLength > maxBytes) refuse();
@@ -199,6 +200,7 @@ export function createActionsReadSession(policy: Pick<ApprovalPolicy, "approvers
       ]));
       const pending = observeGitHubActions(input, {
         now: clock, signal: controller.signal,
+        onEvidence: (read) => { if (!stopped && !controller.signal.aborted) retained.push(read); },
         fetch: async (url, init) => {
           try {
             await verify(); fresh();
@@ -216,7 +218,6 @@ export function createActionsReadSession(policy: Pick<ApprovalPolicy, "approvers
           } catch { stopped = true; controller.abort(); return refuse(); }
         },
       });
-      void pending.then(r => { retained = r; }, () => {});
       const result = await bounded(pending);
       await verify(); fresh(); // source catch cannot launder a wrapper failure
       return result;
@@ -226,9 +227,9 @@ export function createActionsReadSession(policy: Pick<ApprovalPolicy, "approvers
       // failures. Request-local positive failures can survive as private carry.
       if (context) {
         try {
-          const c = { ...context, now: Math.max(context.now, ...(retained?.reads ?? []).map(r => r.at)) };
+          const c = { ...context, now: Math.max(context.now, ...retained.map(r => r.at)) };
           result.state = evaluate(c, decodeBatch(c,
-            (retained?.reads ?? []).map(r => ({ ...r, coverage: "partial" }))), previousState).state;
+            retained.map(r => ({ ...r, coverage: "partial" }))), previousState).state;
         }
         catch { /* unknown cannot confer recovery */ }
       }
