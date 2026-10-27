@@ -11,16 +11,20 @@ No webhook URL was supplied or accessed; all implementation tests use fake HTTP.
 
 ```text
 existing Effect producer → exact-name/flag allowlist → invocation-local counts
-  → independent admitted background persistence → existing SupportLedger D1
+  → bounded background persistence → independent alert tables in SupportLedger D1
 minute tick, after existing support phases → independent runtime + provider admission
   → one bounded Discord POST → confirmed / explicit rate rejection / blocked-unknown
 ```
 
 This PR depends on #108 (`e6bb85217c96827bb51ec1759d771730649152bf`). Preserve its
 fresh independent-ledger admission and restore epoch checks when integrating.
-Both alert persistence and draining enter `contained`; the actual POST also
-requires a fresh provider admission. Maintenance denial, ledger unavailability
-or a SupportDB epoch mismatch prevents sending. No alert grants restore safety,
+Alert draining still enters `contained`; the actual POST also requires a fresh
+provider admission. Maintenance denial, ledger unavailability or a SupportDB
+epoch mismatch prevents sending. Local collector persistence writes only the
+independent alert tables, without a SupportDB read or support runtime admission.
+It can record failures during containment, but cannot authorize support work or
+sending. An unavailable notification table must not strand a support runtime
+owner and permanently obstruct SupportDB recovery. No alert grants restore safety,
 lifts containment, releases a suspension, or enables support delivery.
 
 Alert state uses additive **ledger migration 0004**, not SupportDB, so restoring
@@ -33,14 +37,28 @@ still never expires under #108. Do not delete runtime or GitHub admissions to
 make a restore appear drained.
 
 The request path only collects finite classes in memory. Persistence attaches
-to `waitUntil`, after the support response is determined. Prompt delivery and
-webhook refresh have separate collectors; the Cron captures existing phases.
+to `waitUntil` from request finalization, on success, failure or cooperative
+cancellation. It does not await database or notification I/O on intake. A failed
+background registration logs a fixed local signal and preserves the accepted
+response; no registration fallback restarts support work. Prompt delivery and
+webhook refresh have separate collectors; the Cron captures setup and phases.
+Failure logging and exit finalization share each collector's scope; phase
+failures handled internally do not manufacture an additional outer failure.
 Notification storage failures log only `Support alert state unavailable`; they
 do not change an accepted report or create a delivery receipt. Persistence is
 best effort: an interrupted wake-up can lose a one-shot notification; recurring
 existing producers may recover it. No durable intake/notification atomicity is
-claimed. The Cron drain adds at most one two-second HTTP timeout after existing
-phase bounds (57 seconds); network retries never loop within an invocation.
+claimed. Persistence has a separate two-second cooperative bound, even in exit
+finalization; cancellation stops further collector writes. An already dispatched
+D1 write cannot be cancelled and may finish later, only in independent finite
+alert state. No support work is resumed and no support admission is released by
+this finalizer. The Cron retains delivery → cleanup → refresh → sweep → persistence
+→ drain ordering. Nominal phase deadlines total 57 seconds, persistence may add
+two, and the drain retains one two-second HTTP timeout. These are cooperative
+Effect bounds, not a platform wall-clock guarantee or a guarantee of completion
+before another Cron invocation. Existing support owners remain obstructed after
+failure/interruption, and the existing alert lock bounds competing drains.
+Network retries never loop within an invocation.
 There is no new queue, service, health polling, or WordPress page network call.
 
 ## Signals wired and gaps
@@ -56,15 +74,26 @@ not an outbound notification. The adapter never serializes arbitrary log values.
 | Status refresh | Existing global oldest-age threshold (one hour), retry attempt-five flag, tracking lost. A later explicit healthy **global refresh-age** observation alone can emit recovery for `refresh_lag`. |
 | Status sweep | Existing one-hour lag flags, mapping/historical-installation conflict, per-repository failure. Aggregated per class across repositories; no automatic recovery based on one healthy repository. |
 | Cleanup/retention | Existing review and isolated-step failure flags, including step `ledger` for mirror/compaction failure, plus whole cleanup phase failure. Step/reason strings are dropped. |
-| Phase wrappers | Existing delivery/cleanup/refresh/sweep failures captured during the scheduled phases; prompt delivery timeout wrapper is outside its collector and remains logs-only. |
+| Phase deadlines | Delivery 25s, cleanup 5s, refresh 11s and sweep 16s now log their existing fixed failure class on timeout, after cooperative cancellation settles; order and failure containment are retained. No new timeout class or recovery rule. |
+| Outer runtime wrappers | Tick setup (including title-key derivation) and escaped phase failure; prompt delivery failure/cancellation and its 25s work deadline; request handler failure/cancellation after bindings resolve. The webhook refresh catch stays inside its separate collector, with its existing 12s deadline now observed. |
+| Unexpected application response | `handleRequest`'s existing exception catch still returns the same 503/body, now emitting `request_handler_failed` through a data-free internal flag. Ordinary validation, authentication errors, unknown endpoints, rate limits and intentional containment 503s do not trigger this class. A thrown request handler preserves its original cause. |
 
-**Unwired:** webhook errors outside the receiver (wrong endpoint, runtime crash,
-platform 5xx), outer scheduled-tick failure, denied admission/restore replay,
-whole-platform/D1 failure, missing Cron, silent retention backlog, arbitrary
-authentication rejection, deploy/preflight/migration failures, and acknowledgment
-or escalation. The outer tick and prompt wrapper names are allowlisted for
-future scoped capture but are outside today's collectors. Failures of the
-alert adapter itself remain constant logs only, avoiding recursive alerts.
+**Still external/unwired:** platform-generated 5xx, failures before usable bindings
+(including invocation/runtime setup), total Worker/route/D1 failure, absent Cron
+invocations, workflow/deployment/preflight/migration failures outside the Worker,
+silent retention backlog, and operator receipt/acknowledgment or escalation.
+Pre-binding failures have fixed structured fallback logs, without error data;
+they cannot persist through missing bindings. There is no binding reacquisition
+loop. Worker request-handler observation covers only the application boundaries
+above; it does not establish general HTTP 5xx monitoring. Denied admission and
+restore replay remain intentional containment, not incidents.
+
+Alert-store/registration failures log `Support alert state unavailable`; drain
+exceptions log `Support alert drain unavailable`, outside the signal allowlist.
+Unsupported/uncertain transport still latches the existing independent route
+state closed. A broken route cannot notify through itself. Restricted local
+logs/state and external observation must cover this gap; no recursive alert,
+route reopening, new dedup/recovery policy or responder hierarchy is added.
 
 Deploy failure notification cannot safely use this Worker/D1 drain when the
 candidate failed to deploy. #109 also intentionally blocks every apply pending
@@ -77,7 +106,7 @@ prove its own absence. No per-page or self-monitoring call closes that gap.
 
 ## Proposed bounded incident policy
 
-- Key: this stage's independent database plus finite event class (24 possible
+- Key: this stage's independent database plus finite event class (25 possible
   classes today). No request, Reporter, Client, repository or contact dimension.
   Different problems in the same class aggregate and can be hidden by this
   coarse deduplication; Operators still need restricted source logs. This is a

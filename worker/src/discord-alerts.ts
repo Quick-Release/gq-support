@@ -26,6 +26,7 @@ export const SIGNALS = {
   "Support status refresh failed": "refresh_failed",
   "Support status sweep failed": "sweep_failed",
   "Support scheduled tick failed": "tick_failed",
+  "Support request handler failed": "request_handler_failed",
   "Support webhook status refresh failed": "webhook_refresh_failed",
 } as const;
 const DELIVERY_CLASSES = {
@@ -74,10 +75,13 @@ export function collectAlerts() {
   });
   return {
     layer: Logger.layer([logger], { mergeWithExisting: true }),
-    persist: async (db: QueryDatabase, config: AlertConfig, now = Date.now()) => {
+    persist: async (db: QueryDatabase, config: AlertConfig, now = Date.now(), signal?: AbortSignal) => {
       if (!config.enabled || !webhookURL(config.webhook)) return;
-      // Called in an independently admitted background operation, never intake's response path.
-      for (const [signal, event] of events) await observeAlert(db, signal, event.active, event.count, now);
+      // Background-only local alert-state writes, never intake's response path.
+      for (const [name, event] of events) {
+        if (signal?.aborted) return;
+        await observeAlert(db, name, event.active, event.count, now);
+      }
     },
   };
 }
@@ -175,8 +179,14 @@ export const recordAlerts = <A, E, R>(work: Effect.Effect<A, E, R>, main: QueryD
     const collector = collectAlerts();
     return work.pipe(Effect.provide(collector.layer), Effect.onExit(() => persistCollected(collector, main, ledger, config)));
   });
-export const persistCollected = (collector: ReturnType<typeof collectAlerts>, main: QueryDatabase, ledger: QueryDatabase, config: AlertConfig) =>
+export const persistCollected = (collector: ReturnType<typeof collectAlerts>, _main: QueryDatabase, ledger: QueryDatabase, config: AlertConfig) =>
   !config.enabled || !webhookURL(config.webhook) ? Effect.void :
-  contained(main, ledger, Effect.promise(() => collector.persist(ledger, config)), undefined).pipe(
+  // Only independent alert-state writes: no SupportDB reads, provider I/O or
+  // support runtime admission that a failed notification store could strand.
+  // Promise cancellation cannot cancel a dispatched D1 write; late completion
+  // can only update finite alert state, never resume cancelled support work.
+  Effect.promise((signal) => collector.persist(ledger, config, Date.now(), signal)).pipe(
+    Effect.interruptible, Effect.timeoutOption(2_000),
+    Effect.flatMap((result) => result._tag === "None" ? Effect.logError("Support alert state unavailable") : Effect.void),
     Effect.catchCause(() => Effect.logError("Support alert state unavailable")),
   );

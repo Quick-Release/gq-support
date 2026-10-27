@@ -171,11 +171,76 @@ source evidence: #104 reports nightly Chromium, Firefox and counter passes; #106
 reports PHP 8.5 and PHP 8.1 contract/runtime/browser/counter passes. Those results
 belong to their pinned source heads, not this integrated candidate.
 
+## Bounded outer runtime observation follow-up (CODE only)
+
+Based on PR119 `674a5994cf8a43e2a80c19c43d659cab0cf02ad3`, stacked on
+`t3/bounded-discord-custody`. No migration, provider, secret, deployment setting
+or live operation is introduced. This remains a draft integration candidate;
+#20 and #29 remain open and are not MVP accepted.
+
+Boundary inventory before the change:
+
+- Prompt delivery resolved environment/credentials and raw bindings, then ran
+  `recordAlerts(contained(sweepDelivery))`. Its 25s `timeoutOption` and failure
+  catch enclosed that collector, so outer failure logs escaped collection and
+  timeout `None` was silently discarded.
+- Tick resolved raw bindings and derived its title key before `recordAlerts`;
+  its outer catch was outside collection. Scheduled phases individually caught
+  failures inside collection, but all four timeout results were discarded.
+  Persistence preceded the separately caught alert drain.
+- Fetch resolved request/environment/execution context, receiver, services, key
+  and bindings before its request collector. It registered persistence only
+  after successful contained handling. Escaped failure/cancellation bypassed
+  registration. Separately started webhook refresh already caught failures
+  inside its own collector; that catch is preserved.
+
+Newly wired CODE: one invocation collector encompasses failure logging and exit
+finalization once usable bindings exist. Tick key setup and delivery/request
+handler failures are observed without changing original errors or response
+codes. Existing cooperative deadlines (25/5/11/16s scheduled, 25s delivery wake,
+12s webhook refresh) now produce fixed existing failure classes; support work is
+never restarted. Delivery's synchronous binding acquisition precedes its bounded
+actual work; missing bindings remain logs-only. No new request-handler deadline
+is invented. The installation API's existing unexpected-exception 503 catch
+marks a data-free internal flag; only that catch emits the new
+`request_handler_failed` class. Validation/client errors and intentional
+containment 503s remain unalerted. There are now 25 finite classes, with unchanged
+privacy, incident keys, recovery and deduplication rules.
+
+Request finalization registers independent persistence through the existing
+execution context without awaiting I/O, including on failure/cancellation.
+Registration failure cannot change an accepted response. Background/Cron exit
+persistence has a separate two-second cooperative bound and stops dispatching
+further writes on cancellation. Already dispatched D1 writes may finish only
+against finite alert state. These local writes no longer acquire a support
+runtime admission or read SupportDB: an alert-store failure cannot strand a
+support recovery obstruction. Support work, uncertain provider ownership and
+Discord transport retain their original containment/admission checks. Phase
+ordering and persistence-before-drain ordering remain intact. Nominal phase
+bounds total 57s, plus at most the cooperative 2s persistence and 2s transport
+bounds; this does not promise completion before the next tick or cancel
+non-cooperative support cleanup.
+
+Unknown pre-binding failures cannot persist without bindings; fixed fallback
+logs and external observation are required, without a reacquisition loop.
+Alert-drain/store outages remain nonrecursive fixed logs. A failed/uncertain
+Discord route remains latched locally and cannot report its own outage through
+that route. External monitoring still needs to integrate platform 5xx, missing
+Cron, workflow/deployment failures outside the Worker, total-route/pre-binding
+failures and route health; operator receipt remains separate from HTTP 200.
+No external monitor, live routing, acknowledgment or escalation ownership is
+implemented or claimed by this slice.
+
+Validation for this follow-up is recorded below after final checks. Inherited
+PR119 evidence above is not new proof for these runtime changes.
+
 ## Remaining CODE and LIVE gates
 
-#20 still lacks external platform 5xx,
-missing-Cron and deployment-failure observations, outer tick/prompt wrapper failure
-observations and failed-route observations. Existing Discord producer tests do
+#20 still lacks external platform-generated 5xx, absent-Cron, workflow/deployment
+failure outside the Worker, total route/pre-binding failure and operator-receipt
+observations. The bounded outer-runtime follow-up below wires application tick,
+prompt delivery and request failure observations, but cannot close those external
+gaps or prove live Discord routing. Existing Discord producer tests do
 not make #20 accepted. Managed Composer/tested-ZIP MVP upgrades, vvaz **or**
 gmarques authority (no hierarchy), Discord routing and the approved tracing policy
 are settled decisions, not LIVE settings or candidate approval.
