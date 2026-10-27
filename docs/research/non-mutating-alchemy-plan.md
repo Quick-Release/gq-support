@@ -110,7 +110,30 @@ If neither custody option is acceptable, request upstream scoped read access
 and a consistent snapshot/revision contract, then separately review the upgrade.
 No dependency upgrade, new backend/provider or state migration is proposed here.
 
-## Implementation after that decision (not authorized by this document)
+## Approved approach — 2026-10-27
+
+The requesting maintainer approved the recommended direct-backend approach:
+use the existing Alchemy state credential inside a protected planning job,
+restrict the planning wrapper to this project's state, and exclude all other
+deployments/state writers from acquisition through planning and apply.
+The maintainer was informed that the bearer itself grants cross-stack writes.
+This records the custody and writer-exclusion choice, not proof that the window,
+credential delivery, endpoint identity or reviewer configuration is established.
+
+Implementation and local synthetic validation may proceed. Obtain the existing
+credential through private secret entry only after the implementation is ready
+for review. Do not extract a profile or trigger credential recovery/bootstrap.
+Keep the planning client read-only; a later authorized apply must use the exact
+validated native plan and an explicit capability handoff. A broad bearer must
+never be made available to untrusted PR execution.
+
+No particular live plan, infrastructure mutation, deployment, release or staging
+drill is approved by this decision. Candidate-specific approval, private
+credential delivery, verified writer exclusion and authenticated Test F for both
+databases remain separate requirements. The existing apply refusal stays until
+the tested replacement and these prerequisites are established.
+
+## Implementation of the approved approach
 
 1. Factor the current stack declaration into a factory accepting a State layer.
    Keep the default deployment entry using the current backend. Planning uses
