@@ -598,3 +598,74 @@ and #29 remain open. The smallest next CODE step is a reviewed activation and
 continuous-coverage evidence contract; transport can then consume this DTO without
 inventing coverage. The pending parent fallback policy is independent of these
 endpoints.
+
+### Endpoint validation evidence (CODE only)
+
+All commands ran with `/home/valerio/.local/share/mise/installs/node/26.12.1/bin`
+first in PATH (**Node 26.12.1**). Every Vitest run used `--maxWorkers=1`.
+
+- RED: two actual-registration tests failed because readiness/default-disabled
+  snapshot acquired bindings first. Another RED test failed because malformed
+  unrelated support configuration prevented handler initialization. The final
+  registration bypasses that configuration and raw storage, and tests an
+  authenticated snapshot with SupportDB absent and no admission/support/App work.
+- Focused final route/custody/broker/provider run: **103 tests / 5 files passed**.
+  This covers installed-workerd timing-safe verification, current-token rotation,
+  unsupported crypto, fixed errors, query/body/method/cookie/origin denial,
+  cooperative hung-read timeout, full 240-cell coherent D1 output, overflow,
+  malformed/NUL-corrupted data, generation/candidate pins, ordering/staleness,
+  real-wire failure carry and maximum-width byte budget. New custody-name upload
+  rejection tests use otherwise valid metadata and matching bundle digests.
+- Final complete Worker run on frozen runtime commit
+  `9f061351e64067721f45e70b6c1bf12c5d7f0c42`: **1,333 tests / 55 files passed**,
+  **777.25 seconds**. The actual shared native graph/Worker/App custody/broker/
+  output tests exercise both stages and all four Discord/observer mode pairs.
+  Only first-party fake HTTP and fake private inputs are used. App RPC execution
+  is synthetic; its exact environment/input keys exclude observer capability
+  material. No live App identity, binding, setting or receipt is inferred.
+- Offline protocol: **81 tests passed**, retaining prior advancing HTTP pins and
+  late-Cron failure ownership. All **five negative controls** are detected by real
+  assertion failures. The temporary-copy runner now includes the shared actual
+  wire decoder; module-load failure is not accepted as a detected regression.
+- **114 CI-script tests**, runtime/workflow policies, Worker typecheck/lint,
+  root/app JS lint, **three lint controls**, Worker/docs and candidate-reachable
+  history secret scans, and whole-slice whitespace checks pass.
+
+Exploratory runs while source was changing found missing tracked-source copies,
+empty-query handling and configuration-before-readiness defects. Two incomplete
+broad runs were stopped for corrections; none is counted as passing evidence.
+Only the complete frozen-source run above establishes the full-suite result.
+Afterward, only tests/docs changed: the workerd fixture now explicitly asserts
+that correct authentication reaches the ledger callback and wrong authentication
+does not. That focused file passed **17 tests**; typecheck and lint were rerun; runtime/custody source
+was unchanged and the full suite was not repeated.
+
+Reproduction commands (from the repository root):
+
+```sh
+pnpm --filter gq-support-worker exec vitest run --maxWorkers=1
+pnpm --filter gq-support-worker exec vitest run test/observer-http.test.ts test/observer-custody.test.ts test/worker-runtime-alerts.test.ts test/planning-apply-broker.test.ts test/mvp-integration.test.ts --maxWorkers=1
+pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts --maxWorkers=1
+node worker/tools/observer/negative-controls.mjs
+pnpm --filter gq-support-worker typecheck
+pnpm --filter gq-support-worker lint
+pnpm test:ci
+node scripts/ci/runtime-matrix.mjs policy
+node scripts/ci/workflow-policy.mjs
+pnpm lint:js
+pnpm test:lint
+scripts/ci/gitleaks.sh dir worker
+scripts/ci/gitleaks.sh dir docs
+scripts/ci/gitleaks.sh git --log-opts='4f3cffa096f091cda89872b04e5aa6946141c0cb..HEAD' .
+git diff --check 4f3cffa096f091cda89872b04e5aa6946141c0cb
+```
+
+The actual-wire adapter supplies no disabled-drain or maintenance exclusion proof;
+a settled terminal with drain=not_run still cannot count as healthy completion.
+The smallest next step remains a reviewed activation/continuous-coverage and
+exclusion contract, followed by fixed external transport. POLICY fallback,
+scheduler/workflow, durable sender/journal and private LIVE delivery/proof remain
+pending. Receipt is unverified and #20/#29 stay open. No LIVE operation, credential/
+profile access, remote settings/State change, deploy, notification, drill, GitHub comment,
+merge, hosted-check polling/watch, browser, PHP or DDEV work was performed.
+Pushes use `GQ_SUPPORT_SKIP_PRE_PUSH=1`; hosted checks/reviews remain uninspected.

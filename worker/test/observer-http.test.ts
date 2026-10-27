@@ -26,14 +26,18 @@ it("uses the installed workerd timing-safe primitive and never dispatches outbou
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
   let outbound = 0;
   const runtime = new Miniflare(convertV4MiniflareOptions({ modules: true, compatibilityDate: "2026-09-16", bindings: env,
-    script: `${compiled}\nexport default { async fetch(request, env) { return observerRequest(request, env, async () => { throw new Error("binding_canary"); }); } };`,
+    script: `${compiled}\nexport default { async fetch(request, env) {
+      let acquired = false;
+      const result = await observerRequest(request, env, async () => { acquired = true; throw new Error("binding_canary"); });
+      return Response.json({ ...await result.json(), acquired }, { status: result.status });
+    } };`,
     outboundService: async () => { outbound++; throw new Error("unexpected network"); } }));
   try {
     const denied = await runtime.dispatchFetch(url, { headers: { Authorization: `Bearer ${randomBytes(32).toString("hex")}` } });
-    expect(denied.status).toBe(401);
+    expect(denied.status).toBe(401); expect(await denied.json()).toMatchObject({ acquired: false });
     const accepted = await runtime.dispatchFetch(url, { headers: { Authorization: `Bearer ${token}` } });
     expect(accepted.status).toBe(503); // passed auth and reached the deliberately unavailable binding
-    expect(await accepted.json()).toEqual({ code: "observer_unavailable" });
+    expect(await accepted.json()).toEqual({ code: "observer_unavailable", acquired: true });
     expect(outbound).toBe(0);
   } finally { await runtime.dispose(); }
 });
