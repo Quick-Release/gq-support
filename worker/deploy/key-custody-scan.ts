@@ -30,3 +30,14 @@ export async function scanKeyFiles(directory: string, assertClean: ReturnType<ty
   }
   return count;
 }
+
+/** Match both the complete Discord URL and its credential path component. Never print either. */
+export function discordLeakCheck(webhook: string) {
+  const token = webhook.split("/").at(-1);
+  if (!token || token.length < 60) throw new Error("Discord custody configuration invalid");
+  const needles = [Buffer.from(webhook), Buffer.from(token)];
+  return (input: string | Uint8Array) => {
+    const bytes = typeof input === "string" ? Buffer.from(input) : Buffer.from(input);
+    if (needles.some((needle) => bytes.includes(needle))) throw new Error("Discord credential found outside its secret binding");
+  };
+}

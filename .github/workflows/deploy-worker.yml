@@ -53,6 +53,8 @@ jobs:
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
           GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
           GITHUB_WEBHOOK_PREVIOUS_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET }}
+          DISCORD_ALERTS_ENABLED: ${{ vars.SUPPORT_DISCORD_ALERTS_ENABLED == 'true' && 'true' || 'false' }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_ALERT_WEBHOOK_URL }}
           GITHUB_WEBHOOK_DIAGNOSTICS: ${{ inputs.stage == 'staging' && vars.SUPPORT_GITHUB_WEBHOOK_DIAGNOSTICS == 'true' && 'true' || 'false' }}
         run: |
           set -euo pipefail

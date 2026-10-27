@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash, createPublicKey } from "node:crypto";
 import { appConfig, SUPPORT_ACCOUNT_ID } from "../deploy/github-app.ts";
-import { keyLeakCheck, scanKeyFiles } from "../deploy/key-custody-scan.ts";
+import { discordLeakCheck, keyLeakCheck, scanKeyFiles } from "../deploy/key-custody-scan.ts";
 import * as Effect from "effect/Effect";
 import * as Alchemist from "alchemy/Alchemist";
 import * as Cloudflare from "alchemy/Cloudflare";
@@ -16,7 +16,9 @@ try {
   const pem = process.env.GITHUB_APP_PRIVATE_KEY;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!pem || !token) throw new Error();
-  const assertClean = keyLeakCheck(pem);
+  const assertKeyClean = keyLeakCheck(pem);
+  const assertDiscordClean = process.env.DISCORD_ALERT_WEBHOOK_URL ? discordLeakCheck(process.env.DISCORD_ALERT_WEBHOOK_URL) : null;
+  const assertClean = (input: string | Uint8Array) => { assertKeyClean(input); assertDiscordClean?.(input); };
   const profile = process.env.ALCHEMY_PROFILE ?? "default";
   if (!/^[A-Za-z0-9_-]+$/.test(profile)) throw new Error();
   step = "state authentication";
@@ -51,10 +53,14 @@ try {
   const settingsResponse = await fetch(`${root}/settings`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
   if (!settingsResponse.ok) throw new Error();
   const settings = await settingsResponse.json() as {
-    success: boolean; result: { bindings: Array<{ name: string; type: string; text?: string }> };
+    success: boolean; result: { observability?: { traces?: { enabled?: boolean } }; bindings: Array<{ name: string; type: string; text?: string }> };
   };
   const binding = settings.result.bindings.find((entry) => entry.name === "GITHUB_APP_PRIVATE_KEY");
   if (!settings.success || binding?.type !== "secret_text" || binding.text !== undefined) throw new Error();
+  if (process.env.DISCORD_ALERTS_ENABLED === "true") {
+    const discord = settings.result.bindings.find((entry) => entry.name === "DISCORD_ALERT_WEBHOOK_URL");
+    if (discord?.type !== "secret_text" || discord.text !== undefined || settings.result.observability?.traces?.enabled !== false) throw new Error();
+  }
   assertClean(JSON.stringify(settings));
   step = "Worker bundle";
   const content = await fetch(`${root}/content/v2`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
