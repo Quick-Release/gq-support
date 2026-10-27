@@ -244,7 +244,9 @@ pins account/stage/candidate/activation/generation and exact workflow expectatio
 response fields cannot authenticate themselves. Public output is at most 2 KiB
 and excludes private identities, topology, raw content and error causes.
 
-Snapshot/heartbeat/readiness wire contracts remain **proposed, with no producer**.
+Snapshot/readiness wire contracts remain **proposed and unwired**. The internal
+Cron producer CODE below now records local progress; it supplies no external read
+capability or activation/coverage proof.
 Workflow/deployment JSON is explicitly a normalized projection, not a fabricated
 complete provider response. Only the selected documented analytics envelope has a
 wire projection; its output still requires independently trusted provenance.
@@ -273,12 +275,13 @@ fixtures and hygiene checks, not live source/transport or operational proof.
 HTTP/TLS/redirect/private-host enforcement and streaming byte limits are unwired;
 protocol byte limits apply before JSON decoding of supplied byte arrays.
 
-Minimum next CODE slice is still the producer: preserve controller scheduled UTC
-minute; persist bounded start and settled per-phase terminal results plus drain;
-retain attempt/coverage/overflow and maintenance generations; add a separately
-scoped authenticated aggregate snapshot and data-free readiness before support
-admission. Test actual scheduled callback failures/containment/binding loss and
-out-of-order/concurrent writes, without altering restore/provider ownership.
+The internal producer slice below now preserves controller UTC minute, start,
+settled phase/drain results, attempts, overflow and maintenance generations.
+The next CODE slice is a separately scoped authenticated aggregate reader and
+data-free readiness before support admission, with independently verified
+activation and an explicit partial/coverage contract. The 100-row consumer must
+not silently truncate the 240-row producer. Restore/provider ownership remains
+outside observation authority.
 Only after that come trusted wire adapters, LIVE identity/scope/schema/lag/sampling
 proof and separately authorized drills. Durable journal/runner survival and human
 receipt proof remain separate prerequisites before sending or scheduling.
@@ -439,7 +442,7 @@ bounded pagination with an audited coherent coverage contract, or return a
 smaller explicitly **partial** window; it cannot truncate 240 to 100 and claim
 complete coverage. Sticky partial/lost evidence needs an explicit reconciliation
 contract before it can be cleared. The current decoder has no field for the
-producer's partial marker or unknown activation; it must not be fed fabricated
+producer's terminal outcome, partial marker or unknown activation; it must not be fed fabricated
 activation or complete provenance. Real external source/authentication is still
 required. #20 and #29 remain open; all LIVE manifests, permissions, reviewers,
 runner/exclusion, credentials, approvals, RPC/Test F and drills remain unverified.

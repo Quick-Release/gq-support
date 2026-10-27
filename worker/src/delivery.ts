@@ -58,7 +58,7 @@ const suspendIfUnsafe = (options: DeliveryOptions, row: DeliveryRow, error: { re
       Effect.annotateLogs({ repository: row.repository_id, reason, alert: true })))) : Effect.void;
 };
 const log = (row: Pick<DeliveryRow, "id" | "request_id" | "generation"> & { owner?: string | null }, outcome: string, alert = false) =>
-  (alert || !["Delivered", "Reconciled", "NotApplied", "Superseded"].includes(outcome) ? notePhaseFailure : Effect.void).pipe(Effect.andThen(
+  (alert || !["Delivered", "Reconciled", "NotApplied", "Superseded", "MetadataRepair"].includes(outcome) ? notePhaseFailure : Effect.void).pipe(Effect.andThen(
   (alert ? Effect.logError("Support delivery requires review") : Effect.logInfo("Support delivery outcome")).pipe(
     Effect.annotateLogs({ request: row.request_id, intent: row.id, generation: row.generation,
       ...(row.owner ? { attempt: row.owner } : {}), outcome, alert }),
@@ -214,6 +214,7 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         yield* finish({ state: 'delivered', next: repaired || review || (!Result.isSuccess(result) && !retryable) || now() >= row.created_at + DAY
           ? null : Result.isFailure(result) && result.failure._tag === 'RateLimited' ? result.failure.until : now() + (Result.isSuccess(result) ? 10_000 : 60_000),
           repair: !repaired, providerUntil: Result.isFailure(result) && result.failure._tag === 'RateLimited' ? result.failure.until : undefined, error: Result.isFailure(result) ? result.failure._tag : result.success._tag });
+        if (!repaired) yield* notePhaseFailure;
         yield* log(row, 'MetadataRepair', review || (Result.isFailure(result) && !retryable));
         return;
       }

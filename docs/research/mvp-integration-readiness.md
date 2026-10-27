@@ -291,11 +291,11 @@ actual head branch is `t3/outer-runtime-failures`, not `t3/outer-runtime-alerts`
 The [offline protocol/evaluator](../../worker/tools/observer/README.md) now has
 77 passing isolated tests and five detected broken variants (Node 26.12.1, one
 Vitest worker). It adds strict proposed contracts, finite verdicts and bounded
-in-memory failure carry only. Snapshot/heartbeat/readiness remain proposed until
-the next producer slice implements controller-minute start, settled phase/drain
-results, maintenance/activation/coverage and scoped read-only endpoints. No running
-observer, workflow, scheduler, heartbeat producer, HTTP transport or live
-configuration is implemented or enabled. Wire identity/scope/lag/sampling, runner
+in-memory failure carry only. The internal producer follow-up below now records
+controller-minute start and settled phase/drain results in the maintenance
+generation. Snapshot/readiness endpoints, activation/coverage proof and scoped
+read-only capabilities remain unwired. No running external observer, workflow,
+scheduler, HTTP transport or live configuration is implemented or enabled. Wire identity/scope/lag/sampling, runner
 custody, receipt reconciliation and authorized LIVE proof remain required. A protected persistent journal is a prerequisite, not an
 assumed property of hosted Actions runners. GitHub failure visibility is not an
 approved or verified fallback notification route. The parent visibility versus
