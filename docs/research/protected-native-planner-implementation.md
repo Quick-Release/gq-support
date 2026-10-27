@@ -1114,3 +1114,37 @@ Initial fixture runs exposed the native checkpoint version/default-mode form,
 terminal dependency ordering and the existing `checksums.txt` sidecars; the
 corrected profile handles those explicitly. These failures were resolved before
 the passing runs above; no guard was disabled or live prerequisite substituted.
+
+### Review correction: retain unresolved writer ownership
+
+The independent review found one P1: the entry's unconditional cleanup removed
+its local lock after an accepted D1 request lost its response. A participating
+local writer could then reacquire the still-valid window while remote work
+remained unresolved. Standards review found no actionable violations.
+
+The entry now runs the entire retained continuation inside the local window's
+one-shot `runApply`. It marks ownership for retention before invoking any
+continuation code and permits automatic removal only after the continuation
+returns successfully and the window still passes its identity/time checks.
+Any exception, cancellation, expired window, lost response or cleanup racing
+an unfinished continuation preserves the marker while closing its descriptor.
+A repeated close is harmless; another attempt is refused. Preflight failures
+before entering the continuation may still release a valid lock normally.
+This intentionally retains the lock even for a continuation failure before a
+remote write: remote settlement is never inferred from a failed run.
+
+Neither expiry nor a different window ID permits reacquisition over the marker.
+There is no automated reconciliation, expiry removal or force-clear command.
+vvaz or gmarques must keep every external writer excluded, establish actual
+remote D1/State/Worker outcomes and completion of in-flight work, and approve a
+separately reviewed incident recovery before removal/replacement of the marker
+and a new candidate. A local tmpfs marker cannot survive runner destruction or
+coordinate other runners: the external all-writer exclusion remains required
+through incident reconciliation, including runner loss. Never use a new runner,
+reboot or temporary-directory cleanup to bypass unresolved ownership.
+
+Three focused regressions initially failed before this API existed. After the
+fix, 144 evidence/broker/additive-policy tests passed, including lost-response
+reacquisition, fresh-window refusal after expiry, cleanup during pending work,
+successful release and one-shot behavior. Worker typecheck and affected ESLint
+passed. These are local lock/transport proofs, not live settlement evidence.

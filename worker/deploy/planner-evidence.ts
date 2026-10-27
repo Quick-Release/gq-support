@@ -56,14 +56,24 @@ export function exclusiveLocalWindow(path: string, window: OwnerWindow, now = Da
   // local authorized entry. Existing/stale lock refuses; never steal a lease.
   const fd = openSync(path, "wx", 0o600);
   const original = fstatSync(fd);
-  let closed = false;
+  let closed = false, attempted = false, retain = false;
   const check = () => {
     const current = lstatSync(path);
     requireEvidence(!closed && !current.isSymbolicLink() && current.ino === original.ino && current.dev === original.dev &&
       current.uid === process.getuid?.() && (current.mode & 0o777) === 0o600 && now() >= window.startsAt && now() < window.expiresAt);
   };
-  return { binding: digest(window), check, close: () => {
+  return { binding: digest(window), check,
+    // Enter before the retained continuation can dispatch anything. A failed
+    // continuation may have an accepted remote write with a lost response.
+    // Keep its marker even when no write can be proved; only full success
+    // permits automatic cleanup. There is no timeout or force-clear path.
+    runApply: async <T>(apply: () => Promise<T>): Promise<T> => {
+      check(); requireEvidence(!attempted); attempted = true; retain = true;
+      const result = await apply();
+      check(); retain = false;
+      return result;
+    }, close: () => {
     if (closed) return;
-    try { check(); unlinkSync(path); } finally { closed = true; closeSync(fd); }
+    try { if (!retain) { check(); unlinkSync(path); } } finally { closed = true; closeSync(fd); }
   } };
 }
