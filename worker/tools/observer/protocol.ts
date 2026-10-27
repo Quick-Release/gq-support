@@ -1,3 +1,4 @@
+import { assessSnapshot, type SnapshotClaims } from "./snapshot-evidence.ts";
 import { decodeObserverSnapshot, observerOutcomes, terminalOutcomes } from "../../src/observer-snapshot.ts";
 /** Offline only. Original normalized fixture contracts remain proposals. The v1
  * snapshot branch adapts the actual producer wire; other sources still require
@@ -36,14 +37,16 @@ export interface Read {
   pages: number; body: Uint8Array;
   /** Set by a future fixed-route transport, never by JSON health assertions. */
   vantage?: "available" | "unavailable";
+  /** Independently verified private transport pins; not snapshot JSON. */
+  deployment?: string; version?: string;
 }
 const outcomes = ["ok", "failed", "timed_out", "contained", "not_run"] as const;
 type Outcome = typeof outcomes[number];
 type Phases = { delivery: Outcome; cleanup: Outcome; refresh: Outcome; sweep: Outcome; drain: Outcome };
-interface Tick { slot: number; attempt: number; start: number; terminal: number | null; phases: Phases | null; outcome?: "settled" | "failed" | "interrupted" | null }
+interface Tick { candidate: string; generation: number; slot: number; attempt: number; start: number; terminal: number | null; phases: Phases | null; outcome?: "settled" | "failed" | "interrupted" | null }
 interface Snapshot {
   generated: number; stage: Stage; candidate: string; activation: number | null; generation: number;
-  from: number; to: number; storage: "ok" | "unavailable"; ticks: Tick[]; coverageUnknown?: boolean;
+  from: number; to: number; storage: "ok" | "unavailable"; ticks: Tick[]; coverageUnknown?: boolean; claims?: SnapshotClaims;
 }
 interface Workflow extends Expectation {
   created: number; started: number | null; updated: number;
@@ -102,7 +105,7 @@ function context(c: Context): void {
     if (time(r.from, c.now) >= time(r.to, c.now) || integer(r.generation) > c.generation) bad();
   }
 }
-function decode(source: Source, v: unknown, c: Context, r: Read): Payload {
+function decode(source: Source, v: unknown, c: Context, r: Read, review?: unknown): Payload {
   if (source === "http") {
     object(v, []);
     return { result: choice(r.vantage, ["available", "unavailable"]) };
@@ -140,7 +143,8 @@ function decode(source: Source, v: unknown, c: Context, r: Read): Payload {
   if (v && typeof v === "object" && Object.hasOwn(v, "version")) {
     const wire = decodeObserverSnapshot(v, r.at);
     if (wire.stage !== c.stage || wire.candidate !== c.candidate || wire.generation !== c.generation) return bad();
-    const ticks: Tick[] = wire.ticks.filter(t => t[0] === c.stage && t[1] === c.candidate && t[2] === c.generation).map(t => ({
+    const ticks: Tick[] = wire.ticks.map(t => ({
+      candidate: t[1], generation: t[2],
       slot: t[3], attempt: t[4], start: t[5], terminal: t[6], outcome: t[7] === null ? null : terminalOutcomes[t[7]],
       phases: { delivery: observerOutcomes[t[8]], cleanup: observerOutcomes[t[9]],
         refresh: observerOutcomes[t[10]], sweep: observerOutcomes[t[11]], drain: observerOutcomes[t[12]] },
@@ -148,7 +152,7 @@ function decode(source: Source, v: unknown, c: Context, r: Read): Payload {
     // The producer has no activation/continuous-coverage witness. Always unknown,
     // even when a caller accidentally labels transport coverage complete.
     return { generated: wire.generated, stage: wire.stage, candidate: wire.candidate, activation: null,
-      generation: wire.generation, from: r.from, to: r.to, storage: "ok", ticks, coverageUnknown: true };
+      generation: wire.generation, from: r.from, to: r.to, storage: "ok", ticks, coverageUnknown: true, claims: assessSnapshot(wire, c, r, review) };
   }
   const o = object(v, ["generated", "stage", "candidate", "activation", "generation", "from", "to", "storage", "ticks"]);
   const generated = time(o.generated, r.at), from = time(o.from, generated), to = time(o.to, generated);
@@ -166,7 +170,7 @@ function decode(source: Source, v: unknown, c: Context, r: Read): Payload {
       phases = { delivery: choice(p.delivery, outcomes), cleanup: choice(p.cleanup, outcomes),
         refresh: choice(p.refresh, outcomes), sweep: choice(p.sweep, outcomes), drain: choice(p.drain, outcomes) };
     }
-    return { slot, attempt, start, terminal, phases };
+    return { candidate: c.candidate, generation: c.generation, slot, attempt, start, terminal, phases };
   });
   if (new Set(ticks.map(t => `${t.slot}/${t.attempt}`)).size !== ticks.length) bad();
   return { generated, from, to, stage: c.stage, candidate: c.candidate, activation: c.activation,
@@ -178,7 +182,7 @@ function sameExpectation(a: Expectation, b: Expectation): boolean {
 }
 /** Check bytes BEFORE JSON. Batch/row/page bounds are hard stops, with fixed errors.
  * Partial positive error observations survive, but partial input cannot prove health. */
-export function decodeBatch(c: Context, reads: readonly Read[]): Batch {
+export function decodeBatch(c: Context, reads: readonly Read[], snapshotReview?: unknown): Batch {
   try { context(c); } catch { return { evidence: [], invalid: true }; }
   if (reads.length > 32 || reads.reduce((n, r) => n + r.body.byteLength, 0) > 1024 * 1024)
     return { evidence: [], invalid: true };
@@ -198,7 +202,7 @@ export function decodeBatch(c: Context, reads: readonly Read[]): Batch {
       pages.set(r.source, (pages.get(r.source) ?? 0) + r.pages);
       if (r.source === "workflow" && (pages.get(r.source) ?? 0) > 3) bad();
       if (body.byteLength > 65536 || r.status !== "ok") bad();
-      payload = decode(r.source, JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(body)), c, r);
+      payload = decode(r.source, JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(body)), c, r, snapshotReview);
     } catch { invalid = true; }
     evidence.push({ read: provenance, payload });
   }
@@ -208,7 +212,7 @@ interface Cell {
   active: boolean; count: number; first: number; last: number; watermark: number; observedAt: number;
   candidate: string; generation: number;
 }
-interface CronFailure { slot: number; attempt: number; terminal: number; open: boolean }
+interface CronFailure { candidate: string; generation: number; slot: number; attempt: number; terminal: number; open: boolean }
 interface HttpSample { observed: number; at: number; failed: boolean; candidate: string; generation: number }
 /** In-memory carry only. No persistence, durable ownership, send permission or receipt. */
 export interface State {
@@ -277,22 +281,22 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
     }
     if (r.source === "snapshot") {
       const s = p as Snapshot;
-      if (!fresh(e, c) || s.generated < c.now - proposals.freshness || s.storage !== "ok") { telemetryUnknown = true; continue; }
+      if (!fresh(e, c) || s.storage !== "ok") { telemetryUnknown = true; continue; }
       let incomplete = false, contained = false;
       for (const t of s.ticks) {
         const values = t.phases && Object.values(t.phases);
         if (t.outcome === "failed" || t.outcome === "interrupted" || values?.some(v => v === "failed" || v === "timed_out") ||
           (t.terminal === null && c.now - t.start >= proposals.completion)) {
           put("cron_incomplete", "incident", e, t.slot); incomplete = true;
-          const known = cronFailures.findIndex(x => x.slot === t.slot && x.attempt === t.attempt);
-          const failure = { slot: t.slot, attempt: t.attempt, terminal: t.terminal ?? r.at, open: t.terminal === null };
+          const known = cronFailures.findIndex(x => x.candidate === t.candidate && x.generation === t.generation && x.slot === t.slot && x.attempt === t.attempt);
+          const failure = { candidate: t.candidate, generation: t.generation, slot: t.slot, attempt: t.attempt, terminal: t.terminal ?? r.at, open: t.terminal === null };
           if (known < 0) {
             if (cronFailures.length === 100) cronOverflow = true;
             else cronFailures.push(failure);
           } else if (t.terminal !== null && cronFailures[known].open) cronFailures[known] = failure;
         } else if (values?.some(v => v === "contained" || v === "not_run")) contained = true;
       }
-      if (s.coverageUnknown || !complete(e, c)) { telemetryUnknown = true; continue; }
+      if (s.generated < c.now - proposals.freshness || s.coverageUnknown || !complete(e, c)) { telemetryUnknown = true; continue; }
       const end = Math.floor(c.now / minute) * minute - 2 * minute, start = end - 10 * minute;
       const covered = s.from <= start && s.to >= end && c.activation <= start;
       const expected = Array.from({ length: 10 }, (_, i) => start + i * minute).filter(t => !excluded(t));
@@ -301,7 +305,7 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
       else if (covered && !expected.length) put("cron_start_missing", "excluded", e);
       const allOk = s.ticks.length > 0 && s.ticks.every(t => t.terminal !== null && t.phases && Object.values(t.phases).every(v => v === "ok"));
       const reconciled = !cronOverflow && cronFailures.every(f => s.ticks.some(t =>
-        t.slot === f.slot && (t.attempt > f.attempt || (f.open && t.attempt === f.attempt)) && t.terminal !== null && t.terminal > f.terminal &&
+        t.candidate === f.candidate && t.generation === f.generation && t.slot === f.slot && (t.attempt > f.attempt || (f.open && t.attempt === f.attempt)) && t.terminal !== null && t.terminal > f.terminal &&
         t.phases && Object.values(t.phases).every(v => v === "ok")));
       if (!incomplete && reconciled && allOk && covered && expected.length > 0 && expected.every(slot => s.ticks.some(t => t.slot === slot))) put("cron_incomplete", "clear", e);
       else if (!incomplete && covered && expected.length === 0) put("cron_incomplete", "excluded", e);
