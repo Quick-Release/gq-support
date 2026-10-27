@@ -135,7 +135,9 @@ signals from #57's freshness targets. Proposed/unapproved routing keys are stage
 (migration); suppress repeats during one incident, preserve first/last occurrence
 and count, and send recovery/acknowledgment through the approved existing route.
 The user must approve routing, escalation and deduplication policy before wiring.
-No alert destination or service objective is assigned here.
+Discord webhook delivery is the confirmed incident route below; the private
+webhook URL, delivery configuration and live acknowledgment remain unverified.
+No service objective is assigned here.
 
 Measure accepted-report durability, GitHub delivery delay and Support status
 freshness independently; there is no client-visible reply stream in the MVP.
@@ -300,8 +302,11 @@ The requesting maintainer confirmed the following in the orchestration thread:
 - **MVP updates:** managed Composer/tested-ZIP upgrades with deliberate
   per-installation upgrades. A native WordPress updater is outside the MVP gate.
 - **Incident authority:** vvaz or gmarques may handle incidents and operational
-  recovery. Neither a primary/backup ordering nor an alert destination was
-  specified; do not invent them or infer notification permission.
+  recovery. No primary/backup ordering was specified; do not invent one.
+- **Incident route:** Discord webhook delivery, confirmed by the requesting
+  maintainer. Obtain the URL through private secret entry when wiring is ready;
+  never commit it or request it in ordinary chat. Naming the route does not
+  establish successful delivery or authorize test notifications.
 - **Release authority:** vvaz or gmarques may provide explicit approval for each
   production rollout. Naming approvers does not approve a particular rollout.
 - **Pilot compatibility:** retain support for every enrolled v1 plugin version
@@ -314,8 +319,9 @@ Client contact details and restricted operational records outside this repositor
 
 ## Remaining decision frontier
 
-- Select the existing incident destination and restricted operational record.
-  Alert routing cannot be enabled until the actual destination is confirmed.
+- Record the restricted operational inventory location. Discord is the selected
+  incident destination; obtain its webhook privately during implementation and
+  verify scoped alert delivery before claiming readiness.
 - Confirm whether vvaz and gmarques are peers or have a primary/backup order;
   define acknowledgment/escalation coverage without inventing a service promise.
 - Choose enforcement for per-rollout approval: required GitHub Environment
