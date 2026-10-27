@@ -1,5 +1,10 @@
 # Operational readiness evidence for #20
 
+Current execution-review entry point: [MVP staging acceptance packet](mvp-staging-acceptance-packet.md).
+It pins PR #132 evidence, current source prerequisites, private attestations and
+finite drills; it grants no live authority or acceptance. Historical assessments
+below retain their original scope.
+
 Assessment dated 2026-10-27 against `main` commit
 `6e2a792fe74f95a1be3e367bab97909443039ea2` (merged lifecycle PR #103).
 [Issue #20](https://github.com/Quick-Release/gq-support/issues/20), including its
