@@ -52,6 +52,19 @@ also needs source/migration digests, serialization against concurrent applies,
 and a fresh human authorization. Initial creation/adoption needs a separately
 reviewed procedure; do not silently treat missing state as safe creation.
 
+## State-access investigation follow-up
+
+The [beta.83 feasibility report](../research/non-mutating-alchemy-plan.md)
+identifies a supported explicit HTTP State-service seam and tests its reads
+without bootstrap/recovery. It also proves why native bulk export is not a
+complete authoritative snapshot: missing rows are skipped, outputs are omitted,
+and the wire state schema is permissive. The store bearer has write and
+cross-stack authority; no approved read-only credential/snapshot or writer
+exclusion procedure is available. The report specifies two bounded custody
+options and exact implementation prerequisites. It does **not** implement a
+release adapter or lift this refusal. Its local protocol tests are not native
+replacement/deletion/additive acceptance or authenticated Test F.
+
 ## Candidate and approval boundaries
 
 Plugin publication now runs only on a manual dispatch from `main`, within the
