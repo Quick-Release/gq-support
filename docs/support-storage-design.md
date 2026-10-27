@@ -148,4 +148,14 @@ The Slot → Client relation lives in code, so D1 cannot enforce it with a forei
 
 - **Reads are primary-only.** Read replication stays off; revisit only if the latency budget is missed, and then use `first-primary` sessions for every authorization and idempotency path. A new request is visible to the Reporter immediately, from the create response.
 - **Migrations** are forward-only expand/contract steps in `worker/migrations/`, applied by Alchemy on deploy. A rollback means deploying the previous Worker against the expanded schema, never a down-migration.
-- **Restores** follow ADR 0016.
+- **Restores** follow ADR 0016 and the [exclusive containment runbook](runbooks/restore-containment.md).
+  The independent ledger owns admission, outstanding executions and maintenance
+  audit; migration `0003_maintenance.sql` adds these tables without changing old
+  migrations. Ingress, timed background phases, CLI commands and provider writes
+  register against its current mode. No admission expires. Restore recording and
+  replay require containment with zero outstanding owners; replay forces delivery
+  off and explicit release requires the verified generation. No cached or stale
+  restore verdict, auto-replay or restored enabled bit grants admission. A lost
+  owner or unresolved remote write is an obstruction, never a safe-to-restore
+  signal. See the runbook for privacy availability, version rollout and live-proof
+  limits.

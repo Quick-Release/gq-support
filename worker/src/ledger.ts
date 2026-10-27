@@ -54,11 +54,6 @@ const CHUNK = 50;
 const MIRROR_SKEW_MS = 300_000;
 /** A full pass also covers any write that left `changed_at` at its default. */
 const FULL_MIRROR_MS = 86_400_000;
-/** How long a passed restore check is reused before the epochs are compared again. */
-const VERDICT_MS = 60_000;
-/** A failed recheck still trusts a verdict this recent. */
-const STALE_VERDICT_MS = 600_000;
-
 const referenceOf = (kind: LedgerKind, image: LedgerImage) => TABLES[kind].key.map((column) => String(image[column])).join(":");
 /** A full image with every mirrored column, so a replay never mixes two versions of a row. */
 export const imageOf = (kind: LedgerKind, row: Readonly<Record<string, unknown>>, defaults: LedgerImage = {}): LedgerEntry => {
@@ -83,7 +78,9 @@ export const ledgerStore = (ledger: QueryDatabase) => ({
       AND reference IN (?, ?)`).bind(`slot:${slot}`, `request:${requestId}`).first()) !== null;
   },
   async epoch() {
-    return (await ledger.prepare("SELECT epoch FROM ledger_epoch WHERE id = 1").first<{ epoch: number }>())?.epoch ?? 0;
+    const row = await ledger.prepare("SELECT epoch FROM ledger_epoch WHERE id = 1").first<{ epoch: number }>();
+    if (!row) throw new Error("Missing ledger epoch");
+    return row.epoch;
   },
   /** Removals outlive the 30-day Time Travel window, then go. */
   async compact(now: number, keepMs: number) {
@@ -182,23 +179,13 @@ export const replayLedger = async (main: QueryDatabase, ledger: QueryDatabase, e
   await inChunks(main, work);
 };
 
-/**
- * The gate before any traffic or sweep: if the Operator recorded a restore
- * since the main database last replayed, replay first. The verdict is cached
- * for a minute; a failed check trusts a verdict up to ten minutes old.
- */
-export const restoreGate = () => {
-  let verdict: { epoch: number; at: number } | undefined;
-  return async (mainDb: QueryDatabase, ledgerDb: QueryDatabase, now: number): Promise<boolean> => {
-    if (verdict && now - verdict.at < VERDICT_MS) return true;
-    try {
-      const recorded = await ledgerStore(ledgerDb).epoch();
-      const replayed = (await mainDb.prepare("SELECT epoch FROM restore_state WHERE id = 1").first<{ epoch: number }>())?.epoch ?? 0;
-      if (replayed < recorded) await replayLedger(mainDb, ledgerDb, recorded, now);
-      verdict = { epoch: recorded, at: now };
-      return true;
-    } catch {
-      return verdict !== undefined && now - verdict.at < STALE_VERDICT_MS;
-    }
-  };
+/** Fresh primary checks only. Replay is an exclusive Operator action under containment. */
+export const restoreGate = () => async (mainDb: QueryDatabase, ledgerDb: QueryDatabase, _now: number): Promise<boolean> => {
+  try {
+    const recorded = await ledgerStore(ledgerDb).epoch();
+    const replayed = (await mainDb.prepare("SELECT epoch FROM restore_state WHERE id = 1").first<{ epoch: number }>())?.epoch;
+    return replayed === recorded;
+  } catch {
+    return false;
+  }
 };

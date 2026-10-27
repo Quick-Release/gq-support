@@ -48,18 +48,18 @@ credential; application and deployment processes receive the child token.
 
 ## Operator commands
 
-Use the database ID from the intended Alchemy stage's outputs and the GETQUICK
+Use both database IDs from the intended Alchemy stage's outputs and the Tipme
 Cloudflare account ID, with `--stage` naming the same stage: the CLI checks
-Slots against that stage's mappings. The CLI requires all three explicitly and always targets
+Slots against that stage's mappings. The CLI requires all four explicitly and always targets
 remote D1. Run from `worker/` using your own Wrangler login or Cloudflare
 credentials with D1 read/write access; no operator credential is bound to the
 Worker and there is no operator HTTP endpoint.
 
 ```sh
 pnpm exec wrangler login
-pnpm operator enroll shop/production --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator status shop/production --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator revoke shop/production --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator enroll shop/production --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator status shop/production --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator revoke shop/production --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 `enroll` prints a grouped base32 code with 128 random bits, valid for 30 minutes.
@@ -81,9 +81,9 @@ write only sweep bookkeeping and a counts-only `status_audit` row; the
 [missed-webhook runbook](../docs/runbooks/missed-webhooks.md) gives the order:
 
 ```sh
-pnpm operator status-health --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator status-reconcile <ISO-outage-start> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator status-repair <ISO-window-start> <ISO-window-end> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator status-health --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator status-reconcile <ISO-outage-start> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator status-repair <ISO-window-start> <ISO-window-end> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 `status-health` reports the due refresh backlog, each repository's last sweep,
@@ -109,17 +109,16 @@ pnpm operator erase shop/production <opaque-actor> <rs_reference> --stage <stage
 pnpm operator offboard shop/production <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
-After a Time Travel restore of `SupportDB`, record it before anything else:
-
-```sh
-pnpm operator restore-recorded <opaque-actor> time-travel-restore --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
-```
-
-Each Worker then answers `503` and skips its sweeps until it has replayed the
-ledger: suppressions, erasures and cleanup records come back, restored rows
-under cleanup lose their text, suspensions and key revocations are reapplied
-(never lifted) and every request that is not delivered becomes
-`outcome-unknown`, reconciled by its marker.
+Restores require [exclusive containment](../docs/runbooks/restore-containment.md).
+All CLI commands now require both database IDs. Use `maintenance-enter`, inspect
+`maintenance-status`, and complete an exclusive `maintenance-mirror` before any
+approved restore. Restore SupportDB only, then `restore-recorded`,
+`maintenance-replay`, verify and explicitly `maintenance-release` with the current
+generation. Replay is an Operator action; normal Workers never replay or trust
+cached/stale restore verdicts. Delivery is forced off by replay and needs separate
+approval to enable. Lost execution or an uncertain provider write never expires
+into a drained state; stop for investigation. These commands do not authorize a
+live restore or deployment. See the runbook for all prerequisites and abort rules.
 
 ## HTTP behavior
 
@@ -255,9 +254,9 @@ requires review because it has no pinned provider installation.
 
 The migration starts `delivery_control.enabled = 0`. After rollout/restore checks,
 an independently authenticated Operator can enable the intended database with
-`UPDATE delivery_control SET enabled = 1 WHERE id = 1`. Disable it before restore
-or incident recovery. This is a dispatch gate, not a complete restore procedure:
-#20 owns restore suppression replay, and #46 owns erasure/retention integration.
+`UPDATE delivery_control SET enabled = 1 WHERE id = 1`. This is a dispatch gate. Use the
+[exclusive containment procedure](../docs/runbooks/restore-containment.md) for a
+restore; disabling dispatch alone does not fence ingress or background work.
 Do not enable production report delivery until those gates are satisfied.
 `delivery_suppression` denies new creates/repairs by Slot or request; removing a
 WordPress key alone does not cancel accepted reports.
@@ -288,7 +287,7 @@ are log events for operations to route, not outbound notifications.
 An independent Operator may resume a **failed**, confirmed non-created request:
 
 ```sh
-pnpm operator resume shop/production int_<id> 2026-10-18T12:00:00Z operator-7 permissions-restored --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator resume shop/production int_<id> 2026-10-18T12:00:00Z operator-7 permissions-restored --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 Supply an opaque actor, an explicit deadline within the next 24 hours and one of
@@ -331,7 +330,7 @@ including during individual refreshes. After a passing sweep later than the
 suspension, an Operator runs:
 
 ```sh
-pnpm operator unsuspend shop/production operator-7 verified-private --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator unsuspend shop/production operator-7 verified-private --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 The evidence must match the recorded cause: `verified-private` (public),
@@ -402,3 +401,14 @@ response bodies or tokens enter them.
 
 Verification: `pnpm exec vitest run test/status-refresh.test.ts` exercises the
 scheduled entry, local workerd D1, fake GitHub and the signed installation API.
+
+
+## Discord incident notifications (disabled candidate)
+
+The [Discord runbook](../docs/runbooks/discord-alerts.md) describes the exact
+producer allowlist, proposed aggregation/recovery policy, independent-ledger
+containment and private provisioning. `SUPPORT_DISCORD_ALERTS_ENABLED` defaults
+false; no URL or live receipt is established. Automatic Worker traces are disabled
+in this candidate because outbound fetch spans would expose the webhook credential
+in its URL path; structured Logs remain enabled. Review that tradeoff before
+rollout. #108 is required; #109's apply block remains in force.
