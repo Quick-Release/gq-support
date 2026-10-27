@@ -1,4 +1,4 @@
-# Observer protocol and fixed HTTPS library
+# Observer protocol, fixed HTTPS and authenticated review library
 
 Library only; no monitor entry point, ambient network dispatch, scheduler, persistence or send.
 Based on the [observer design](../../../docs/research/external-incident-observer.md).
@@ -104,12 +104,13 @@ section of the observer design for exact schema, byte budget and custody order.
 ## Bounded private activation review (this slice)
 
 `validateSnapshotReview(bytes, custody, now)` accepts at most 8 KiB of exact-schema
-JSON. `custody` must come from a future **private authenticated review loader**,
+JSON. `custody` must come from a **private authenticated review loader**,
 not HTTP, manifest self-assertions, a caller boolean or Alchemy State. Its SHA-256
 binds the exact bytes; its account/stage/candidate/deployment/version/generation
 and vvaz-or-gmarques restricted-record digest must match. Digest integrity is
-not authentication. No real attestation or loader exists in this slice. A loader must refuse
-reissue/replay across processes; there is no durable replay journal here.
+not authentication. The authenticated read loader below verifies actor approval;
+real target/activation attestation and durable reissue/replay refusal remain external.
+There is no durable replay journal here.
 
 Pass the resulting process-local, single-use capability as the third argument to
 `decodeBatch`. The actual v1 adapter attaches private `claims` to its snapshot
@@ -163,8 +164,9 @@ cannot establish stage from its spelling: authenticated stage-to-origin/Worker
 binding, DNS resolution safety, Cloudflare account ownership and current single
 version/deployment/candidate identity remain **independent target-attestation and
 loader requirements**. A syntactically valid target or manifest/digest does not
-authenticate those assertions. No loader, live attestation or approval boolean is
-implemented. Caller-created test pins are synthetic, not live identity evidence.
+authenticate those assertions. The loader below authenticates approval of private
+bytes, without independently validating live attestation. Caller-created test pins
+are synthetic, not live identity evidence.
 
 Fetch uses GET, Accept JSON, Accept-Encoding:identity, redirect:error, credentials:omit, cache:no-store and
 a per-run AbortSignal. No proxy/auth wrapper, cookies, query options, custom
@@ -204,9 +206,9 @@ private authenticated review custody. It is consumed **before any run validation
 when a snapshot is requested, including invalid target/token, failed readiness,
 denial, timeout or malformed snapshot. Only accepted exact-byte/observation/time
 bindings can produce `reviewed_external_input`; continuity stays unknown. This
-library implements neither private credential delivery nor the authenticated review
-loader. Reissuing manifest capabilities across processes still requires that loader
-and a durable replay journal. A digest or caller boolean never replaces them.
+library implements no private credential delivery. The authenticated handoff below
+adds exact-record verification; reissuing capabilities across processes still needs
+a durable replay journal. A digest or caller boolean never replaces them.
 
 Validation adds `node worker/tools/observer/transport-negative-controls.mjs` to the
 commands above. Three broken copies (relaxed body cap, redirect following, token on
@@ -214,11 +216,122 @@ readiness) must fail actual assertions; the five existing controls remain requir
 Local tests cover actual producer → injected HTTP → wire decoder → evaluator for
 both stages and the full 240-cell D1 ring. They perform no TLS/live ownership test.
 
-Remaining CODE: GitHub/Cloudflare wire adapters; authenticated target/review loader
-and private delivery after an actual restricted record/authentication contract is
-chosen; continuous storage witness and late-I/O fencing; scheduler; durable unresolved
+Remaining CODE (updated by the loader section below): GitHub/Cloudflare telemetry
+wire adapters; independently validated target attestation and private delivery;
+continuous storage witness and late-I/O fencing; scheduler; durable unresolved
 journal and sender. Remaining LIVE: real manifests and independent identity/scope,
 permissions, runner/storage/exclusions, credentials, approvals, Test F/drills and
 receipt/human acknowledgment. Parent fallback policy remains pending. #20/#29 stay
 open; no production enablement. Configured runtime 2026-10-17 remains unproven under
 installed workerd tested at 2026-09-16; production compatibility was not lowered.
+
+## Authenticated digest-only review loader (this slice)
+
+`createObserverReadSession(reviewedPolicy, privatePins, githubReadToken).observe(request, io)`
+is a trusted-launcher library, with no enabled entry point. The existing
+`observeHTTPS` trusted-input interface remains usable; a future approved flow must
+use this authenticated handoff rather than treating its target argument as actor
+proof. No real approval exists or is granted by this implementation.
+
+This repository is **public**. The proposed exact #20 comment grammar is one ASCII
+line, with no newline or other text: `approve-observer-read sha256:` followed by
+exactly 64 lowercase hex characters. Only that digest may be published. No origin,
+account/deployment/version/generation manifest, credential or private output belongs
+in GitHub comments, PR summaries or artifacts. This is an implementation proposal
+for review, not user approval, an SLO or a command for an agent to post.
+
+The SHA-256 binds every byte of a privately delivered UTF-8 JSON manifest (≤32 KiB).
+Its exact top-level keys are `schema` (1), `purpose` (`observer_reads`), `stage`,
+`candidate` (exact 40-hex source head), `session`, `nonce` (independent fresh 64-hex
+launcher identities), `readyAt`, `expiresAt` (UTC ms), `target`, `context`,
+`observation` and `snapshotReview`. Target and context retain the #125/#126 exact
+schemas and pins; `snapshotReview` is null or the exact private #125 JSON text.
+The independently sealed launcher pins must match the bytes and digest. Proposed
+session validity is at most five minutes; creation must be strictly after ready,
+not future, and unedited. No public command needs the private pins.
+
+The caller supplies one exact positive numeric comment ID, never a latest-comment
+query. The loader reads only fixed HTTPS GitHub GET routes:
+
+- `/repos/Quick-Release/gq-support/issues/comments/{id}` (twice per verification);
+- `/users/{vvaz|gmarques}` for the authenticated comment author;
+- `/repos/Quick-Release/gq-support/collaborators/{vvaz|gmarques}/permission`.
+
+It requires the comment's exact `id`, `url`, `issue_url` (#20), `html_url`, raw
+`body`, equal `created_at`/`updated_at` and author `user.id/login/type=User`.
+Current user identity and current write/admin legacy permission must match the
+same reviewed numeric identity (GitHub maps maintain to write). Author association,
+manifest reviewer/digest/approved flags, local JSON and callbacks cannot authenticate
+the actor. vvaz OR gmarques retain equal existing authority. As in the deployment
+verifier, numeric IDs must be supplied in source-reviewed metadata. Live IDs are
+unconfigured here; fixture IDs are explicitly synthetic and cannot be defaults.
+
+The session consumes itself **before any** copy, parse, hash, mismatch, auth failure
+or await. It copies all private bytes, pins, carry and I/O references before awaits.
+An initial verification precedes review creation; the wrapped #126 fetch repeats
+verification immediately before each Worker GET, with cancellation/window/clock
+checks after all async verification and no await between the final check and
+dispatch. A final verification withholds all result authority if the record is
+revoked while Worker I/O is pending. Any verification failure is terminal even
+when #126 catches a transport exception. No reusable boolean or fetch authority
+escapes. Deletion, edit (including a revoke command), changed identity/permissions,
+expiry, clock regression, malformed/unknown replies and cancellation fail closed.
+An unrelated new comment cannot revoke this exact record: its author must edit or
+delete the supplied record. There is no list, discovery, response-link fetch or
+automatic replacement record.
+
+Every GET refuses redirects, nonexact final URLs, cookies, pagination links,
+compression and non-JSON/non-200 responses. Total cooperative budget is ten seconds
+including verification and Worker reads, with ≤16 GitHub responses, ≤32 KiB/response,
+≤1024 chunks/response and thus ≤512 KiB of GitHub bytes. No retries; refused and
+late streams are cancelled. Injected standard fetch must honor these options and
+have no ambient auth/proxy/tracing. Test fakes model HTTP only. Cancellation cannot
+prove termination of noncooperative I/O. Revalidation is a fresh API observation,
+not an atomic GitHub/Worker transaction; a change after the last observation cannot
+be detected before it exists. Documented timestamps/current body do not prove hidden
+edit history. No stale reusable grant is handed to #126.
+
+GitHub Authorization is held only in this closure and reaches only those fixed
+`api.github.com` routes; the separate snapshot token reaches only #126's snapshot
+route, never GitHub or readiness. Identical declared tokens are refused. There is
+no ambient gh/env/profile/token discovery, Worker prop, RPC, public error, log or
+credential artifact. Only the existing bounded finite `result.public` is publishable;
+`state`, manifest and review remain private in trusted launcher memory.
+
+For optional #125 review, `reviewer` must equal the authenticated author and `record`
+must be SHA-256 of the exact UTF-8 GitHub API comment URL. This binds the selected
+record without publishing private data. Snapshot bytes/observation/time and all
+candidate/generation/deployment/version pins still pass the original one-use checks.
+The actor must independently retain and attest the target/activation evidence.
+A digest-only author approval proves approval of private bytes, **not** Cloudflare
+DNS/account/Worker/deployment ownership, actual activation or continuous storage.
+No independently validated Cloudflare source is implemented. There is no blanket
+manifest-authority=healthy rule, missing-record=nonexecution claim, private actual-wire
+coverage, health, recovery, deployment, restore, broader credential grant or send
+authority. Continuity and actual-wire coverage remain unknown; old failures stay pinned.
+
+The one-shot is process-local and per session object, not durable replay protection.
+Creating another session object or restarting cannot prove refusal; a durable
+launcher-owned replay journal is prerequisite to an enabled workflow. No cache or
+artifact persistence pretends to supply that proof. Real private delivery remains
+parent-owned future work: an operator must retain the exact bytes and supporting
+external attestation in an access-controlled private channel available only to the
+trusted launcher and approving actor, independently supply reviewed numeric IDs and
+fresh session pins, then explicitly identify the exact public digest record. No
+private store, new service or expanded GitHub/Cloudflare grant is selected here.
+
+API fields/permissions were checked against current official
+[issue-comment documentation](https://docs.github.com/en/rest/issues/comments#get-an-issue-comment),
+[user documentation](https://docs.github.com/en/rest/users/users#get-a-user) and
+[repository permission documentation](https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user).
+The library retains the existing verifier's explicit 2022-11-28 API version.
+
+Run the isolated suite and original eight negative controls above, plus
+`node worker/tools/observer/review-negative-controls.mjs`. Two additional broken
+copies must fail real assertions for missing verification and stale dispatch authority.
+Remaining CODE: private delivery/independent target attestation, durable replay and
+unresolved journal, continuous storage witness, other provider adapters, scheduler
+and sender. Remaining LIVE: genuine records, identities, custody/permissions, runner
+and external evidence, Test F/drills/receipt/human acknowledgment. Remaining POLICY:
+parent fallback decision. #20/#29 remain open; nothing enables production. Configured
+2026-10-17 runtime is still unproven under test date 2026-09-16.

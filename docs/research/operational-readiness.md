@@ -474,3 +474,33 @@ Parent fallback policy is pending; #20/#29 remain open and production stays disa
 Smallest safe next slice is the loader contract/tests once a real restricted record
 and authentication source is identified. Configured runtime 2026-10-17 remains
 unproven under installed workerd test date 2026-09-16; no production date change.
+
+### Authenticated observer read approval CODE status
+
+The [bounded loader](../../worker/tools/observer/README.md#authenticated-digest-only-review-loader-this-slice)
+now authenticates one exact digest-only #20 comment and hands #126 dispatch a fresh
+revalidation closure. This updates the earlier loader-code-absent status, without
+supplying live evidence or approval. Existing vvaz OR gmarques authority is unchanged;
+numeric IDs remain unconfigured source-reviewed metadata, never invented from tests.
+The repository is public: private manifests, targets and credentials must stay with
+the trusted launcher/actor, with only an exact digest on GitHub. Private delivery
+and where the operator retains exact bytes/supporting evidence remain parent-owned
+future work; this slice selects no store or new service. Proposed grammar and
+five-minute window need review and imply no user approval or SLO.
+
+The handoff consumes before validation, verifies exact actor/record/current permission,
+rechecks cancellation/expiry after all awaits and before each observer GET, and
+withholds results after revocation while reads are pending. It is not an atomic
+cross-provider lock or durable replay guard. A launcher-owned journal is prerequisite
+to enabled use. Approval attests private bytes only; independently validated
+Cloudflare ownership/current-target and activation evidence remain external duties.
+Continuous storage witness, actual-wire coverage, Cron/business health and recovery
+remain unknown. Missing records are not nonexecution and old failures stay pinned.
+
+Remaining CODE: private delivery/target attestation, durable replay/unresolved journal,
+continuous storage witness/late-I/O fencing, other telemetry adapters, scheduler and
+sender. Remaining LIVE: actual records, reviewed identity/permission/custody evidence,
+runner/exclusions, credentials, Test F/drills, receipts and human acknowledgment.
+Parent fallback POLICY remains pending and independent. #20/#29 remain open; no
+production enablement, deploy, notification, restore or expanded credential grant.
+Configured 2026-10-17 runtime remains unproven under test date 2026-09-16.
