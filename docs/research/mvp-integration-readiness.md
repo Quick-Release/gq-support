@@ -407,3 +407,20 @@ writes/removals before Discord custody; no new resource/profile or live change.
 See [implemented contract](external-incident-observer.md#fixed-readiness-and-aggregate-wire-snapshot-this-code-slice).
 External transport, scheduler, durable sender/journal, POLICY fallback, private
 credential delivery and LIVE evidence remain absent/unverified. #20/#29 stay open.
+
+
+### Observer fixed HTTPS library CODE delta
+
+The [fixed transport library](../../worker/tools/observer/README.md#fixed-https-transport-this-slice)
+now connects real readiness/snapshot wire to the decoder/evaluator, with explicit
+reviewed target pins, snapshot-only capability, a cooperative 10s total deadline,
+streaming 64 KiB/1024-chunk bounds and sanitized ≤2 KiB public verdicts. Local
+injected HTTP/D1 tests cover both stages and the full 240-cell ring; no TLS or live
+ownership was verified. Host syntax and manifest digests are not authenticated
+stage/account/current-deployment evidence. Target/review loader and private parent
+delivery remain absent; Cron continuity and business health stay unknown. No
+production runtime/configuration or enablement changed. GitHub/Cloudflare adapters,
+continuous storage witness, scheduler, durable journal/sender, fallback policy and
+all LIVE manifests/permissions/runner/exclusion/credentials/approvals/Test F/drills/
+receipt remain outstanding. #20/#29 stay open. Configured 2026-10-17 compatibility
+remains unproven by installed workerd testing at 2026-09-16.

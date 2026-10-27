@@ -1,6 +1,6 @@
-# Offline observer protocol
+# Observer protocol and fixed HTTPS library
 
-Pure library only; no monitor entry point, network, scheduler, persistence or send.
+Library only; no monitor entry point, ambient network dispatch, scheduler, persistence or send.
 Based on the [observer design](../../../docs/research/external-incident-observer.md).
 
 `decodeBatch(reviewedContext, trustedReads)` checks proposed normalized JSON and
@@ -15,9 +15,9 @@ generation/exclusions and at most 20 run expectations. `Read` provenance comes
 from a future trusted adapter: transport result, observation identity, UTC times,
 coverage and page count cannot come from a response's health/authentication
 assertions. HTTP bodies are empty normalized objects; availability is the trusted
-transport's `vantage` classification. No HTTP transport exists, so TLS, redirect
-refusal, endpoint allowlisting, streaming byte caps and private-host rejection
-are **not implemented or tested**. Byte caps apply to already received byte arrays.
+transport's `vantage` classification. The fixed HTTPS library below supplies this
+provenance from injected fetch; the decoder itself only caps already received bytes.
+No live TLS, DNS or account ownership has been verified.
 There are no example live identities, secrets or full fabricated provider replies.
 
 The original normalized snapshot fixture contract remains **proposed**. The actual
@@ -98,7 +98,7 @@ other queries keep 100. The producer supplies activation=null, coverage=unknown
 and sticky partial. It therefore supports positive finite failure evidence but
 cannot prove missing starts or recover an incident. No phase is remapped to ok.
 The adapter has real endpoint-byte fixtures, including a full 240-cell D1 ring.
-Network transport, scheduler, journal and sender remain absent. See the latest
+The fixed transport below is implemented; scheduler, journal and sender remain absent. See the latest
 section of the observer design for exact schema, byte budget and custody order.
 
 ## Bounded private activation review (this slice)
@@ -137,3 +137,88 @@ separate historical recovery rules.
 
 See the [design contract](../../../docs/research/external-incident-observer.md#bounded-activation-and-record-evidence-contract)
 for schema, authority, exclusions, prerequisites and validation limits.
+
+
+## Fixed HTTPS transport (this slice)
+
+`observeHTTPS(privateInput, io)` connects the actual endpoint wire to the strict
+snapshot decoder and evaluator. It requires an explicit trusted `ReviewedTarget`,
+reviewed `Context`, independent observation integer, injected standard fetch and
+UTC clock. There is no default fetch, env/profile lookup, enabled entry point,
+CLI, workflow or scheduler. Omitting the dedicated stage-read token performs
+readiness only. The token must be 64 lowercase hex characters, copied before any
+await and sent only as snapshot Authorization. No other credential is accepted.
+Only `result.public` is publishable (fixed finite enums and eight-class verdict,
+≤2 KiB). `result.state` is private bounded in-process carry, never a public
+artifact or RPC payload. Raw response/error/header/URL/token/review IDs are absent.
+
+Exactly two sequential GET routes are possible: `/internal/observer/v1/readiness`
+and `/internal/observer/v1/snapshot`, on the **same explicit reviewed origin**.
+Target origin must be canonical `https://<exact-worker>.<subdomain>.workers.dev`,
+with canonical DNS labels and no trailing slash, port (even 443), query, fragment,
+userinfo, escapes, localhost/IP/private literal or custom domain. Target account,
+stage, candidate and generation must agree with context before dispatch;
+deployment/version must be exact UUID pins supplied independently. A host name
+cannot establish stage from its spelling: authenticated stage-to-origin/Worker
+binding, DNS resolution safety, Cloudflare account ownership and current single
+version/deployment/candidate identity remain **independent target-attestation and
+loader requirements**. A syntactically valid target or manifest/digest does not
+authenticate those assertions. No loader, live attestation or approval boolean is
+implemented. Caller-created test pins are synthetic, not live identity evidence.
+
+Fetch uses GET, Accept JSON, Accept-Encoding:identity, redirect:error, credentials:omit, cache:no-store and
+a per-run AbortSignal. No proxy/auth wrapper, cookies, query options, custom
+paths/headers, provider calls, CRUD or mutations are supported. The trusted fetch
+must honor these semantics and have no ambient auth/proxy/debug tracing. Only absent/identity Content-Encoding is accepted, so Content-Length describes
+the bounded stream rather than compressed wire bytes. Final
+Response.url must equal the exact requested URL, redirected/opaque redirects are
+refused, and 200 needs JSON content type with no Set-Cookie. Non-200 bodies are
+discarded/cancelled; 401/403 snapshot is denied, 4xx/5xx unavailable. Readiness
+requires exactly `{version:1,check:"route_runtime",result:"available"}`. A bare
+200, malformed body or redirected response is unknown, never route recovery.
+DNS/TLS/HTTP/timeouts establish only observed unavailability at this vantage;
+no platform cause, business delivery, App, Cron or Discord health is inferred.
+
+A cooperative **10-second total two-read budget**, ≤64 KiB/read, ≤1024 stream
+chunks/read (including empty chunks), ≤128 KiB total and two responses bound each
+invocation. Content-Length is validated when present; streaming caps also apply
+without it. Snapshot rows retain the real decoder's 240-cell cap. No retry occurs.
+Failed/uncertain readiness ends dispatch; cancellation/deadline invalidates every
+remaining request. Streams are cancelled on refusal; late responses are disposed.
+Noncooperative fake I/O cannot be remotely cancelled by this library: it returns
+bounded unavailable, requests cancellation and never dispatches again. The budget
+is cooperative, not a preemption or remote-termination guarantee. Clock regressions
+are refused. All mutable target/context/carry/private inputs are copied before awaits.
+
+Snapshot acceptance means a complete authenticated-route response with valid actual
+v1 schema, current stage/candidate/generation and generated time within the existing
+proposed two-minute freshness window. It does **not** prove current deployment or
+version from JSON, nor independently prove the caller's token custody/scope. `partial`
+can be accepted as partial evidence while health/recovery stays unknown. Explicit
+valid failed rows are preserved and prior incidents stay latched. Observation IDs
+and completion times are recorded consistently; equal-time or cross-revision HTTP
+pairs cannot manufacture confirmation. No complete Cron coverage is synthesized.
+
+The optional #125 capability remains useful only with genuine independently supplied
+private authenticated review custody. It is consumed **before any run validation**
+when a snapshot is requested, including invalid target/token, failed readiness,
+denial, timeout or malformed snapshot. Only accepted exact-byte/observation/time
+bindings can produce `reviewed_external_input`; continuity stays unknown. This
+library implements neither private credential delivery nor the authenticated review
+loader. Reissuing manifest capabilities across processes still requires that loader
+and a durable replay journal. A digest or caller boolean never replaces them.
+
+Validation adds `node worker/tools/observer/transport-negative-controls.mjs` to the
+commands above. Three broken copies (relaxed body cap, redirect following, token on
+readiness) must fail actual assertions; the five existing controls remain required.
+Local tests cover actual producer → injected HTTP → wire decoder → evaluator for
+both stages and the full 240-cell D1 ring. They perform no TLS/live ownership test.
+
+Remaining CODE: GitHub/Cloudflare wire adapters; authenticated target/review loader
+and private delivery after an actual restricted record/authentication contract is
+chosen; continuous storage witness and late-I/O fencing; scheduler; durable unresolved
+journal and sender. Remaining LIVE: real manifests and independent identity/scope,
+permissions, runner/storage/exclusions, credentials, approvals, Test F/drills and
+receipt/human acknowledgment. Parent fallback policy remains pending. #20/#29 stay
+open; no production enablement. Configured runtime 2026-10-17 remains unproven under
+installed workerd tested at 2026-09-16; production compatibility was not lowered.
