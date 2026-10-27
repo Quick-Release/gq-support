@@ -417,3 +417,29 @@ this wire cannot prove missing starts or clear incidents. External HTTPS transpo
 scheduler/workflow, durable sender/journal, POLICY fallback and private LIVE
 custody/receipt evidence remain outstanding. #20/#29 stay open. See the
 [implemented contract](external-incident-observer.md#fixed-readiness-and-aggregate-wire-snapshot-this-code-slice).
+
+### Bounded activation/record assessment CODE status
+
+The [private evidence contract](external-incident-observer.md#bounded-activation-and-record-evidence-contract)
+now validates exact reviewed-manifest bytes against separate custody pins, short
+UTC validity, fresh observed/issued evidence, deployment/version/generation,
+single-use snapshot-byte/observation binding and bounded authorized exclusions.
+This is an offline validator/test seam; no authenticated private loader or genuine
+attestation has been supplied. Actor authenticity and business-activation truth
+are explicit external duties for vvaz or gmarques, without a primary/backup order.
+
+Accepted input permits only private bounded record-presence/absence assessment
+and candidate-bound disabled-notification expectation. It proves neither
+successful heartbeat writes during gaps nor Cron nonexecution. The actual wire
+still cannot grant missing-start health/recovery; not_run/contained remain finite
+outcomes. Old candidate/generation failures are retained with exact identities,
+including old explicit failures encountered in fresh observations. New windows,
+redeployments and exclusions cannot erase them.
+
+Next safe CODE step: fixed read-only transport which reports unknown unless
+provenance, exact current pins and independently authenticated review are present.
+Continuous-write witness, durable unresolved identity journal, scheduler, sender
+and receipt proof remain absent. LIVE review/custody/activation evidence must be
+collected later; no production enablement. Parent fallback choice remains pending;
+#20/#29 remain open. Configured compatibility 2026-10-17 remains unvalidated by the
+local workerd review, which used 2026-09-16; production date was not lowered.

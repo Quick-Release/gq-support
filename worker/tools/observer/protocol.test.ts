@@ -325,3 +325,27 @@ describe("review regressions for advancing evidence and late failure ownership",
     expect(verdict("cron_incomplete", [], clock(3 * M), discovered.state).verdict).toBe("incident");
   });
 });
+
+describe("actual wire retained failure identity", () => {
+  const wire = (c: Context, candidate = OTHER, generation = 0) => ({ version: 1, generated: c.now,
+    stage: c.stage, candidate: c.candidate, generation: c.generation, maintenance: "open", watermark: NOW,
+    partial: false, activation: null, coverage: "unknown", route: "disabled",
+    ticks: [[c.stage, candidate, generation, NOW - 5 * M, 1, NOW - 5 * M, NOW - 4 * M, 0, 2, 1, 1, 1, 0]] });
+  it("retains an explicit previous-candidate/generation failure on a fresh read", () => {
+    expect(verdict("cron_incomplete", [transport("snapshot", wire(clock()))]).verdict).toBe("incident");
+  });
+  it("does not age out an explicit stale failure when the read itself is fresh", () => {
+    const c = clock(120 * M);
+    const body = { ...wire(c, SHA, 1), generated: NOW };
+    expect(verdict("cron_incomplete", [transport("snapshot", body, {}, c)], c).verdict).toBe("incident");
+  });
+});
+
+it("new coverage, candidate, generation and exclusions cannot reconcile an older failure identity", () => {
+  const initial = run([transport("snapshot", snapshot([tick(undefined, { phases: { ...phases, cleanup: "failed" } })]))]);
+  const c = { ...clock(M), candidate: OTHER, generation: 2, exclusions: [{ from: NOW - 20 * M, to: NOW, generation: 2 }] };
+  const successful = snapshot(ring().map(t => ({ ...t, attempt: 2, terminal: NOW + 1 })), {}, c);
+  const next = run([transport("snapshot", successful, {}, c)], c, initial.state);
+  expect(next.public.classes[3].verdict).toBe("incident");
+  expect(next.state.cronFailures).toMatchObject([{ candidate: SHA, generation: 1 }]);
+});

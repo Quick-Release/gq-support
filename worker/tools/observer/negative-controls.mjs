@@ -22,7 +22,7 @@ for (const [name, before, after] of variants) {
   try {
     writeFileSync(join(temp, 'protocol.ts'), original.replace(before, after).replace('../../src/observer-snapshot.ts', './observer-snapshot.ts'));
     copyFileSync(join(root, '../../src/observer-snapshot.ts'), join(temp, 'observer-snapshot.ts'));
-    for (const file of ['protocol.test.ts', 'analytics-wire.ts']) copyFileSync(join(root, file), join(temp, file));
+    for (const file of ['protocol.test.ts', 'analytics-wire.ts', 'snapshot-evidence.ts']) writeFileSync(join(temp, file), readFileSync(join(root, file), 'utf8').replace('../../src/observer-snapshot.ts', './observer-snapshot.ts'));
     symlinkSync(join(root, '../../node_modules'), join(temp, 'node_modules'), 'dir');
     writeFileSync(join(temp, 'vitest.config.mjs'), `export default { root: ${JSON.stringify(temp)}, test: { include: ['protocol.test.ts'], maxWorkers: 1 } };`);
     const result = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config',

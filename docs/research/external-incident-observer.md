@@ -669,3 +669,170 @@ pending. Receipt is unverified and #20/#29 stay open. No LIVE operation, credent
 profile access, remote settings/State change, deploy, notification, drill, GitHub comment,
 merge, hosted-check polling/watch, browser, PHP or DDEV work was performed.
 Pushes use `GQ_SUPPORT_SKIP_PRE_PUSH=1`; hosted checks/reviews remain uninspected.
+
+## Bounded activation and record evidence contract
+
+This slice starts at authoritative PR #124 SHA
+`837baea59bb49393ce935fce9f26c972749a99ae`. GitHub reports its head branch as
+`t3/observer-progress-snapshot`; the requested `t3/observer-read-surface` ref is
+absent. The pinned SHA takes precedence. Earlier proposed health/coverage rules
+are not implemented activation or continuity witnesses.
+
+**NOW implemented, offline only:**
+[`snapshot-evidence.ts`](../../worker/tools/observer/snapshot-evidence.ts) validates
+an exact private manifest and separately supplied custody pins, then the actual
+v1 wire adapter attaches a bounded private assessment to Batch. It grants no
+public health or recovery. No runtime producer, endpoint, migration, Alchemy
+provider, retained planning/candidate custody, DB retain policy, failed-window
+protection or ownership-release behavior changes.
+
+The private manifest is at most 8 KiB with these exact fields:
+
+| Fields | Required meaning and validation |
+| --- | --- |
+| `schema`, `proof` | `1`, `reviewed_business_activation`; release/deployment creation timestamp is not this proof. |
+| `account`, `stage`, `candidate`, `deployment`, `version`, `generation` | Tipme account, staging/prod, 40-hex reviewed source SHA, exact UUID deployment and single UUID version, safe nonnegative maintenance generation. Independently supplied custody must match all pins. No weighted/multiple-version inference. |
+| `activatedAt`, `validFrom`, `validTo` | UTC milliseconds; activation no later than validity start; half-open validity contains now; length at most 60 minutes. Context activation must match. No retroactive extension from latest tick or now. |
+| `issued`, `evidenceObserved` | UTC safe integers, validity start ≤ evidence observed ≤ issued ≤ now; observed no older than two minutes. This is a proposed freshness limit, not an approved SLO. |
+| `reviewer`, `record` | Exactly vvaz **or** gmarques and a 64-hex digest identifying the restricted authenticated operational review record. Custody must match both; no hierarchy or escalation order. |
+| `snapshotSha256`, `observation`, `readAt` | SHA-256 of exact snapshot bytes, independent runner observation integer and UTC read time, bound to trusted Read. Evidence observed ≤ read time ≤ issue; read time is within validity and at most two minutes old. Capability consumes once, even on mismatch. Replaying or copying it cannot grant new claims. |
+| `notification` | Reviewed `enabled` or `disabled` expectation bound to these pins. Disabled plus wire route=disabled yields only private `reviewed_disabled`; not_run/contained never becomes ok. Neither value proves provider health, delivery or receipt. |
+| `exclusions` | At most 60 sorted, nonoverlapping `{from,to,generation,reason}` intervals inside validity, same generation, positive duration, reasons only maintenance/restore/rollback. Context intervals must match exactly. The same actor/record must authorize every interval in that private manifest; this authentication is an external duty. Exclusions never erase record gaps or failures here. |
+
+Custody is a separate exact object containing the six identity pins plus
+`sha256`, `reviewer`, `record`. Hashes check integrity, **not signer identity,
+review approval or historical truth**. The validator cannot create those facts.
+A caller-created custody object is only an offline test seam. Single-use capability
+refusal is process-local; revalidating the same manifest bytes can create another
+capability, so authenticated issuance/replay refusal across runs remains an external
+loader/journal duty. Exact body/time/observation binding cannot become a new observation
+by replaying those bytes. No live loader or durable replay/reissue journal,
+restricted record location, authenticated author verification, single-version
+provider observation or real activation attestation has been supplied. The
+existing approved operations authority is vvaz or gmarques ([recorded decision](operational-readiness.md#confirmed-operational-decisions--2026-10-27)); this contract grants neither a new
+operator role nor production approval. The external reviewer must establish
+business activation, current exact deployment/version and maintenance generation,
+reviewed notification mode and the reason/authorization of every exclusion from
+actual restricted evidence. A deployment timestamp alone is insufficient.
+
+The trusted transport must independently check exact current deployment/version
+and fixed authenticated read origin and supply observation/time/pins. It remains
+unimplemented. The manifest is never accepted from the untrusted response. It
+contains private identities and must stay outside source, public artifacts,
+Worker props/State, offline public candidates and publishable verdicts. There
+are no secrets in the schema. The module returns only fixed refusal errors.
+
+**What the bounded proof means:** the existing
+[`observerRequest`](../../worker/src/observer-http.ts) reads all ≤240 cells and
+controls through one fixed SQL statement, refusing corrupt/excess cells, failed
+storage, byte overflow and timeout. Its actual DTO is strictly decoded. Given
+trusted fixed-route provenance and matching reviewed input, `coherent_ring_read`
+reports explicit whole-minute `[from,to)` bounds and absent matching-candidate/
+generation record slots **at that coherent read**. Bounds intersect requested
+interval, reviewed validity, activation, completed generated-time minutes and
+the conservative retained range (at most 60 minutes, also no earlier than
+watermark−59 minutes). They are not silently extended to a full hour. Partial
+transport, sticky partial/overflow, evicted unresolved evidence or unavailable
+storage cannot grant that record assessment. Other queries still cap at 100;
+wire stays 240 cells / 64 KiB, public stays eight fixed classes / ≤2 KiB.
+
+Record absence is an **evidence gap**, not Cron nonexecution and not successful
+writes throughout the gap. In
+[`progressIO`](../../worker/src/cron-progress.ts), a failed/timed-out start can
+leave no record and no sticky partial marker; already dispatched I/O may settle
+late. Runner loss before a start, partial phase storage, rollback, and maintenance
+or restore gaps have no independent continuous-write witness. HTTP 200, a
+permission boolean, zero/empty results, release creation time and watermark do
+not repair that absence. Accordingly actual-wire `activation=null`, evaluator
+coverage unknown and private `continuity=unknown` remain unchanged, including
+when this validator accepts external activation input. Missing starts cannot
+be classified as execution failures and successful rows cannot recover retained
+failures on this wire. Disabled drain expectations do not make completion healthy.
+
+The adapter now retains each row's candidate/generation instead of discarding
+old identities. Fresh observations of explicit failed/timed_out/interrupted
+records latch even when their generated/slot times are old. Unfinished attempts
+still use the proposed incomplete deadline. Failure identity includes candidate,
+generation, slot and attempt; a new deployment/generation, exclusion, newer
+success window or missing/evicted row cannot reconcile it. Overflow stays latched.
+Unknown cannot recover an incident. Existing advancing HTTP pairs/pins, late
+Cron latch and #123 cleanup-due failure / #124 constant-time auth/custody remain.
+
+**Remaining CODE:** smallest safe next slice is a fixed read-only HTTPS transport
+that verifies current exact pins and returns unknown where provenance or review
+is absent, without provider-write/SQL-admin capabilities. A private authenticated
+manifest loader needs an actual restricted review-record location and
+independent actor/proof verification before accepting real attestations. Complete
+Cron coverage/recovery additionally needs a separately reviewed, bounded witness
+for successful progress storage across the claimed interval, durable unresolved
+identity carry, late-I/O fencing and rollback/restore/maintenance continuity.
+No complete flag or operator boolean substitutes for it. That witness is not
+available now and this slice does not design a new monitoring platform.
+
+**Remaining LIVE/preconditions/assumptions:** collect genuine exact-pin activation
+and notification/exclusion evidence under existing authority; verify independent
+transport identity/scope and clocks; validate journal/runner-loss continuity and
+sender/receipt custody. Scheduler/workflow adapters, durable journal, sender and
+receipt proof remain unwired. Parent fallback policy remains pending independently.
+#20/#29 remain open. This is not production enablement or approval.
+
+**Configured runtime validation gap retained:** the earlier local workerd review
+could not start configured compatibility **2026-10-17** and used test date
+**2026-09-16**. This slice retains that fixture date and does not lower production
+configuration or claim configured-runtime proof. Offline Node checks and local
+D1/older-date workerd tests establish only their stated bounds.
+
+### Evidence-contract validation (local only)
+
+Node 26.12.1 was selected with
+`PATH=/home/valerio/.local/share/mise/installs/node/26.12.1/bin:$PATH` for every
+Node/pnpm command below. Exact commands from repo root:
+
+```sh
+pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts --maxWorkers=1
+pnpm --filter gq-support-worker exec vitest run test/observer-http.test.ts test/cron-progress.test.ts --maxWorkers=1
+node worker/tools/observer/negative-controls.mjs
+pnpm exec eslint worker/tools/observer worker/test/observer-http.test.ts --max-warnings=0
+pnpm --filter gq-support-worker typecheck
+node scripts/ci/runtime-matrix.mjs policy
+node scripts/ci/workflow-policy.mjs
+scripts/ci/gitleaks.sh dir worker
+scripts/ci/gitleaks.sh dir docs
+git diff --check 837baea59bb49393ce935fce9f26c972749a99ae
+```
+
+- RED: two new real-wire failure regressions failed with unknown instead of
+  incident; the prior **81 tests passed** in that same run.
+- GREEN: isolated protocol/contract **121 tests / 2 files**; affected producer/
+  endpoint tests **22 tests / 2 files**. All **five negative controls** still
+  cause actual assertion failures. No claimed “21 probes” or broad-suite count
+  is inferred from the task shorthand.
+- Local real D1 producer → authenticated endpoint bytes → strict adapter →
+  evaluator covers 240 cells, reviewed narrow disabled expectation without
+  healthy completion, failure carry, and a timed-out heartbeat write absent at
+  read then actually settling later. Partial/evicted unresolved evidence,
+  malformed/wrong-pin/stale/future/rollback inputs, race/body changes,
+  capability replay, exclusions and enabled-mode forgery cannot grant health.
+  Runtime privacy canaries use `gqcanary_` plus fresh random material.
+- Affected lint/types, runtime/workflow policies, Worker/docs secret scans and
+  whitespace pass. No runtime source changes justify a broad Worker rerun; the
+  prior full-suite result remains historical, not rerun evidence for this slice.
+
+PR #124's reported independent Standards=0 / Spec=0 review is parent context,
+not a review of these new changes. Hosted checks/reviews are uninspected. No live
+HTTP/account/state/credentials/profiles/secret requests, deployment/settings,
+notifications/drills, GitHub messages/comments, merge, browser, PHP, DDEV or
+CI polling/watch occurred. Push uses `GQ_SUPPORT_SKIP_PRE_PUSH=1`.
+
+### Evidence capability review correction
+
+Independent review found one P2: parsing/provenance/context or budget rejection
+could leave the caller's single-use snapshot review capability reusable. The
+batch now consumes it before any snapshot validation, and reserves its internal
+replacement for the first snapshot only. A rejected first read cannot pass that
+authority to a later read or retry. Non-snapshot batches do not consume it.
+Eight new cases reproduced the defect before correction, covering malformed
+JSON/UTF-8/wire data, size, status, context, batch bounds and same-batch retry.
+All 129 offline tests and five existing negative controls pass after correction;
+Worker typecheck and affected lint pass. This adds no authentication, continuity,
+health or operational authority. No runtime source or LIVE resource changed.

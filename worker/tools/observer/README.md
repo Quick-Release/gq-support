@@ -100,3 +100,40 @@ cannot prove missing starts or recover an incident. No phase is remapped to ok.
 The adapter has real endpoint-byte fixtures, including a full 240-cell D1 ring.
 Network transport, scheduler, journal and sender remain absent. See the latest
 section of the observer design for exact schema, byte budget and custody order.
+
+## Bounded private activation review (this slice)
+
+`validateSnapshotReview(bytes, custody, now)` accepts at most 8 KiB of exact-schema
+JSON. `custody` must come from a future **private authenticated review loader**,
+not HTTP, manifest self-assertions, a caller boolean or Alchemy State. Its SHA-256
+binds the exact bytes; its account/stage/candidate/deployment/version/generation
+and vvaz-or-gmarques restricted-record digest must match. Digest integrity is
+not authentication. No real attestation or loader exists in this slice. A loader must refuse
+reissue/replay across processes; there is no durable replay journal here.
+
+Pass the resulting process-local, single-use capability as the third argument to
+`decodeBatch`. The actual v1 adapter attaches private `claims` to its snapshot
+payload. Reusing a capability, serialized/copied capability, changed observation/time/
+body digest, expired/stale evidence and mismatched pins cannot grant claims.
+Only `Evaluation.public` is publishable; neither Batch nor State nor review inputs
+are public. The manifest is private operational evidence, never a source fixture,
+Worker prop/State, offline public candidate, or runtime endpoint update.
+
+The accepted claim is `coherent_ring_read` over explicit whole-minute `[from,to)`
+bounds (at most 60 minutes), intersecting review validity, requested read interval,
+retention lower bound and completed minutes at generated time. `missing` means
+records absent **at that read**, not proof Cron never executed or that writes
+succeeded throughout the interval. A delayed heartbeat write can subsequently
+appear. Sticky partial/overflow/lost unresolved evidence denies record coverage.
+No watermark or latest tick is copied into a continuity proof.
+
+`continuity` stays `unknown`, actual-wire activation stays null and evaluator
+coverage stays unknown. Even an accepted private activation input cannot grant
+missing-start incidents, healthy Cron, affirmative recovery, or notification
+permission. `reviewed_disabled` means only reviewed candidate-bound disabled
+notification expectation corroborated by wire route=disabled; drain=not_run and
+contained are never mapped to ok. The proposed normalized fixtures retain their
+separate historical recovery rules.
+
+See the [design contract](../../../docs/research/external-incident-observer.md#bounded-activation-and-record-evidence-contract)
+for schema, authority, exclusions, prerequisites and validation limits.

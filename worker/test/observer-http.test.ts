@@ -1,13 +1,15 @@
 import { URL } from "node:url";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import ts from "typescript";
 import { afterEach, expect, it, vi } from "vitest";
 import { observerRequest } from "../src/observer-http.ts";
 import { decodeObserverSnapshot } from "../src/observer-snapshot.ts";
-import { emptyPhases, startProgress, writeProgress } from "../src/cron-progress.ts";
+import * as Effect from "effect/Effect";
+import { emptyPhases, progressIO, startProgress, writeProgress } from "../src/cron-progress.ts";
 import { localStage } from "./local-d1.ts";
+import { validateSnapshotReview } from "../tools/observer/snapshot-evidence.ts";
 import { decodeBatch, evaluate, type Context, type Read } from "../tools/observer/protocol.ts";
 const token = randomBytes(32).toString("hex"), candidate = "a".repeat(40);
 const env = { SUPPORT_OBSERVER_ENABLED: "true", SUPPORT_OBSERVER_READ_TOKEN: token,
@@ -100,6 +102,24 @@ it("returns all 240 cells in one coherent fixed read, preserves overflow/generat
       account: context.account, stage: context.stage, candidate, generation: 0, status: "ok", coverage: "complete", pages: 1, body: bytes };
     const batchEvidence = decodeBatch(context, [read]); expect(batchEvidence.invalid).toBe(false);
     expect(evaluate(context, batchEvidence).public.classes.find(c => c.class === "cron_start_missing")?.verdict).toBe("unknown");
+    // A separately supplied private review grants only narrow record evidence.
+    const deployment = "11111111-1111-1111-1111-111111111111", version = "22222222-2222-2222-2222-222222222222";
+    const pins = { account: context.account, stage: context.stage, candidate, deployment, version, generation: 0,
+      reviewer: "gmarques" as const, record: randomBytes(32).toString("hex") };
+    const manifest = new TextEncoder().encode(JSON.stringify({ ...pins, schema: 1, proof: "reviewed_business_activation",
+      activatedAt: context.activation, validFrom: now - 5 * 60_000, validTo: wire.generated + 60_000,
+      issued: wire.generated, evidenceObserved: wire.generated, observation: read.observed, readAt: read.at,
+      snapshotSha256: createHash("sha256").update(bytes).digest("hex"), notification: "disabled", exclusions: [] }));
+    const review = validateSnapshotReview(manifest, { ...pins, sha256: createHash("sha256").update(manifest).digest("hex") }, wire.generated);
+    const reviewedBatch = decodeBatch(context, [{ ...read, deployment, version }], review);
+    const payload = reviewedBatch.evidence[0].payload;
+    expect(payload && "claims" in payload && payload.claims).toMatchObject({
+      records: { proof: "coherent_ring_read", from: now - 5 * 60_000, to: now, missing: [] },
+      notification: "reviewed_disabled", continuity: "unknown",
+    });
+    // Every real terminal has drain=not_run. Reviewed disabled expectation is
+    // truthful metadata, never a conversion of not_run to ok or recovery proof.
+    expect(evaluate(context, reviewedBatch).public.classes[3].verdict).toBe("unknown");
     // Real wire failure remains visible, and later unknown/partial cannot recover it.
     const failed = structuredClone(wire); failed.ticks[0][7] = 1;
     const failRead = { ...read, body: new TextEncoder().encode(JSON.stringify(failed)) };
@@ -159,4 +179,47 @@ it("exposes only finite local alert configuration/control, never provider health
     const malformed = await observerRequest(req(), config, async () => stage.databases.ledger);
     expect(malformed.status).toBe(503); expect(await malformed.json()).toEqual({ code: "observer_unavailable" });
   } finally { await stage.dispose(); }
+});
+
+it("keeps a heartbeat write timeout/late settlement as an evidence gap, never execution proof", async () => {
+  cryptoShim(); const stage = await localStage(["ledger"]);
+  let releaseWrite!: () => void;
+  const gate = new Promise<void>(resolve => { releaseWrite = resolve; });
+  try {
+    const db = stage.databases.ledger, now = Math.floor(Date.now() / 60_000) * 60_000;
+    let late!: ReturnType<typeof startProgress>;
+    const timedOut = await Effect.runPromise(progressIO(() => {
+      late = gate.then(() => startProgress(db, { stage: "staging", candidate }, now - 60_000, now - 59_999));
+      return late;
+    }));
+    expect(timedOut).toBeNull();
+    const response = await observerRequest(req(), env, async () => db);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const wire = decodeObserverSnapshot(JSON.parse(new TextDecoder().decode(bytes)), Date.now());
+    expect(wire.ticks).toEqual([]); expect(wire.partial).toBe(false);
+    const context: Context = { now: wire.generated, stage: "staging", candidate, activation: now - 5 * 60_000,
+      generation: 0, account: "8f38791a8c37b182239af2a385ab3c31", expected: [], exclusions: [] };
+    const pins = { account: context.account, stage: context.stage, candidate, generation: 0,
+      deployment: "11111111-1111-1111-1111-111111111111", version: "22222222-2222-2222-2222-222222222222",
+      reviewer: "vvaz" as const, record: randomBytes(32).toString("hex") };
+    const read: Read = { ...pins, source: "snapshot", observed: 1, at: wire.generated, from: context.activation, to: now,
+      status: "ok", coverage: "complete", pages: 1, body: bytes };
+    const manifest = new TextEncoder().encode(JSON.stringify({ ...pins, schema: 1, proof: "reviewed_business_activation",
+      activatedAt: context.activation, validFrom: context.activation, validTo: wire.generated + 60_000,
+      issued: wire.generated, evidenceObserved: wire.generated, observation: read.observed, readAt: read.at,
+      snapshotSha256: createHash("sha256").update(bytes).digest("hex"), notification: "disabled", exclusions: [] }));
+    const review = validateSnapshotReview(manifest, { ...pins, sha256: createHash("sha256").update(manifest).digest("hex") }, wire.generated);
+    const batch = decodeBatch(context, [read], review), payload = batch.evidence[0].payload;
+    expect(payload && "claims" in payload && payload.claims).toMatchObject({
+      records: { from: context.activation, to: now, missing: Array.from({ length: 5 }, (_, i) => context.activation + i * 60_000) },
+      continuity: "unknown",
+    });
+    expect(evaluate(context, batch).public.classes[2].verdict).toBe("unknown");
+    releaseWrite(); await late;
+    // The timed-out operation can settle later; its record is not in the attested read.
+    const changed = await observerRequest(req(), env, async () => db);
+    const lateBytes = new Uint8Array(await changed.arrayBuffer());
+    expect(decodeObserverSnapshot(JSON.parse(new TextDecoder().decode(lateBytes)), Date.now()).ticks).toHaveLength(1);
+    expect(evaluate(context, decodeBatch(context, [read], review)).public.classes[3].verdict).toBe("unknown");
+  } finally { releaseWrite(); await stage.dispose(); }
 });
