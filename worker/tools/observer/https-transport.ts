@@ -127,7 +127,12 @@ export async function observeHTTPS(input: PrivateReadInput, io: TransportIO): Pr
         const pending = transport(url, init);
         // A noncooperative injected transport may settle after our deadline. Do
         // not inspect or decode it, only request stream disposal; never retry.
-        void pending.then(r => { if (stopped) cancel(r.body); }, () => {});
+        void pending.then(r => {
+          // Capture ownership before bounded() can reject at its post-await
+          // clock check, even if the timeout callback has not run yet.
+          response = r;
+          if (stopped) cancel(r.body);
+        }, () => {});
         try { response = await bounded(pending); } catch { throw new ReadUnavailable(); }
         if (response.url !== url || response.redirected || String(response.type) === "opaqueredirect")
           return { bytes: new Uint8Array(), status: 0 };

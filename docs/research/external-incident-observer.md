@@ -946,3 +946,15 @@ deployments, notifications/drills, GitHub comments/messages/reviews, merges, DDE
 browser, hosted CI polling or watches were performed. Git publication uses
 `GQ_SUPPORT_SKIP_PRE_PUSH=1`. Hosted checks/reviews are uninspected, and parent
 review results are not a review of this slice.
+
+### Transport review correction: deadline response ownership
+
+Independent Standards review found no defects; Spec review found one P2.
+If fetch returned at the clock deadline before the timer callback ran, the
+post-await deadline check could reject before cleanup owned the response.
+The fetch settlement handler now captures the response before that clock check,
+so rejection cancels the stream. Truly late settlement still requests disposal
+and cannot start another dispatch. Two new readiness/snapshot cases reproduced
+zero cancellations before correction and now require exactly one. All 216
+offline observer tests, eight negative controls, typecheck and affected lint pass.
+No runtime source, live TLS/DNS/account evidence or operational authority changed.

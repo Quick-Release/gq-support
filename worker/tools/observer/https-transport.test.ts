@@ -288,3 +288,18 @@ it("HTTP confirmation requires distinct advancing observations of the same revie
   i.target.generation--; i.context.generation--; i.target.candidate = "b".repeat(40); i.context.candidate = i.target.candidate;
   expect(verdict(await observeHTTPS(i, io))).toBe("unknown");
 });
+
+it.each(["readiness", "snapshot"])("disposes %s returned at the clock deadline before the timeout callback", async path => {
+  const i = input(), cancelled = vi.fn();
+  let time = now;
+  const io = fake(i, async url => {
+    if (!url.endsWith(path)) return response(url, ready);
+    time += 10_000;
+    return Object.defineProperty(new Response(new ReadableStream({ cancel: cancelled })), "url", { value: url });
+  });
+  io.now = () => time;
+  const result = await observeHTTPS(i, io);
+  expect(cancelled).toHaveBeenCalledTimes(1);
+  expect(io.fetch).toHaveBeenCalledTimes(path === "readiness" ? 1 : 2);
+  expect(result.public).toMatchObject(path === "readiness" ? { readiness: "unavailable" } : { snapshot: "unavailable" });
+});
