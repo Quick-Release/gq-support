@@ -42,6 +42,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      # Intentionally blocks apply until a reviewed, non-mutating native-plan
+      # adapter can verify BOTH databases. No bypass input or credentialed plan.
+      - name: Require safe pre-apply plan
+        env:
+          DEPLOY_STAGE: ${{ inputs.stage }}
+          CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
+        run: node ../scripts/ci/release-evidence.mjs plan "$DEPLOY_STAGE"
+      - name: Verify environment approval enforcement
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_STAGE: ${{ inputs.stage }}
+        run: node ../scripts/ci/release-evidence.mjs approval "$DEPLOY_STAGE"
       - name: Verify the stage App and deploy with Alchemy
         env:
           DEPLOY_STAGE: ${{ inputs.stage }}
