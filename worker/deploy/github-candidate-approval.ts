@@ -99,7 +99,9 @@ export function githubCandidateApproval(policy: ApprovalPolicy, token: string, t
         candidate.readyAt <= now() && now() < candidate.expiresAt && candidate.expiresAt - candidate.readyAt <= 15 * 60_000);
       if (!sealed) sealed = Object.freeze({ ...candidate });
       requireEvidence(JSON.stringify(sealed) === JSON.stringify(candidate));
+      const fresh = () => requireEvidence(!invalid && candidate.readyAt <= now() && now() < candidate.expiresAt);
       await policyChecks();
+      fresh();
       const comments = await get(`/issues/20/comments?since=${encodeURIComponent(new Date(candidate.readyAt).toISOString())}&per_page=100`);
       requireEvidence(Array.isArray(comments) && comments.length < 100);
       const command = approvalCommand(policy, candidate);
@@ -117,11 +119,14 @@ export function githubCandidateApproval(policy: ApprovalPolicy, token: string, t
         matches.push(comment);
       }
       requireEvidence(matches.length <= 1);
+      fresh();
       if (accepted !== undefined) requireEvidence(matches.length === 1 && matches[0].id === accepted);
       if (!matches.length) return false;
       // Re-read the exact comment; deletion/edit between list and handoff fails.
       const comment = obj(await get(`/issues/comments/${matches[0].id}`));
       requireEvidence(JSON.stringify(comment) === JSON.stringify(matches[0]));
+      fresh();
+      requireEvidence(now() - Date.parse(String(comment.created_at)) <= 5 * 60_000);
       accepted = Number(comment.id);
       return true;
     } catch { invalid = true; token = ""; throw refusal(); }

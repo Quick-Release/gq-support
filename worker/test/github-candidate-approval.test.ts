@@ -50,4 +50,17 @@ describe("authenticated post-plan GitHub command", () => {
     http.remove(); await expect(verifier.check(candidate)).rejects.toThrow("apply blocked");
     verifier.close(); await expect(verifier.check(candidate)).rejects.toThrow("apply blocked");
   });
+  it.each(["expiry", "closed"])("refuses %s occurring while the final authenticated read is pending", async (change) => {
+    const http = approvalHttp(); http.approve(candidate);
+    let time = readyAt + 2000;
+    const verifier = githubCandidateApproval(approvalPolicy, "SYNTHETIC_TOKEN", async (url, init) => {
+      const response = await http.fetch(url, init);
+      if (String(url).endsWith("/issues/comments/789")) {
+        if (change === "expiry") time = candidate.expiresAt;
+        else verifier.close();
+      }
+      return response;
+    }, () => time);
+    await expect(verifier.check(candidate)).rejects.toThrow("apply blocked");
+  });
 });

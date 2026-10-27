@@ -12,7 +12,7 @@ import type { AppSecretCustody } from "./github-app-secret.ts";
 import { requireEvidence, refusal } from "./planning-state.ts";
 import { boundedBody } from "./planning-read.ts";
 
-export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>): AppSecretCustody {
+export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>, dispatch: () => void): AppSecretCustody {
   env = { ...env };
   requireEvidence(/^[a-z0-9][a-z0-9-]{0,62}$/.test(workerName));
   const request: typeof fetch = async (url, init) => {
@@ -23,6 +23,7 @@ export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, tr
       ((String(url) === "https://api.github.com/app" && (init.method ?? "GET") === "GET") ||
         (value.origin === "https://api.cloudflare.com" && [secret, `${secret}/GITHUB_WEBHOOK_PREVIOUS_SECRET`].includes(value.pathname) &&
           ["PUT", "DELETE"].includes(init.method ?? ""))));
+    dispatch();
     const response = await transport(url, init);
     requireEvidence(!response.redirected && (!response.url || response.url === String(url)));
     // The old helper intentionally accepts 404 for previous-secret removal.
@@ -47,6 +48,7 @@ export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, tr
         const input = JSON.stringify({ metadata, worker });
         requireEvidence(Buffer.byteLength(input) <= 1024 && process.platform === "linux");
         const bytes = await new Promise<Buffer>((resolve, reject) => {
+          dispatch();
           const child = spawn(process.execPath, ["--import", loader, entry], {
             cwd: scratch, env: { HOME: scratch, PATH: "/usr/bin:/bin", CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN,
               CLOUDFLARE_ACCOUNT_ID: SUPPORT_ACCOUNT_ID, WRANGLER_SEND_METRICS: "false" },

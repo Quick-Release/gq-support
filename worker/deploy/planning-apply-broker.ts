@@ -26,7 +26,7 @@ export interface ApplyBrokerCustody {
   readonly state: typeof fetch;
   readonly app: AppSecretCustody;
 }
-export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBrokerCustody, check: () => Promise<void>) {
+export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBrokerCustody, check: () => Promise<void>, dispatch: () => void) {
   config = structuredClone(config);
   requireEvidence(/^[a-z0-9][a-z0-9-]{0,62}$/.test(config.worker) && new URL(config.stateOrigin).origin === config.stateOrigin &&
     new URL(config.stateOrigin).protocol === "https:" && custody.cloudflareToken.length > 0 && custody.stateBearer.length > 0 &&
@@ -44,7 +44,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
     requireEvidence(!closed && ++requests <= 64);
     // Immediately before EVERY operation, including every State write. State
     // drift checks belong at initial handoff; own writes then change that state.
-    await check(); requireEvidence(!closed);
+    await check(); requireEvidence(!closed); dispatch();
     if (method !== "GET") {
       const name = `${method}:${url}`;
       // State rows legitimately have updating + updated commits; other writes
@@ -148,7 +148,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
           return null;
         }
         requireEvidence(operation.worker === config.worker && uploaded);
-        await check(); requireEvidence(!closed);
+        await check(); requireEvidence(!closed); dispatch();
         if (operation.op === "app-key") {
           requireEvidence(Object.keys(operation).sort().join() === "op,worker" && !key);
           // Reserve before awaiting: an uncertain upload cannot replay.

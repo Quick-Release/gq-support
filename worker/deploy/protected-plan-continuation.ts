@@ -22,7 +22,7 @@ export interface ProtectedContinuation {
   github: typeof fetch;
   broker: Omit<ApplyBrokerConfig, "app" | "bundle" | "instances">;
   custody: Omit<ApplyBrokerCustody, "app">;
-  appCustody(check: () => Promise<void>): AppSecretCustody;
+  appCustody(check: () => Promise<void>, dispatch: () => void): AppSecretCustody;
   evidence: Omit<CandidateBinding, "candidate">;
   // Independently reacquires endpoint + state + local source/lockfiles/SQL and
   // enforces the same local lease, rather than accepting a boolean from child.
@@ -31,6 +31,17 @@ export interface ProtectedContinuation {
   signal: AbortSignal;
   publish(evidence: ApprovalCandidate & { binding: CandidateBinding; bundle: string; resources: Record<string, string> }): void;
 }
+
+/** Authentication is asynchronous: local authorization must still hold when
+ * its response arrives, immediately before granting a broker dispatch. */
+export async function verifyDispatch(signal: AbortSignal, candidate: ApprovalCandidate, checkWindow: () => void,
+  authenticate: () => Promise<boolean>, now = Date.now): Promise<void> {
+  const local = () => { requireEvidence(!signal.aborted && now() < candidate.expiresAt); checkWindow(); };
+  local();
+  requireEvidence(await authenticate());
+  local();
+}
+
 export async function continueProtectedPlan(config: ProtectedContinuation) {
   // Detach caller-owned metadata before the first asynchronous boundary.
   config = { ...config, policy: structuredClone(config.policy), input: structuredClone(config.input), app: structuredClone(config.app),
@@ -48,18 +59,32 @@ export async function continueProtectedPlan(config: ProtectedContinuation) {
   let candidate: ApprovalCandidate | undefined;
   let authorized = false, ready = false, attempted = false;
   let alive = config.signal;
+  const dispatch = () => {
+    requireEvidence(!alive.aborted && authorized && candidate && Date.now() < candidate.expiresAt);
+    config.checkWindow();
+  };
   const check = async () => {
     requireEvidence(!alive.aborted && authorized && candidate);
-    config.checkWindow();
-    requireEvidence(await approval.check(candidate));
+    await verifyDispatch(alive, candidate, config.checkWindow, () => approval.check(candidate!));
+    dispatch();
   };
   let broker: ReturnType<typeof planningApplyBroker> | undefined;
+  const revoke = () => { authorized = false; broker?.close(); approval.close(); };
+  const signals = new Set<AbortSignal>();
+  const watch = (signal: AbortSignal) => {
+    if (signals.has(signal)) return;
+    signals.add(signal); signal.addEventListener("abort", revoke, { once: true });
+    if (signal.aborted) revoke();
+  };
+  watch(config.signal);
   const lifetimeMs = 15 * 60_000;
   try {
     const result = await runOfflineModule(config.repo, "deploy/retained-planning-child.ts", {
       ...config.input, app: config.app, binding, nonce, sourceManifest: config.sourceManifest,
     }, { lifetimeMs, signal: config.signal, message: async (raw, runtimeSignal) => {
+      watch(runtimeSignal);
       alive = AbortSignal.any([config.signal, runtimeSignal]);
+      requireEvidence(!alive.aborted);
       const message = raw as BrokerOperation & { event?: string; binding?: CandidateBinding; nonce?: string; resources?: Record<string, string>; bundle?: string };
       requireEvidence(message && typeof message === "object");
       if (message.event === "ready") {
@@ -73,7 +98,7 @@ export async function continueProtectedPlan(config: ProtectedContinuation) {
           message.resources.Worker === "update" && message.resources.GitHubAppSecret === "update");
         requireEvidence(Buffer.byteLength(JSON.stringify(message)) <= 2048);
         binding = Object.freeze(expected);
-        broker = planningApplyBroker({ ...config.broker, app: config.app, bundle: message.bundle, instances }, { ...config.custody, app: config.appCustody(check) }, check);
+        broker = planningApplyBroker({ ...config.broker, app: config.app, bundle: message.bundle, instances }, { ...config.custody, app: config.appCustody(check, dispatch) }, check, dispatch);
         ready = true;
         const readyAt = Date.now(); candidate = Object.freeze({ candidate: binding.candidate, nonce, readyAt, expiresAt: readyAt + 10 * 60_000 });
         config.publish({ ...candidate, binding, bundle: message.bundle, resources: message.resources }); return null;
@@ -101,8 +126,13 @@ export async function continueProtectedPlan(config: ProtectedContinuation) {
       requireEvidence(Number.isSafeInteger(id));
       return await broker.handle(operation as Exclude<BrokerOperation, { op: "authorize" }>);
     } });
-    requireEvidence(authorized && broker?.outcome().completed && result === '{"status":"applied"}');
+    // Normal child exit revokes its runtime signal too. A committed output and
+    // verified child result establish completion; no dispatch grant stays open.
+    requireEvidence(!config.signal.aborted && broker?.outcome().completed && result === '{"status":"applied"}');
     return Object.freeze({ status: "applied" as const, candidate: binding.candidate });
   } catch { throw refusal(); }
-  finally { authorized = false; broker?.close(); approval.close(); }
+  finally {
+    revoke();
+    for (const signal of signals) signal.removeEventListener("abort", revoke);
+  }
 }

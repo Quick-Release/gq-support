@@ -64,7 +64,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
           githubToken, github: transport, evidence, signal: controller.signal, checkWindow: window.check,
           broker: { worker: config.worker, stateOrigin: config.endpoint.origin, databaseIds: config.endpoint.databases.map((db) => db.databaseId) },
           custody: { cloudflareToken: deploymentToken, stateBearer, cloudflare: transport, state: transport },
-          appCustody: (check) => trustedAppCustody(appEnv, config.worker, transport, check),
+          appCustody: (check, dispatch) => trustedAppCustody(appEnv, config.worker, transport, check, dispatch),
           revalidate: async () => {
             window.check();
             const fresh = await snapshotInput(await acquire());

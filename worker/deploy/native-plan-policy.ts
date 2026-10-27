@@ -45,7 +45,8 @@ function checkNativePlan(plan: Plan, evidence: PlanEvidence): void {
     const node = plan.resources[fqn];
     requireEvidence(identity && identity.instanceId && DATABASE_ID.test(identity.databaseId) && identity.databaseName && node &&
       ["noop", "update"].includes(node.action) && node.resource.Type === "Cloudflare.D1Database" &&
-      node.resource.FQN === fqn && node.resource.LogicalId === fqn && node.mode !== "local" && node.state);
+      node.resource.FQN === fqn && node.resource.LogicalId === fqn && node.resource.RemovalPolicy === "retain" &&
+      node.mode !== "local" && node.state);
     const state: ResourceState = node.state;
     validateRow(state, fqn);
     requireEvidence(state.instanceId === identity.instanceId &&

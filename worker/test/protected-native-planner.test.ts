@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import { protectedPlanningEntry } from "../deploy/planning-entry.ts";
 import { Action } from "alchemy/Action";
+import * as RemovalPolicy from "alchemy/RemovalPolicy";
 import type { PersistedState } from "alchemy/State/State";
 import * as Plan from "alchemy/Plan";
 import { Stage } from "alchemy/Stage";
@@ -50,7 +51,7 @@ async function source(initial: Record<string, ResourceState> = rows()) {
 const providerEnvironment = Layer.succeed(CloudflareEnvironment, Effect.succeed({
   type: "apiToken", apiToken: Redacted.make("public-placeholder"), accountId: ACCOUNT, source: { type: "env" },
 }));
-async function nativePlan(options: { omit?: string; props?: Record<string, unknown>; changed?: string; initial?: Record<string, ResourceState>; action?: boolean; extraState?: PersistedState } = {}) {
+async function nativePlan(options: { omit?: string; unretained?: string; props?: Record<string, unknown>; changed?: string; initial?: Record<string, ResourceState>; action?: boolean; extraState?: PersistedState } = {}) {
   const memory = await source(options.initial);
   if (options.extraState) await Effect.runPromise(memory.set({ ...target, fqn: options.extraState.fqn, value: options.extraState }));
   const stack: StackSpec = { name: STACK, stage: "prod", resources: {}, bindings: {}, actions: {}, output: {} };
@@ -61,7 +62,7 @@ async function nativePlan(options: { omit?: string; props?: Record<string, unkno
     for (const fqn of ["SupportDB", "SupportLedger"]) {
       if (fqn !== options.omit) yield* Database(fqn, {
         jurisdiction: "eu", ...(fqn === options.changed ? options.props : {}),
-      });
+      }).pipe(RemovalPolicy.retain(fqn !== options.unretained));
     }
     if (options.action) yield* Action("FixtureAction", (_input: { value: number }) => Effect.die(new Error("Planning must not run action body")))({ value: 1 });
     return yield* Plan.make(stack);
@@ -117,6 +118,13 @@ describe("installed native engine and live D1 provider diffs", () => {
     expect(() => validateNativePlan(plan, evidence())).not.toThrow();
   });
   for (const fqn of ["SupportDB", "SupportLedger"]) {
+    it(`rejects removing desired retention from a native no-op ${fqn}`, async () => {
+      const plan = await nativePlan({ unretained: fqn });
+      expect(plan.resources[fqn].action).toBe("noop");
+      expect(plan.resources[fqn].state?.removalPolicy).toBe("retain");
+      expect(plan.resources[fqn].resource.RemovalPolicy).toBe("destroy");
+      expect(() => validateNativePlan(plan, evidence())).toThrow("apply blocked");
+    });
     it.each([{ name: "renamed" }, { jurisdiction: "default" }, { primaryLocationHint: "weur" }])(`rejects ${fqn} replacement %j`, async (props) => {
       const plan = await nativePlan({ changed: fqn, props });
       expect(plan.resources[fqn].action).toBe("replace");

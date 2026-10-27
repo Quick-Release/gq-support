@@ -9,7 +9,7 @@ function fixture() {
   const check = vi.fn(async () => {});
   const transport = vi.fn<typeof fetch>(async (url) => String(url) === "https://api.github.com/app" ? Response.json({ id: 123, slug: env.GITHUB_APP_SLUG, client_id: env.GITHUB_APP_CLIENT_ID,
     owner: { login: "Quick-Release", type: "Organization" }, permissions: { issues: "write", metadata: "read" }, events: ["issues", "public", "repository"] }) : Response.json({ success: true }));
-  return { custody: trustedAppCustody(env, "synthetic-worker", transport, check), transport, check };
+  return { custody: trustedAppCustody(env, "synthetic-worker", transport, check, () => {}), transport, check };
 }
 describe("trusted App custody direct fetches", () => {
   it("uses existing real provisioning helpers with exact first-party routes and checks each call", async () => {

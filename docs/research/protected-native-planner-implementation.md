@@ -748,3 +748,27 @@ so waiting for post-plan approval does not treat nonblocking EAGAIN as EOF. All
 child stdout/stderr remain discarded in the final implementation; temporary
 static-label debugging was removed. No real-provider network mutation, live
 approval, private credential read or Test F is claimed by these results.
+
+## Combined-review corrections
+
+The independent Standards/Spec review identified cancellation during awaited
+authentication, approval expiry during the final comment read, and missing
+desired D1 retention validation. These were reproduced with deterministic
+fake-HTTP/native-plan tests. The old verifier accepted expiry and closure during
+its final read; the old native policy accepted a no-op that removed retention.
+
+Cancellation now synchronously closes the broker and approval capability for
+both the owner and child lifetime signals. Authentication rechecks cancellation,
+candidate expiry and the writer window afterward; the broker and trusted custody
+also invoke a synchronous local guard immediately before privileged dispatch.
+Normal child completion revokes dispatch too, while a confirmed final output
+commit and verified child result still establish successful completion. Remote
+operations already dispatched cannot be cancelled or described as rolled back.
+
+The GitHub verifier checks candidate freshness after awaited requests, rejects
+closure during verification and rechecks the approval comment's age after its
+exact reread. Native policy requires desired RemovalPolicy retain for BOTH D1
+resources, including a native no-op, as well as persisted retention.
+
+Staging and D1 update/migration profiles remain unimplemented in this revision.
+These corrections do not enable them or establish any live readiness evidence.

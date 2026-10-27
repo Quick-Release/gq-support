@@ -84,6 +84,25 @@ describe("retained offline native candidate -> authenticated approval -> install
     const { config, controller, calls } = fixture(); config.publish = () => controller.abort();
     await expect(continueProtectedPlan(config)).rejects.toThrow("apply blocked"); expect(calls).toEqual([]);
   }, 90_000);
+  it.each(["abort", "window"])("prevents first State mutation when %s occurs during dispatch authentication", async (change) => {
+    const { config, controller, calls, state, http, app } = fixture();
+    let reads = 0, open = true;
+    config.checkWindow = () => { if (!open) throw new Error("window ended"); };
+    config.github = async (url, init) => {
+      const response = await http.fetch(url, init);
+      // Two authenticated confirmations authorize the candidate. The third
+      // exact-comment read guards its first State checkpoint dispatch.
+      if (String(url).endsWith("/issues/comments/789") && ++reads === 3) {
+        if (change === "abort") controller.abort();
+        else open = false;
+      }
+      return response;
+    };
+    await expect(continueProtectedPlan(config)).rejects.toThrow("apply blocked");
+    expect(reads).toBe(3);
+    expect(calls).toEqual([]); expect(state).toEqual([]);
+    expect(app.provisionKey).not.toHaveBeenCalled();
+  }, 90_000);
   it("retains the native updating row after an uncertain upload and stops secret/output commits", async () => {
     const { config, state, app } = fixture();
     const send = config.custody.cloudflare;
