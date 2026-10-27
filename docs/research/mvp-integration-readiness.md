@@ -367,3 +367,18 @@ in [observer design](external-incident-observer.md#internal-cron-producer-code-s
 All LIVE manifests/permissions/reviewers/runner/exclusion/credentials/approvals,
 RPC/Test F and drills remain unverified. #20/#29 stay open. No live operations,
 settings, credentials, notifications or external resources were changed.
+
+
+Producer validation: **1,289 Worker tests / 53 files passed** on committed runtime
+source `dc02cff830c5184a123bcd4db8df075ab54b5860` (722.92s), including native
+protected stage/mode, additive-history, identity/retain, dispatch/one-shot and
+failed-lock tests. **93** focused producer/delivery/broker tests and **81**
+unchanged offline protocol tests pass. Three subsequent test-only write-rejection
+and absent-ledger regressions bring the final callback file to **20 passing**
+tests; runtime/deployment source is unchanged after the full run. Typecheck/lint,
+114 CI-script tests, workflow/runtime policies, three lint controls, secret scans
+and whitespace pass. Exploratory failures and interrupted pre-correction runs are
+recorded in the observer design and are not final proof. Hosted checks/reviews
+remain uninspected. This establishes CODE behavior only; all LIVE gates above,
+external read authority, activation/coverage and the parent's fallback choice
+remain pending. #20/#29 remain open.

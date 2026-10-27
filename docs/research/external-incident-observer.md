@@ -34,7 +34,7 @@ failures, absent ticks, outside workflow failures and receipt remain external ga
 A returned tick is insufficient evidence: phases catch failures/timeouts, and
 maintenance can deny work. The nominal 57-second phase sum is cooperative.
 
-No dependencies were installed in this checkout. To check the exact locked
+At the original design slice, no dependencies were installed. To check the exact locked
 contracts without running package scripts, the published `alchemy@2.0.0-beta.83`
 and `@cloudflare/workers-types@5.20261015.1` tarballs were extracted only in `/tmp`.
 Alchemy `src/Cloudflare/Workers/CronEventSource.ts:202–247` passes a
@@ -359,6 +359,9 @@ confirms #20 and #29 OPEN; hosted PR checks/reviews remain uninspected.
 
 ## Internal Cron producer CODE slice (2026-10-27)
 
+This dedicated `t3/cron-progress-producer` checkout started at PR122 head
+`66a7c74c5236b538091f0068bb1ee6d758ebe6e8`; source branches were untouched.
+Frozen dependencies were installed for this implementation.
 The internal producer is now wired to the actual installed Alchemy
 `CronEventSource` callback in `worker/src/worker.ts`. It keeps the controller's
 UTC `scheduledTime` separately from invocation start (`Date.now()`); retries
@@ -448,3 +451,47 @@ required. #20 and #29 remain open; all LIVE manifests, permissions, reviewers,
 runner/exclusion, credentials, approvals, RPC/Test F and drills remain unverified.
 The parent's pending fallback choice is neither required nor approved by this
 independent CODE slice.
+
+
+### Producer validation (CODE only)
+
+All runs used Node **26.12.1** and Vitest **`--maxWorkers=1`**.
+
+- RED against PR122's actual Worker registration/callback: the controller-minute
+  regression fails with no progress row; restore the implementation afterward.
+  The scheduled deadline regression also fails because the old scheduler returns
+  no finite results. Real cleanup storage failure with logging suppressed
+  reproduced false `ok`; explicit phase signals fix it. The real additive repair
+  regression reproduced a successful repair being mislabeled failed; it now
+  preserves success while incomplete repairs remain explicit.
+- Final focused producer/delivery/broker run: **93 tests / 6 files passed**.
+  Workerd D1 tests fill all **240** cells, allocate concurrent attempts, reject
+  the fifth attempt, retain a late older failure, fence out-of-order/finished and
+  stale-generation writes, and mark unresolved eviction partial. Callback tests
+  cover cancellation, noncooperative finalizers, separate drain failure, hung
+  observation I/O, missing identity and runtime-generated `gqcanary_` privacy
+  canaries. No literal private payload is used as an observation dimension.
+- Complete Worker run on unchanged committed runtime source
+  `dc02cff830c5184a123bcd4db8df075ab54b5860`: **1,289 tests / 53 files passed**,
+  **722.92 seconds**. This includes actual installed shared-graph/native upload,
+  both stages/Discord modes, additive migration policy/history/identity/retain,
+  authenticated dispatch, one-shot apply and retained failed-continuation locks.
+  All native HTTP/RPC/storage evidence is synthetic/offline; no remote settings,
+  permissions, migration applicability or live receipt is inferred.
+- After that full run, three additional test-only write-rejection/missing-ledger
+  cases were added: the final callback file passes **20 tests**. No runtime or
+  deployment source changed after the full run. Worker typecheck/lint pass.
+- Unchanged offline protocol: **81 tests passed**, preserving PR122 HTTP identity
+  pins and late-Cron-failure carry. **114 CI-script tests**, workflow/runtime
+  policies, root/app JS lint and **3** lint controls pass. Worker/docs and
+  candidate-reachable history secret scans and whole-slice whitespace checks pass.
+
+An exploratory native run while source was still being edited reported 61 passes
+and three failures; it is not passing evidence. Two partial full runs were stopped
+for the suppressed-log and metadata-repair corrections before the final complete
+run above. They are not counted as final validation. Only the final frozen-source
+run establishes the reported complete Worker result. Subsequent changes are tests
+and documentation only, so no additional expensive full run was performed.
+Hosted checks/reviews remain **uninspected**; no CI polling/watch or merge was
+performed. Pushes use `GQ_SUPPORT_SKIP_PRE_PUSH=1`; no shared DDEV/browser work ran.
+No LIVE operation, credential/profile access or notification was performed.

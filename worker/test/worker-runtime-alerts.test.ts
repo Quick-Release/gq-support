@@ -248,3 +248,32 @@ it("does not grant declaration release authority to ambient environment values",
   await load();
   expect(state.declaration).toMatchObject({ env: { SUPPORT_RELEASE_CANDIDATE: "unknown", SUPPORT_RELEASE_STAGE: "unknown" } });
 });
+
+it.each(["start", "terminal"] as const)("keeps rejected %s observation writes unknown without preventing support", async (boundary) => {
+  const canary = `gqcanary_${crypto.randomUUID()}`;
+  const progress = await import("../src/cron-progress.ts");
+  if (boundary === "start") vi.spyOn(progress, "startProgress").mockRejectedValue(new Error(canary));
+  else vi.spyOn(progress, "writeProgress").mockRejectedValue(new Error(canary));
+  let ran = false;
+  state.phases = Effect.sync(() => { ran = true; });
+  await load();
+  await stage.databases.ledger.prepare("UPDATE discord_alert_control SET blocked = 1").run();
+  await Effect.runPromise(state.tick!.pipe(Effect.provideService(WorkerEnvironment, env)));
+  expect(ran).toBe(true);
+  const rows = (await stage.databases.ledger.prepare("SELECT * FROM cron_progress").all()).results;
+  expect(rows).toHaveLength(boundary === "start" ? 0 : 1);
+  expect(rows.every(row => row.terminal === null)).toBe(true);
+  expect(JSON.stringify(rows)).not.toContain(canary);
+  expect(await stage.databases.ledger.prepare("SELECT COUNT(*) AS n FROM maintenance_operation").first()).toEqual({ n: 0 });
+});
+
+it("leaves an absent scheduled ledger binding unknown without starting support", async () => {
+  state.missing = true;
+  state.ledger = undefined;
+  let ran = false;
+  state.phases = Effect.sync(() => { ran = true; });
+  await load();
+  await Effect.runPromise(state.tick!.pipe(Effect.provideService(WorkerEnvironment, env)));
+  expect(ran).toBe(false);
+  expect((await stage.databases.ledger.prepare("SELECT * FROM cron_progress").all()).results).toEqual([]);
+});
