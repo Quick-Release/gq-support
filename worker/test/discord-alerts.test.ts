@@ -12,6 +12,7 @@ import { alertConfig, collectAlerts, drainAlerts, observeAlert, persistCollected
 import { createGitHubWebhookReceiver } from "../src/github-webhooks.ts";
 import { localStage } from "./local-d1.ts";
 import { provisionDiscordAlertSecret, validateDiscordAlertConfig } from "../deploy/discord-alert-secret.ts";
+import { executeOperator } from "../src/maintenance-operator.ts";
 
 // Generated, synthetic credentials only. Never call a real endpoint in this suite.
 const URL = `https://discord.com/api/webhooks/123456789012345678/${"fake_".repeat(14)}`;
@@ -23,10 +24,15 @@ afterEach(async () => { await stage.dispose(); });
 const ledger = () => stage.databases.ledger;
 const main = () => stage.databases.main;
 const observe = (active = true, now = START) => observeAlert(ledger(), "refresh_lag", active, 1, now);
-const drain = (request: typeof fetch, now = START, setting = config) => drainAlerts(main(), ledger(), setting, request, now);
+const drain = (request: typeof fetch, now = START, setting = config) => drainAlerts(main(), ledger(), setting, request, now, () => now);
 const ok = () => vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
 const control = () => ledger().prepare("SELECT * FROM discord_alert_control").first<{ blocked: number; owner: string | null; next_at: number }>();
 const rows = () => ledger().prepare("SELECT * FROM discord_alert").all();
+const operator = (...args: string[]) => executeOperator(args, {
+  query: async (sql, params) => (await main().prepare(sql).bind(...params).all<Record<string, unknown>>()).results,
+  ledger: async (sql, params) => (await ledger().prepare(sql).bind(...params).all<Record<string, unknown>>()).results,
+  mappings: [], recordRevocation: async () => {},
+});
 
 it("captures a real rejected webhook, persists outside its response, and sends an exact allowlisted payload", async () => {
   const collector = collectAlerts();
@@ -141,10 +147,12 @@ it.each([302, 500, 204, 429, 401, 404])("fails closed on status %i without consu
   expect(await control()).toMatchObject({ blocked: 1 });
   expect((await rows()).results[0]).toMatchObject({ sent_version: 0 });
   const operations = (await ledger().prepare("SELECT * FROM maintenance_operation WHERE kind = 'provider'").all()).results;
-  expect(operations).toHaveLength([302, 500, 204].includes(status) ? 1 : 0);
+  expect(operations).toHaveLength(0);
+  await operator("maintenance-enter", "operator-1");
+  await operator("maintenance-mirror", "operator-1");
 });
 
-it("treats transport/timeout as unknown, retains provider obstruction and never claims success", async () => {
+it("keeps transport/timeout uncertainty in alert state without obstructing support recovery", async () => {
   await observe();
   const fake = vi.fn<typeof fetch>().mockRejectedValue(new Error(`${URL}?private=secret`));
   await drain(fake);
@@ -153,7 +161,39 @@ it("treats transport/timeout as unknown, retains provider obstruction and never 
   expect((fake.mock.calls[0]![1]!.signal)).toBeInstanceOf(AbortSignal);
   expect(await control()).toMatchObject({ blocked: 1 });
   expect((await rows()).results[0]).toMatchObject({ sent_version: 0 });
-  expect((await ledger().prepare("SELECT * FROM maintenance_operation WHERE kind='provider'").all()).results).toHaveLength(1);
+  expect((await ledger().prepare("SELECT * FROM maintenance_operation").all()).results).toHaveLength(0);
+  await operator("maintenance-enter", "operator-1");
+  await operator("maintenance-mirror", "operator-1");
+});
+
+it.each([429, 200])("starts response-relative cooldown at receipt for delayed status %i", async (status) => {
+  await observe();
+  await observeAlert(ledger(), "webhook_rejected", true, 1, START + 1);
+  const fake = vi.fn<typeof fetch>().mockImplementation(async () => new Response("{}", { status,
+    headers: status === 429 ? { "Retry-After": "120" } : { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset-After": "120" } }));
+  await drainAlerts(main(), ledger(), config, fake, START, () => START + 1_000);
+  expect(await control()).toMatchObject({ next_at: START + 121_000 });
+  await drain(fake, START + 120_999);
+  expect(fake).toHaveBeenCalledTimes(1);
+  await drain(fake, START + 121_000);
+  expect(fake).toHaveBeenCalledTimes(2);
+});
+
+it("obstructs restore during active notification I/O, then isolates its uncertain receipt", async () => {
+  await observe();
+  let started!: () => void, respond!: (response: Response) => void;
+  const dispatched = new Promise<void>((resolve) => { started = resolve; });
+  const response = new Promise<Response>((resolve) => { respond = resolve; });
+  const fake = vi.fn<typeof fetch>().mockImplementation(async () => { started(); return response; });
+  const pending = drain(fake);
+  await dispatched;
+  await operator("maintenance-enter", "operator-1");
+  await expect(operator("maintenance-mirror", "operator-1")).rejects.toThrow("exclusive drain");
+  respond(new Response(null, { status: 500 }));
+  await pending;
+  expect(await control()).toMatchObject({ blocked: 1 });
+  expect((await ledger().prepare("SELECT * FROM maintenance_operation").all()).results).toHaveLength(0);
+  await operator("maintenance-mirror", "operator-1");
 });
 
 it.each(["http://discord.com/api/webhooks/1/token", `${URL}?wait=true`, `${URL}#fragment`, URL.replace("discord.com", "discord.com.evil.invalid"), URL.replace("discord.com", "discord.com:443"), URL.replace("discord.com", "user@discord.com"), URL.replace("discord.com", "127.0.0.1"), URL.replace("/webhooks/", "/v10/webhooks/")])("rejects unsupported URL shapes without HTTP", async (webhook) => {

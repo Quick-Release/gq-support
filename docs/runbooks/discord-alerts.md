@@ -26,10 +26,11 @@ lifts containment, releases a suspension, or enables support delivery.
 Alert state uses additive **ledger migration 0004**, not SupportDB, so restoring
 SupportDB cannot rewind notification receipts or cooldowns. It is not mirrored
 into SupportDB or involved in report replay. Never restore the ledger with the
-main database. An uncertain POST retains a non-expiring provider obstruction;
-a lost drain owner never expires. These can intentionally block restore/release
-until an Operator investigates under the #108 recovery protocol. Do not delete
-admissions to make a restore appear drained.
+main database. Active notification I/O holds admission until it settles locally. Unknown remote
+receipt then remains blocked only in alert-route state: it cannot replay
+SupportDB data and must not obstruct support recovery. A lost runtime owner
+still never expires under #108. Do not delete runtime or GitHub admissions to
+make a restore appear drained.
 
 The request path only collects finite classes in memory. Persistence attaches
 to `waitUntil`, after the support response is determined. Prompt delivery and
@@ -95,15 +96,15 @@ prove its own absence. No per-page or self-monitoring call closes that gap.
   No message body or ID is consumed or retained. This is not human acknowledgment.
   `allowed_mentions: {parse: []}` is mandatory; no embeds, user fields or links.
 - Retry **only** a 429 rejection with a valid numeric `Retry-After` header in
-  seconds (fractional allowed), no earlier than its deadline or the local minute
-  bound. Exhausted-bucket responses also honor `X-RateLimit-Reset-After`.
+  seconds (fractional allowed), measured from response receipt and no earlier
+  than its deadline or the local minute bound. Exhausted-bucket responses also honor `X-RateLimit-Reset-After`.
   Three POST attempts per state version maximum. Exhaustion leaves it unsent
   until explicit state change/expiry; it does not assert receipt. There is no
   hard-coded Discord per-route quota. Body-only/malformed rate responses block
   the route; the documented header alternative is the supported subset.
 - Timeout/transport, 5xx, unexpected 2xx, redirects and other unsupported responses
-  block the route with no automatic retry. Unknown delivery retains provider
-  admission; known 400/401/403/404/429 can retire admission. Route health cannot
+  block the route with no automatic retry. After local I/O settles, notification provider admission retires even when
+  remote receipt remains unknown; the alert route stays blocked. Route health cannot
   notify over its failed route. Inspect it through independent Operator access.
 - Rows expire after **seven quiet days**, during an admitted configured drain.
   Active recurring rows stay bounded by the finite class set. The same condition
@@ -184,7 +185,7 @@ solve this by exposing a URL credential to automatic traces.
 
 For a blocked route/lost owner, inspect only counts/classes/times and operation
 IDs through independent Operator tooling. Do not blindly reset `blocked`, clear
-an owner or delete provider admissions; this slice deliberately adds no remote
+a lost runtime owner or delete GitHub provider admissions; this slice deliberately adds no remote
 unblock/replay API. Review channel-side outcomes and #108 obstructions first;
 prepare any repair as a separately authorized, audited Operator operation.
 

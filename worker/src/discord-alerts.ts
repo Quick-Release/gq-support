@@ -100,7 +100,7 @@ interface Row { signal: Signal; active: number; count: number; first_at: number;
 
 /** At most one POST per minute across competing isolates. Unknown delivery latches the route closed. */
 export async function drainAlerts(main: QueryDatabase, ledger: QueryDatabase, config: AlertConfig,
-  request: typeof fetch = fetch, now = Date.now()) {
+  request: typeof fetch = fetch, now = Date.now(), clock = Date.now) {
   const url = config.enabled ? webhookURL(config.webhook) : null;
   if (!url || !["prod", "staging"].includes(config.stage) || !/^(?:[a-f0-9]{40}|unrecorded)$/.test(config.release)) return;
   await Effect.runPromise(contained(main, ledger, Effect.promise(async () => {
@@ -128,37 +128,42 @@ export async function drainAlerts(main: QueryDatabase, ledger: QueryDatabase, co
           allowed_mentions: { parse: [] },
         }) });
     } catch {
-      // Transport/timeout may have posted. Preserve provider obstruction and stop this route.
-      await block(ledger, owner); return;
+      // The notification may have posted, but it cannot mutate SupportDB or
+      // replay its data. Latch alert uncertainty locally, not in restore drain.
+      await block(ledger, owner);
+      await finishOperation(ledger, operation);
+      return;
     }
+    const receivedAt = Math.max(now, clock());
     // Never consume or log the upstream body, including on errors.
     await response.body?.cancel().catch(() => undefined);
+    // Local notification I/O has settled; its unknown remote receipt is kept
+    // in discord_alert_control. The enclosing runtime still owns local writes.
+    await finishOperation(ledger, operation);
     if (response.status === 200) {
       await ledger.prepare("UPDATE discord_alert SET sent_version = ?, attempts = 0 WHERE signal = ?").bind(row.version, row.signal).run();
-      await finishOperation(ledger, operation);
       const remaining = response.headers.get("X-RateLimit-Remaining");
-      const reset = seconds(response.headers.get("X-RateLimit-Reset-After"));
+      const reset = seconds(response.headers.get("X-RateLimit-Reset-After"), receivedAt);
       if (remaining === "0") {
         if (reset === null) { await block(ledger, owner); return; }
-        await defer(ledger, owner, now + Math.max(MINUTE, reset));
+        await defer(ledger, owner, receivedAt + Math.max(MINUTE, reset));
       } else await unlock(ledger, owner);
     } else if (response.status === 429) {
-      await finishOperation(ledger, operation);
-      const retry = seconds(response.headers.get("Retry-After"));
+      const retry = seconds(response.headers.get("Retry-After"), receivedAt);
       // Header is the documented alternative to body.retry_after. Unsupported/missing header fails closed.
       if (retry === null) await block(ledger, owner);
-      else await defer(ledger, owner, now + Math.max(MINUTE, retry));
+      else await defer(ledger, owner, receivedAt + Math.max(MINUTE, retry));
     } else {
-      // Definitive rejection can retire admission; 5xx/unexpected/redirect stays uncertain.
-      if ([400, 401, 403, 404].includes(response.status)) await finishOperation(ledger, operation);
+      // Unsupported outcomes stop this notification route without obstructing
+      // support recovery. Existing GitHub write obstructions are unchanged.
       await block(ledger, owner);
     }
   }), undefined));
 }
-const seconds = (value: string | null): number | null => {
+const seconds = (value: string | null, receivedAt: number): number | null => {
   if (value === null || !/^\d+(?:\.\d+)?$/.test(value)) return null;
   const ms = Math.ceil(Number(value) * 1000);
-  return Number.isSafeInteger(ms) && ms >= 0 && ms <= Number.MAX_SAFE_INTEGER - Date.now() ? ms : null;
+  return Number.isSafeInteger(ms) && ms >= 0 && ms <= Number.MAX_SAFE_INTEGER - receivedAt ? ms : null;
 };
 const unlock = async (db: QueryDatabase, owner: string) => { await db.prepare("UPDATE discord_alert_control SET owner = NULL WHERE owner = ?").bind(owner).run(); };
 const defer = async (db: QueryDatabase, owner: string, next: number) => { await db.prepare("UPDATE discord_alert_control SET next_at = ?, owner = NULL WHERE owner = ?").bind(next, owner).run(); };
