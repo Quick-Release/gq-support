@@ -110,3 +110,23 @@ it("a correctly bound sticky-partial read still cannot grant record coverage", (
   const review = validateSnapshotReview(encode(m), custody(m), now);
   expect(claims(c, r, review)).toMatchObject({ activation: "reviewed_external_input", records: null, continuity: "unknown" });
 });
+
+it.each(["json", "utf8", "wire", "oversize", "status", "context", "batch"])("consumes snapshot capability before %s rejection", (fault) => {
+  const m = manifest(), cap = validateSnapshotReview(encode(m), custody(m), now);
+  const r = read(), context = { ...c };
+  if (fault === "json") r.body = new TextEncoder().encode("{");
+  if (fault === "utf8") r.body = new Uint8Array([255]);
+  if (fault === "wire") r.body = encode({ ...wire(), version: 2 });
+  if (fault === "oversize") r.body = new Uint8Array(65537);
+  if (fault === "status") r.status = "unavailable";
+  if (fault === "context") context.activation = now + 1;
+  const reads = fault === "batch" ? Array.from({ length: 33 }, () => r) : [r];
+  expect(decodeBatch(context, reads, cap).invalid).toBe(true);
+  expect(claims(c, read(), cap)).toMatchObject({ activation: "unknown", records: null });
+});
+it("does not transfer failed snapshot authority to a later read in the same batch", () => {
+  const m = manifest(), cap = validateSnapshotReview(encode(m), custody(m), now);
+  const batch = decodeBatch(c, [{ ...read(), body: new TextEncoder().encode("{") }, read()], cap);
+  const second = batch.evidence[1]?.payload;
+  expect(second && "claims" in second ? second.claims : null).toMatchObject({ activation: "unknown", records: null });
+});

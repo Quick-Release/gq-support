@@ -1,4 +1,4 @@
-import { assessSnapshot, type SnapshotClaims } from "./snapshot-evidence.ts";
+import { assessSnapshot, consumeSnapshotReview, type SnapshotClaims } from "./snapshot-evidence.ts";
 import { decodeObserverSnapshot, observerOutcomes, terminalOutcomes } from "../../src/observer-snapshot.ts";
 /** Offline only. Original normalized fixture contracts remain proposals. The v1
  * snapshot branch adapts the actual producer wire; other sources still require
@@ -183,6 +183,9 @@ function sameExpectation(a: Expectation, b: Expectation): boolean {
 /** Check bytes BEFORE JSON. Batch/row/page bounds are hard stops, with fixed errors.
  * Partial positive error observations survive, but partial input cannot prove health. */
 export function decodeBatch(c: Context, reads: readonly Read[], snapshotReview?: unknown): Batch {
+  // The first snapshot attempt owns this authority, including rejected context,
+  // budgets, provenance, bytes and wire data. No later read may inherit it.
+  let review = reads.some(r => r.source === "snapshot") ? consumeSnapshotReview(snapshotReview) : undefined;
   try { context(c); } catch { return { evidence: [], invalid: true }; }
   if (reads.length > 32 || reads.reduce((n, r) => n + r.body.byteLength, 0) > 1024 * 1024)
     return { evidence: [], invalid: true };
@@ -192,6 +195,8 @@ export function decodeBatch(c: Context, reads: readonly Read[], snapshotReview?:
   const pages = new Map<Source, number>();
   for (const r of reads) {
     const { body, ...provenance } = r;
+    const attempt = r.source === "snapshot" ? review : undefined;
+    if (r.source === "snapshot") review = undefined;
     let payload: Payload | null = null;
     try {
       choice(r.source, ["http", "analytics", "snapshot", "workflow", "deployment", "route"]);
@@ -202,7 +207,7 @@ export function decodeBatch(c: Context, reads: readonly Read[], snapshotReview?:
       pages.set(r.source, (pages.get(r.source) ?? 0) + r.pages);
       if (r.source === "workflow" && (pages.get(r.source) ?? 0) > 3) bad();
       if (body.byteLength > 65536 || r.status !== "ok") bad();
-      payload = decode(r.source, JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(body)), c, r, snapshotReview);
+      payload = decode(r.source, JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(body)), c, r, attempt);
     } catch { invalid = true; }
     evidence.push({ read: provenance, payload });
   }

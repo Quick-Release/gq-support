@@ -67,6 +67,17 @@ export function validateSnapshotReview(bytes: Uint8Array, custody: SnapshotRevie
     return capability;
   } catch { return refuse(); }
 }
+/** Move authority out of the caller's capability before any decode can fail.
+ * The replacement stays internal to that one snapshot attempt. */
+export function consumeSnapshotReview(capability: unknown): SnapshotReview | undefined {
+  if (!capability || typeof capability !== "object") return undefined;
+  const manifest = reviewed.get(capability);
+  reviewed.delete(capability);
+  if (!manifest) return undefined;
+  const attempt: SnapshotReview = Object.freeze({ kind: "private_snapshot_review" });
+  reviewed.set(attempt, manifest);
+  return attempt;
+}
 /** Private assessment only. Complete SQL read proves absence of RECORDS within
  * explicit bounds, never successful heartbeat writes or Cron nonexecution. */
 export interface SnapshotClaims {

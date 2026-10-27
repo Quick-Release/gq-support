@@ -823,3 +823,16 @@ not a review of these new changes. Hosted checks/reviews are uninspected. No liv
 HTTP/account/state/credentials/profiles/secret requests, deployment/settings,
 notifications/drills, GitHub messages/comments, merge, browser, PHP, DDEV or
 CI polling/watch occurred. Push uses `GQ_SUPPORT_SKIP_PRE_PUSH=1`.
+
+### Evidence capability review correction
+
+Independent review found one P2: parsing/provenance/context or budget rejection
+could leave the caller's single-use snapshot review capability reusable. The
+batch now consumes it before any snapshot validation, and reserves its internal
+replacement for the first snapshot only. A rejected first read cannot pass that
+authority to a later read or retry. Non-snapshot batches do not consume it.
+Eight new cases reproduced the defect before correction, covering malformed
+JSON/UTF-8/wire data, size, status, context, batch bounds and same-batch retry.
+All 129 offline tests and five existing negative controls pass after correction;
+Worker typecheck and affected lint pass. This adds no authentication, continuity,
+health or operational authority. No runtime source or LIVE resource changed.
