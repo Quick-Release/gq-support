@@ -22,13 +22,29 @@ const denied = () => Effect.fail(new StateStoreError({ message: refusal().messag
 export function requireEvidence(condition: unknown): asserts condition {
   if (!condition) throw refusal();
 }
-export type Target = { stack: typeof STACK; stage: "prod" | "staging" };
+export type ProtectedStage = "prod" | "staging";
+export const protectedAppSlugs = Object.freeze({ prod: "getquick-support", staging: "getquick-support-staging" });
+export function checkStage(stage: string): asserts stage is ProtectedStage {
+  requireEvidence(Object.hasOwn(protectedAppSlugs, stage));
+}
+export type Target = { stack: typeof STACK; stage: ProtectedStage };
 export function checkTarget(target: Target) {
   requireEvidence(target && target.stack === STACK && ["prod", "staging"].includes(target.stage));
 }
 
+// The copied native input is exactly one reviewed stack/stage, never a bag
+// from which the child may choose another target.
+export function checkInputTarget(input: { rows: unknown; output: unknown }, target: Target) {
+  checkTarget(target);
+  for (const value of [input.rows, input.output]) {
+    requireEvidence(value && typeof value === "object" && Object.keys(value).join() === target.stack);
+    const stages = (value as Record<string, unknown>)[target.stack];
+    requireEvidence(stages && typeof stages === "object" && Object.keys(stages).join() === target.stage);
+  }
+}
+
 // This is a reviewed, immutable deployment contract, NOT an env-provided flag.
-// No production manifest has been supplied. No production entry can acquire state.
+// Neither protected stage has a live manifest. Both entries remain blocked.
 export interface EndpointContract {
   readonly origin: string;
   readonly account: typeof ACCOUNT;
@@ -38,6 +54,7 @@ export interface EndpointContract {
   readonly target: Target;
 }
 export const productionEndpointContract: ReviewedEndpoint | undefined = undefined;
+export const stagingEndpointContract: ReviewedEndpoint | undefined = undefined;
 
 // transport must be a dedicated non-redirecting fetch, not an SDK/global client.
 // Exact paths, no listStacks (which would expose other projects), no URL prefix grants.

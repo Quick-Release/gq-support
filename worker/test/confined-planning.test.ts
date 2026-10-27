@@ -27,7 +27,7 @@ function fixture() {
     Worker: { fqn: "Worker", logicalId: "Worker", instanceId: "instance-Worker", resourceType: "Cloudflare.Worker", providerVersion: 1, providerMode: "live", status: "created", downstream: ["GitHubAppSecret"], bindings: [], props: {}, attr: { accountId, workerName: "synthetic-worker", workerId: "00000000000000000000000000000001", url: "https://synthetic-worker.example.workers.dev", urls: ["https://synthetic-worker.example.workers.dev"], crons: ["* * * * *"], hash: {} } },
     GitHubAppSecret: { fqn: "GitHubAppSecret", logicalId: "GitHubAppSecret", instanceId: "instance-secret", resourceType: "GQSupport.GitHubAppSecret", providerVersion: 1, providerMode: "live", status: "created", downstream: [], bindings: [], props: { stage: "prod", workerName: "synthetic-worker" }, attr: {} },
   };
-  return { databases: [
+  return { target: { stack: "GQSupportWorker" as const, stage: "prod" as const }, databases: [
     { fqn: "SupportDB" as const, instanceId: "instance-SupportDB", databaseId: "00000000-0000-4000-8000-000000000001", databaseName: "synthetic-SupportDB" },
     { fqn: "SupportLedger" as const, instanceId: "instance-SupportLedger", databaseId: "00000000-0000-4000-8000-000000000002", databaseName: "synthetic-SupportLedger" },
   ], rows: { GQSupportWorker: { prod: rows } }, output: { GQSupportWorker: { prod: {} } } };

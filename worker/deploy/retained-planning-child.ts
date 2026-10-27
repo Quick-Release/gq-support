@@ -34,7 +34,7 @@ async function main() {
   }));
   await planOffline(input, { capability, client, custody: {
     provisionKey: async (stage, worker) => {
-      capability.check(); requireEvidence(stage === "prod");
+      capability.check(); requireEvidence(stage === input.target.stage);
       return await channel.request({ op: "app-key", worker }) as Awaited<ReturnType<typeof import("./github-app.ts").provisionAppKey>>;
     },
     provisionWebhook: async (worker, appId) => { capability.check(); await channel.request({ op: "app-webhook", worker, appId }); },
@@ -44,14 +44,14 @@ async function main() {
     },
   }, retain: async (native, context, evidence, snapshot, resources, bundle, checkBundle) => {
     const binding = { ...input.binding, candidate: digest({ seed: input.binding.candidate, bundle }) };
-    const retained = retainCandidate({ native, stack: { name: STACK, stage: "prod" }, session: { context } }, evidence, binding);
+    const retained = retainCandidate({ native, stack: { name: STACK, stage: input.target.stage }, session: { context } }, evidence, binding);
     // Only the approved bounded evidence/summary crosses this public event.
     await channel.send({ event: "ready", binding, nonce: input.nonce, resources, bundle });
     const authorized = await channel.request({ op: "authorize" });
     requireEvidence(JSON.stringify(authorized) === JSON.stringify(binding));
     await checkBundle(); // before opening the phase gate or the first State checkpoint
     const target = (request: { stack: string; stage: string }) => {
-      capability.check(); requireEvidence(request.stack === STACK && request.stage === "prod");
+      capability.check(); requireEvidence(request.stack === STACK && request.stage === input.target.stage);
     };
     const writer: StateService = { ...snapshot,
       set: (request) => Effect.promise(async () => {

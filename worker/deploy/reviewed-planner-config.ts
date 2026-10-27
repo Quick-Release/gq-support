@@ -8,6 +8,6 @@ export interface ReviewedPlannerConfig {
   readonly approval: Omit<ApprovalPolicy, "run" | "attempt" | "head">;
   readonly worker: string;
   readonly window: OwnerWindow;
-  readonly app: { readonly id: number; readonly clientId: string; readonly slug: "getquick-support" };
+  readonly app: { readonly id: number; readonly clientId: string; readonly slug: "getquick-support" | "getquick-support-staging" };
 }
 export const reviewedPlannerConfig: ReviewedPlannerConfig | undefined = undefined;

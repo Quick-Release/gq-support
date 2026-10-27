@@ -8,11 +8,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseIdentity } from "./native-plan-policy.ts";
 import type { verifyApp } from "./github-app.ts";
-import { refusal, requireEvidence } from "./planning-state.ts";
+import { refusal, requireEvidence, type Target } from "./planning-state.ts";
 import { MAX_FRAME, checkChannelFrame } from "./retained-child-channel.ts";
 import { MAX_BODY, checkWire } from "./planning-read.ts";
 
 export interface ConfinedPlanInput {
+  readonly target: Target;
   readonly databases: readonly DatabaseIdentity[];
   readonly rows: unknown;
   readonly output: unknown;
@@ -30,7 +31,7 @@ export async function runConfinedPlan(repo: string, input: ConfinedPlanInput,
 ): Promise<ConfinedPlanSummary> {
   try {
     checkWire(input);
-    requireEvidence(Object.keys(input).sort().join() === "databases,output,rows");
+    requireEvidence(Object.keys(input).sort().join() === "databases,output,rows,target");
     const verified = await preflight();
     const app = { stage: verified.stage, appId: verified.appId, slug: verified.slug, clientId: verified.clientId, fingerprint: verified.fingerprint };
     const summary = JSON.parse(await runOfflineModule(repo, "deploy/confined-planning-child.ts", { ...input, app })) as ConfinedPlanSummary;

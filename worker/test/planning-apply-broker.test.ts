@@ -5,11 +5,12 @@ import { ACCOUNT } from "../deploy/planning-state.ts";
 const app = { stage: "prod", clientId: "synthetic", slug: "getquick-support", appId: 123, fingerprint: "synthetic-public" };
 const origin = "https://api.cloudflare.com";
 const script = `${origin}/client/v4/accounts/${ACCOUNT}/workers/scripts/synthetic-worker`;
-function fixture(check = vi.fn(async () => {}), dispatch = () => {}) {
+function fixture(check = vi.fn(async () => {}), dispatch = () => {}, stage: "prod" | "staging" = "prod") {
+  const metadata = { ...app, stage, slug: stage === "prod" ? "getquick-support" : "getquick-support-staging" };
   const transport = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: {} }));
   const custody = { cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: transport, state: transport,
-    app: { provisionKey: vi.fn(async () => app), provisionWebhook: vi.fn(async () => {}), check: vi.fn(async () => ({ appId: 123, checkedAt: new Date().toISOString() })) } };
-  const broker = planningApplyBroker({ instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databaseIds: ["db1", "db2"], app }, custody, check, dispatch);
+    app: { provisionKey: vi.fn(async () => metadata), provisionWebhook: vi.fn(async () => {}), check: vi.fn(async () => ({ appId: 123, checkedAt: new Date().toISOString() })) } };
+  const broker = planningApplyBroker({ stage, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app: metadata }, custody, check, dispatch);
   return { broker, transport, custody, check };
 }
 describe("narrow real-provider broker", () => {
@@ -75,7 +76,7 @@ describe("narrow real-provider broker", () => {
 it("rejects changed approved bundle bytes before the script PUT", async () => {
   const app = { stage: "prod", clientId: "synthetic", slug: "getquick-support", appId: 123, fingerprint: "public" };
   const send = vi.fn<typeof fetch>();
-  const broker = planningApplyBroker({ worker: "synthetic-worker", stateOrigin: "https://state.invalid", instances: { Worker: "i", GitHubAppSecret: "j" }, databaseIds: ["db1", "db2"], app, bundle: "b".repeat(64) }, {
+  const broker = planningApplyBroker({ stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid", instances: { Worker: "i", GitHubAppSecret: "j" }, databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app, bundle: "b".repeat(64) }, {
     cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: send, state: send,
     app: { provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 123, checkedAt: new Date().toISOString() }) },
   }, async () => {}, () => {});
@@ -85,4 +86,25 @@ it("rejects changed approved bundle bytes before the script PUT", async () => {
   const encoded = new Response(form);
   await expect(broker.handle({ op: "cloudflare", method: "PUT", url: script, contentType: encoded.headers.get("content-type")!, body: Buffer.from(await encoded.arrayBuffer()).toString("base64") })).rejects.toThrow("apply blocked");
   expect(send).not.toHaveBeenCalled();
+});
+
+
+describe.each(["prod", "staging"] as const)("%s broker stage isolation", (stage) => {
+  it.each(["SupportDB", "SupportLedger", "../prod/Worker", "Worker/other"])("denies State resource %s before transport", async (fqn) => {
+    const { broker, transport } = fixture(undefined, undefined, stage);
+    await expect(broker.handle({ op: "state-set", fqn, value: {} })).rejects.toThrow("apply blocked");
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("denies another stage's App row even with the expected native instance", async () => {
+    const { broker, transport } = fixture(undefined, undefined, stage);
+    await expect(broker.handle({ op: "state-set", fqn: "GitHubAppSecret", value: {
+      fqn: "GitHubAppSecret", instanceId: "j", status: "updated", props: { stage: stage === "prod" ? "staging" : "prod", workerName: "synthetic-worker" },
+    } })).rejects.toThrow("apply blocked");
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("denies another reviewed Worker path", async () => {
+    const { broker, transport } = fixture(undefined, undefined, stage);
+    await expect(broker.handle({ op: "cloudflare", method: "GET", url: script.replace("synthetic-worker", "other-stage-worker") + "/settings", body: "", contentType: "" })).rejects.toThrow("apply blocked");
+    expect(transport).not.toHaveBeenCalled();
+  });
 });

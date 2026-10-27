@@ -10,7 +10,7 @@ import { digest } from "./planner-evidence.ts";
 import type { CandidateBinding } from "./retained-plan.ts";
 import type { BrokerOperation } from "./retained-child-channel.ts";
 import type { verifyApp } from "./github-app.ts";
-import { requireEvidence, refusal, ACCOUNT, STACK } from "./planning-state.ts";
+import { requireEvidence, refusal, ACCOUNT, STACK, checkInputTarget, protectedAppSlugs } from "./planning-state.ts";
 
 export interface ProtectedContinuation {
   repo: string;
@@ -48,13 +48,19 @@ export async function continueProtectedPlan(config: ProtectedContinuation) {
     evidence: Object.freeze({ ...config.evidence }), broker: structuredClone(config.broker), sourceManifest: structuredClone(config.sourceManifest) };
   requireEvidence(Object.keys(config.evidence).sort().join() === "lockfiles,migrations,source,state,target,window" &&
     Object.values(config.evidence).every((value) => /^[a-f0-9]{64}$/.test(value)));
-  const initial = config.input.rows as Record<string, Record<string, Record<string, { instanceId: string; attr: { accountId: string; workerName: string } }>>>;
-  const worker = initial?.[STACK]?.prod?.Worker;
-  const secret = initial?.[STACK]?.prod?.GitHubAppSecret;
+  checkInputTarget(config.input, config.input.target);
+  const { stage } = config.input.target;
+  requireEvidence(config.policy.stage === stage && config.broker.stage === stage && config.app.stage === stage &&
+    config.app.slug === protectedAppSlugs[stage]);
+  const initial = config.input.rows as Record<string, Record<string, Record<string, { instanceId: string; props: { stage?: string; workerName?: string }; attr: { accountId: string; workerName: string } }>>>;
+  const worker = initial?.[STACK]?.[stage]?.Worker;
+  const secret = initial?.[STACK]?.[stage]?.GitHubAppSecret;
   requireEvidence(worker?.attr.accountId === ACCOUNT && worker.attr.workerName === config.broker.worker && worker.instanceId && secret?.instanceId);
+  requireEvidence(secret.props.stage === stage && secret.props.workerName === config.broker.worker &&
+    JSON.stringify(config.broker.databases) === JSON.stringify(config.input.databases));
   const instances = { Worker: worker.instanceId, GitHubAppSecret: secret.instanceId };
   const nonce = randomBytes(32).toString("hex");
-  let binding = Object.freeze({ ...config.evidence, candidate: digest({ ...config.evidence, nonce, run: config.policy.run, attempt: config.policy.attempt, head: config.policy.head }) });
+  let binding = Object.freeze({ ...config.evidence, candidate: digest({ ...config.evidence, nonce, stage, app: config.app, broker: config.broker, policy: config.policy, run: config.policy.run, attempt: config.policy.attempt, head: config.policy.head }) });
   const approval = githubCandidateApproval(config.policy, config.githubToken, config.github);
   let candidate: ApprovalCandidate | undefined;
   let authorized = false, ready = false, attempted = false;

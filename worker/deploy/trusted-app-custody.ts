@@ -9,11 +9,14 @@ import { fileURLToPath, URL } from "node:url";
 import { provisionAppKey, SUPPORT_ACCOUNT_ID } from "./github-app.ts";
 import { provisionWebhookSecrets } from "./github-webhook-secrets.ts";
 import type { AppSecretCustody } from "./github-app-secret.ts";
-import { requireEvidence, refusal } from "./planning-state.ts";
+import { requireEvidence, refusal, checkStage, protectedAppSlugs, type ProtectedStage } from "./planning-state.ts";
 import { boundedBody } from "./planning-read.ts";
 
-export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>, dispatch: () => void): AppSecretCustody {
+export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>, dispatch: () => void, targetStage: ProtectedStage): AppSecretCustody {
   env = { ...env };
+  checkStage(targetStage);
+  requireEvidence(env.GITHUB_APP_SLUG === protectedAppSlugs[targetStage]);
+  let provisioned: Awaited<ReturnType<typeof provisionAppKey>> | undefined;
   requireEvidence(/^[a-z0-9][a-z0-9-]{0,62}$/.test(workerName));
   const request: typeof fetch = async (url, init) => {
     await check();
@@ -23,19 +26,27 @@ export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, tr
       ((String(url) === "https://api.github.com/app" && (init.method ?? "GET") === "GET") ||
         (value.origin === "https://api.cloudflare.com" && [secret, `${secret}/GITHUB_WEBHOOK_PREVIOUS_SECRET`].includes(value.pathname) &&
           ["PUT", "DELETE"].includes(init.method ?? ""))));
+    // Authenticate the public App response against reviewed custody metadata
+    // before the key helper can reach its subsequent secret PUT.
     dispatch();
     const response = await transport(url, init);
     requireEvidence(!response.redirected && (!response.url || response.url === String(url)));
     // The old helper intentionally accepts 404 for previous-secret removal.
     if (response.status === 404 && init.method === "DELETE") return new Response(null, { status: 404 });
     const bytes = await boundedBody(response, 64 * 1024);
+    if (String(url) === "https://api.github.com/app") {
+      const app = JSON.parse(Buffer.from(bytes).toString()) as { id?: number; client_id?: string; slug?: string };
+      requireEvidence(String(app.id) === env.GITHUB_APP_ID && app.client_id === env.GITHUB_APP_CLIENT_ID && app.slug === protectedAppSlugs[targetStage]);
+    }
     return new Response(bytes, { headers: { "content-type": "application/json" } });
   };
   return {
-    provisionKey: async (stage, worker) => { requireEvidence(stage === "prod" && worker === workerName); return provisionAppKey(stage, worker, env, request); },
-    provisionWebhook: async (worker, appId) => { requireEvidence(worker === workerName); return provisionWebhookSecrets(worker, appId, env, request); },
+    provisionKey: async (stage, worker) => { requireEvidence(stage === targetStage && worker === workerName); provisioned = await provisionAppKey(stage, worker, env, request); return provisioned; },
+    provisionWebhook: async (worker, appId) => { requireEvidence(worker === workerName && provisioned && appId === provisioned.appId); return provisionWebhookSecrets(worker, appId, env, request); },
     check: async (metadata, worker) => {
-      requireEvidence(worker === workerName);
+      requireEvidence(worker === workerName && provisioned &&
+        metadata.clientId === provisioned.clientId && metadata.slug === provisioned.slug && metadata.fingerprint === provisioned.fingerprint &&
+        "appId" in metadata && metadata.appId === provisioned.appId && metadata.stage === targetStage && metadata.slug === protectedAppSlugs[targetStage]);
       await check();
       const scratch = mkdtempSync(join(tmpdir(), "gq-trusted-rpc-"));
       try {
@@ -45,7 +56,7 @@ export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, tr
         // 4.133.0. Confine its ambient auth to this dedicated trusted process.
         // It receives only the deployment token, never the App key/webhook or
         // state bearer. Its temporary preview session invokes one fixed RPC.
-        const input = JSON.stringify({ metadata, worker });
+        const input = JSON.stringify({ metadata, worker, stage: targetStage });
         requireEvidence(Buffer.byteLength(input) <= 1024 && process.platform === "linux");
         const bytes = await new Promise<Buffer>((resolve, reject) => {
           dispatch();
@@ -74,7 +85,7 @@ export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, tr
         });
         await check();
         const result = JSON.parse(String(bytes)) as { appId: number; checkedAt: string };
-        requireEvidence(Object.keys(result).sort().join() === "appId,checkedAt" && Number.isSafeInteger(result.appId) && Number.isFinite(Date.parse(result.checkedAt)));
+        requireEvidence(Object.keys(result).sort().join() === "appId,checkedAt" && result.appId === provisioned.appId && Number.isFinite(Date.parse(result.checkedAt)));
         return result;
       } finally { rmSync(scratch, { recursive: true, force: true }); }
     },

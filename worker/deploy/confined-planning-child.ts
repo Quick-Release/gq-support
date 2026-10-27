@@ -27,11 +27,12 @@ import * as Plan from "alchemy/Plan";
 import { InMemoryService } from "alchemy/State/InMemoryState";
 import { supportStack } from "../support-stack.ts";
 import { planningProviders } from "./planning-providers.ts";
-import { acquireSnapshot, snapshotLayer, refusal, requireEvidence, STACK, ACCOUNT } from "./planning-state.ts";
+import { acquireSnapshot, snapshotLayer, refusal, requireEvidence, STACK, ACCOUNT, checkInputTarget, protectedAppSlugs, type Target } from "./planning-state.ts";
 import { wireJson } from "./planning-read.ts";
 import { validateNativePlan, type DatabaseIdentity } from "./native-plan-policy.ts";
 
 export interface OfflinePlanInput {
+  target: Target;
   databases: readonly DatabaseIdentity[];
   rows: Parameters<typeof InMemoryService>[0];
   output: Parameters<typeof InMemoryService>[1];
@@ -45,16 +46,19 @@ export interface OfflineContinuation {
     summary: Readonly<Record<string, string>>, bundle: string, checkBundle: () => Promise<void>) => Promise<void>;
 }
 export async function planOffline(input: OfflinePlanInput, continuation?: OfflineContinuation) {
-  requireEvidence(input.app?.stage === "prod" && input.app.slug === "getquick-support" &&
+  checkInputTarget(input, input.target);
+  const { stage } = input.target;
+  requireEvidence(input.app?.stage === stage && input.app.slug === protectedAppSlugs[stage] &&
     Number.isSafeInteger(input.app.appId) && input.app.appId > 0 && /^[A-Za-z0-9_.-]+$/.test(input.app.clientId) &&
     typeof input.app.fingerprint === "string" && input.app.fingerprint.length > 0);
   const memory = await Effect.runPromise(InMemoryService(input.rows, input.output));
-  const snapshot = await Effect.runPromise(acquireSnapshot({ ...memory, getVersion: () => Effect.succeed(7) }, { stack: STACK, stage: "prod" }));
+  const snapshot = await Effect.runPromise(acquireSnapshot({ ...memory, getVersion: () => Effect.succeed(7) }, { stack: STACK, stage }));
   const required = { SupportDB: "Cloudflare.D1Database", SupportLedger: "Cloudflare.D1Database", Worker: "Cloudflare.Worker", GitHubAppSecret: "GQSupport.GitHubAppSecret" };
-  requireEvidence((await Effect.runPromise(snapshot.list({ stack: STACK, stage: "prod" }))).slice().sort().join() === Object.keys(required).sort().join());
+  requireEvidence((await Effect.runPromise(snapshot.list({ stack: STACK, stage }))).slice().sort().join() === Object.keys(required).sort().join());
   for (const [fqn, type] of Object.entries(required)) {
-    const row = await Effect.runPromise(snapshot.get({ stack: STACK, stage: "prod", fqn }));
+    const row = await Effect.runPromise(snapshot.get({ stack: STACK, stage, fqn }));
     requireEvidence(row && row.kind !== "action" && row.resourceType === type);
+    if (fqn === "GitHubAppSecret") requireEvidence(row.props?.stage === stage);
   }
   const files = (dir: string) => Object.fromEntries(readdirSync(dir).filter((name) => name.endsWith(".sql")).map((name) => [name, readFileSync(`${dir}/${name}`, "utf8")]));
   const migrationFiles = { SupportDB: { dir: "./migrations", files: files("./migrations") }, SupportLedger: { dir: "./ledger-migrations", files: files("./ledger-migrations") } };
@@ -83,7 +87,7 @@ export async function planOffline(input: OfflinePlanInput, continuation?: Offlin
       const plan = yield* Plan.make(stack);
       return { plan, context };
     }).pipe(Effect.provideContext(stack.services), Effect.provideService(State, originalState.value));
-    const evidence: PlanEvidence = { target: { stack: STACK, stage: "prod" }, resolvedAccount: ACCOUNT, databases: input.databases, migrationFiles, migrationHashes: hashes };
+    const evidence: PlanEvidence = { target: { stack: STACK, stage }, resolvedAccount: ACCOUNT, databases: input.databases, migrationFiles, migrationHashes: hashes };
     validateNativePlan(plan, evidence);
     requireEvidence(Object.keys(plan.resources).sort().join() === "GitHubAppSecret,SupportDB,SupportLedger,Worker");
     const summary = Object.fromEntries(Object.entries(plan.resources).map(([fqn, node]) => [fqn, node.action]));
@@ -102,7 +106,7 @@ export async function planOffline(input: OfflinePlanInput, continuation?: Offlin
     Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {
       GITHUB_APP_CLIENT_ID: input.app.clientId, GITHUB_APP_SLUG: input.app.slug, GITHUB_APP_ID: String(input.app.appId),
     } }))),
-    Effect.provideService(Stage, "prod"),
+    Effect.provideService(Stage, stage),
     Effect.provideService(ArtifactStore, createArtifactStore()),
     Effect.provideService(AlchemyContext, { dotAlchemy: "/tmp/alchemy", dev: false, adopt: false, updateStateStore: false }),
     Effect.provideService(HttpClient.HttpClient, continuation?.client ?? HttpClient.make(() => Effect.die(refusal()))),

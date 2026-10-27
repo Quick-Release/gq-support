@@ -1,7 +1,7 @@
 import { constants, openSync, fstatSync, lstatSync, readFileSync, closeSync, unlinkSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import * as Effect from "effect/Effect";
-import { productionEndpointContract, refusal, requireEvidence, STACK } from "./planning-state.ts";
+import { productionEndpointContract, stagingEndpointContract, refusal, requireEvidence, STACK, checkTarget, protectedAppSlugs } from "./planning-state.ts";
 import { reviewedPlannerConfig, type ReviewedPlannerConfig } from "./reviewed-planner-config.ts";
 import { acquireAttestedSnapshot } from "./endpoint-attestation.ts";
 import { planningPreflight } from "./planning-preflight.ts";
@@ -32,12 +32,16 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
   try {
     requireEvidence(reviewed && env.GITHUB_REPOSITORY === "Quick-Release/gq-support" && env.GITHUB_REF === "refs/heads/main" &&
       /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? "") && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? "") &&
-      /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT ?? "") && env.DEPLOY_STAGE === "prod" && reviewed.endpoint.target.stage === "prod");
+      /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT ?? "") && env.DEPLOY_STAGE === reviewed.endpoint.target.stage);
     const config = structuredClone(reviewed);
+    checkTarget(config.endpoint.target);
+    const { stage } = config.endpoint.target;
+    requireEvidence(config.approval.stage === stage && config.app.slug === protectedAppSlugs[stage] &&
+      config.window.target.stack === STACK && config.window.target.stage === stage);
     const approval = { ...config.approval, head: env.GITHUB_SHA!, run: Number(env.GITHUB_RUN_ID), attempt: Number(env.GITHUB_RUN_ATTEMPT) };
     const repo = new URL("../../", import.meta.url).pathname;
     const { manifest: sourceManifest, ...originalSource } = sourceEvidence(repo, approval.head);
-    const window = exclusiveLocalWindow("/dev/shm/gq-support-prod-writer.lock", config.window);
+    const window = exclusiveLocalWindow(`/dev/shm/gq-support-${stage}-writer.lock`, config.window);
     try {
       const githubToken = readPrivate(env.GITHUB_APPROVAL_READ_TOKEN_FILE);
       const policyCheck = githubCandidateApproval(approval, githubToken, transport);
@@ -52,22 +56,23 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       };
       const acquire = () => Effect.runPromise(acquireAttestedSnapshot(config.endpoint, stateBearer, readToken, { cloudflare: transport, state: transport }));
       window.check();
-      const initial = await snapshotInput(await acquire());
-      const app = await planningPreflight(appEnv, transport);
-      const evidence = { ...originalSource, target: digest({ account: config.endpoint.account, stack: STACK, stage: "prod", worker: config.worker }),
+      const initial = await snapshotInput(await acquire(), config.endpoint.target);
+      const app = await planningPreflight(appEnv, transport, stage);
+      requireEvidence(app.appId === config.app.id && app.clientId === config.app.clientId && app.slug === config.app.slug);
+      const evidence = { ...originalSource, target: digest({ account: config.endpoint.account, stack: STACK, stage, worker: config.worker, endpoint: config.endpoint, app: config.app, approval: config.approval }),
         state: digest(initial), window: window.binding };
       const controller = new AbortController();
       const cancel = () => controller.abort();
       process.once("SIGTERM", cancel); process.once("SIGINT", cancel);
       try {
-        return await continueProtectedPlan({ repo, sourceManifest, input: { ...initial, databases: config.endpoint.databases }, app, policy: approval,
+        return await continueProtectedPlan({ repo, sourceManifest, input: { ...initial, target: config.endpoint.target, databases: config.endpoint.databases }, app, policy: approval,
           githubToken, github: transport, evidence, signal: controller.signal, checkWindow: window.check,
-          broker: { worker: config.worker, stateOrigin: config.endpoint.origin, databaseIds: config.endpoint.databases.map((db) => db.databaseId) },
+          broker: { stage, worker: config.worker, stateOrigin: config.endpoint.origin, databases: config.endpoint.databases },
           custody: { cloudflareToken: deploymentToken, stateBearer, cloudflare: transport, state: transport },
-          appCustody: (check, dispatch) => trustedAppCustody(appEnv, config.worker, transport, check, dispatch),
+          appCustody: (check, dispatch) => trustedAppCustody(appEnv, config.worker, transport, check, dispatch, stage),
           revalidate: async () => {
             window.check();
-            const fresh = await snapshotInput(await acquire());
+            const fresh = await snapshotInput(await acquire(), config.endpoint.target);
             const { manifest: _manifest, ...source } = sourceEvidence(repo, approval.head);
             return { ...source, target: evidence.target, state: digest(fresh), window: window.binding };
           },
@@ -82,7 +87,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
     } finally { window.close(); }
   } catch { throw refusal(); }
 });
-export const planningPrerequisites = Object.freeze({ endpointContract: productionEndpointContract, reviewedPlannerConfig,
+export const planningPrerequisites = Object.freeze({ endpointContract: productionEndpointContract, stagingEndpointContract, reviewedPlannerConfig,
   status: "blocked until reviewed metadata, private delivery, protected runner, writer exclusion and candidate approval are supplied",
 });
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

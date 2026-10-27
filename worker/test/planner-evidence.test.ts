@@ -10,7 +10,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "gq-lease-test-")); dirs.push(dir);
   const path = join(dir, "lock"); let now = 1000;
-  const window = { id: "a".repeat(64), startsAt: 1000, expiresAt: 2000, duty: "exclude-every-state-writer-and-endpoint-deployer" as const };
+  const window = { target: { stack: "GQSupportWorker" as const, stage: "prod" as const }, id: "a".repeat(64), startsAt: 1000, expiresAt: 2000, duty: "exclude-every-state-writer-and-endpoint-deployer" as const };
   return { path, window, now: () => now, expire: () => { now = 2000; } };
 }
 describe("local writer exclusion and irreversible phase gate", () => {
