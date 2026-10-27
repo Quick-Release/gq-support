@@ -345,3 +345,25 @@ failures retain unresolved ownership after a previous recovery, and privacy
 fixtures use runtime-generated artifact-scanner canaries. Four added regression
 cases reproduced the defects before correction; all 81 protocol tests pass after.
 No transport, producer, scheduler, durable sender or LIVE evidence is implied.
+
+### Internal Cron progress producer CODE follow-up
+
+The Cron callback now retains `ScheduledController.scheduledTime`, actual UTC
+start, finite support phase outcomes and separate notification drain results in
+new aggregate SupportLedger tables (`0005_cron_progress.sql`). Terminal records
+follow local work/finalizer settlement; they do not resolve uncertain provider
+writes. The 60-minute/four-attempt ring uses a sticky partial marker for overflow
+and lost unresolved evidence. Progress I/O is best effort with 100ms cooperative
+bounds per write and never joins restore drain/admission. Retained native upload
+requires public candidate/stage identity in both Discord modes. Missing identity
+leaves observation unknown while support continues.
+
+This is internal producer CODE only. Remote migration applicability, activation,
+external snapshot coverage/source/authentication and observer enablement remain
+unknown/unwired. The 100-row offline consumer cannot silently consume the
+240-row ring as complete; the next read-only adapter needs bounded coherent
+pagination or explicit partial coverage. See the exact next capability contract
+in [observer design](external-incident-observer.md#internal-cron-producer-code-slice-2026-10-27).
+All LIVE manifests/permissions/reviewers/runner/exclusion/credentials/approvals,
+RPC/Test F and drills remain unverified. #20/#29 stay open. No live operations,
+settings, credentials, notifications or external resources were changed.

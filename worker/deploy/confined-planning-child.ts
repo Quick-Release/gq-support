@@ -1,3 +1,4 @@
+import { ReviewedRelease } from "../src/release-identity.ts";
 import "./planning-runtime-guard.mjs";
 // Private worker of planning-execution.ts. No CLI/deploy/session/auth bootstrap.
 // Native plan and context stay here; only a fixed public summary leaves fd 3.
@@ -32,6 +33,7 @@ import { wireJson } from "./planning-read.ts";
 import { validateNativePlan, type DatabaseIdentity } from "./native-plan-policy.ts";
 
 export interface OfflinePlanInput {
+  release?: string;
   target: Target;
   databases: readonly DatabaseIdentity[];
   rows: Parameters<typeof InMemoryService>[0];
@@ -48,6 +50,7 @@ export interface OfflineContinuation {
 export async function planOffline(input: OfflinePlanInput, continuation?: OfflineContinuation) {
   checkInputTarget(input, input.target);
   const { stage } = input.target;
+  requireEvidence(input.release === undefined || /^[a-f0-9]{40}$/.test(input.release));
   requireEvidence(input.app?.stage === stage && input.app.slug === protectedAppSlugs[stage] &&
     Number.isSafeInteger(input.app.appId) && input.app.appId > 0 && /^[A-Za-z0-9_.-]+$/.test(input.app.clientId) &&
     typeof input.app.fingerprint === "string" && input.app.fingerprint.length > 0);
@@ -106,6 +109,7 @@ export async function planOffline(input: OfflinePlanInput, continuation?: Offlin
     Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {
       GITHUB_APP_CLIENT_ID: input.app.clientId, GITHUB_APP_SLUG: input.app.slug, GITHUB_APP_ID: String(input.app.appId),
     } }))),
+    Effect.provideService(ReviewedRelease, input.release ? { stage, candidate: input.release } : null),
     Effect.provideService(Stage, stage),
     Effect.provideService(ArtifactStore, createArtifactStore()),
     Effect.provideService(AlchemyContext, { dotAlchemy: "/tmp/alchemy", dev: false, adopt: false, updateStateStore: false }),

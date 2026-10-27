@@ -19,7 +19,8 @@ import { confinedInput } from "./confined-input.ts";
 import { requireEvidence, STACK } from "../../deploy/planning-state.ts";
 
 async function main() {
-  const { stage, selected, fault } = JSON.parse(readFileSync(0, "utf8")) as { stage: "prod" | "staging"; selected: "SupportDB" | "SupportLedger" | "both"; fault?: string };
+  const { stage, selected, fault, enabled = false } = JSON.parse(readFileSync(0, "utf8")) as { stage: "prod" | "staging"; selected: "SupportDB" | "SupportLedger" | "both"; fault?: string; enabled?: boolean };
+  const binding = { ...discord, enabled };
   // A main-only update requires the integrated ledger already current. Ledger
   // transition cases deliberately start before 0003/0004 instead.
   const input = confinedInput(stage, selected === "SupportDB" ? "current" : "before-maintenance"), rows = input.rows[STACK][stage];
@@ -40,9 +41,9 @@ async function main() {
     db.exec("CREATE TABLE existing_canary (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO existing_canary VALUES (1, 'preserved');");
     files[fqn] = Object.fromEntries(prior.map((name) => [name, readFileSync(`${dir}/${name}`, "utf8")]));
     if (selected === "both" || selected === fqn) {
-      const additions = fqn === "SupportLedger" ? ["0003_maintenance.sql", "0004_discord_alerts.sql"] : ["0099_extra.sql"];
+      const additions = fqn === "SupportLedger" ? ["0003_maintenance.sql", "0004_discord_alerts.sql", "0005_cron_progress.sql"] : ["0099_extra.sql"];
       for (const name of additions) {
-        const sql = fqn === "SupportLedger" ? readFileSync(`test/fixtures/additive-d1/${name}.fixture`, "utf8") : "CREATE TABLE support_extra (id INTEGER PRIMARY KEY, label TEXT DEFAULT 'fresh'); INSERT INTO support_extra (id) VALUES (1);\n";
+        const sql = fqn === "SupportLedger" ? readFileSync(name === "0005_cron_progress.sql" ? `ledger-migrations/${name}` : `test/fixtures/additive-d1/${name}.fixture`, "utf8") : "CREATE TABLE support_extra (id INTEGER PRIMARY KEY, label TEXT DEFAULT 'fresh'); INSERT INTO support_extra (id) VALUES (1);\n";
         writeFileSync(join(root, dir, name), sql); files[fqn][name] = sql;
       }
     }
@@ -54,9 +55,9 @@ async function main() {
   const state: Record<string, unknown>[] = [];
   let queries = 0, batches = 0, open = true;
   let broker: ReturnType<typeof planningApplyBroker>;
-  const createBroker = (bundle: string) => planningApplyBroker({ discord, stage, worker: rows.Worker.attr.workerName, stateOrigin: "https://state.invalid", databases: input.databases, migrations: grants,
+  const createBroker = (bundle: string) => planningApplyBroker({ discord: binding, stage, worker: rows.Worker.attr.workerName, stateOrigin: "https://state.invalid", databases: input.databases, migrations: grants,
     instances: { Worker: rows.Worker.instanceId, GitHubAppSecret: rows.GitHubAppSecret.instanceId }, app, bundle }, {
-    cloudflareToken: "FAKE_ONLY", stateBearer: "FAKE_ONLY", app: { discord, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: app.appId, checkedAt: new Date().toISOString() }) },
+    cloudflareToken: "FAKE_ONLY", stateBearer: "FAKE_ONLY", app: { discord: binding, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: app.appId, checkedAt: new Date().toISOString() }) },
     state: async (_url, init) => { state.push(JSON.parse(String(init?.body))); return Response.json({}); },
     cloudflare: async (url, init) => {
       const path = new URL(String(url)).pathname;
@@ -105,7 +106,7 @@ async function main() {
   process.chdir(root);
   let applied = false, replayBlocked = false;
   try {
-    await planOffline({ ...input, app }, { capability, client, custody: {
+    await planOffline({ ...input, app, release: discord.release }, { capability, client, custody: {
       provisionKey: async () => await send({ op: "app-key", worker: rows.Worker.attr.workerName }) as typeof app,
       provisionDiscord: async (worker) => { await send({ op: "app-discord", worker }); },
       provisionWebhook: async (worker, appId) => { await send({ op: "app-webhook", worker, appId }); },

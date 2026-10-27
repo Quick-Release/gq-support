@@ -1,3 +1,4 @@
+import { notePhaseFailure } from "./phase-observation.ts";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
@@ -227,6 +228,7 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
     const target = targets.find((candidate) => candidate.repositoryId === state.repository_id)!;
     if (cooling.has(target.installationId) || (target.statusInstallationId !== null && cooling.has(target.statusInstallationId))) continue;
     const incomplete = (error: VerifyRepositoryError, installationId = target.installationId) => Effect.gen(function* () {
+      yield* notePhaseFailure;
       const reason = unsafeReason(error);
       // Historical access loss does not prove the current approved mapping unsafe.
       if (reason && installationId === target.installationId) yield* suspendRepository(options.db, target.repositoryId, reason, now());

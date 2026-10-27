@@ -135,6 +135,13 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
             const bindings = metadata.bindings.filter((binding: { type: string }) => binding.type === "d1");
             requireEvidence(bindings.length === 2 && new Set(bindings.map((binding: { id?: string; database_id?: string }) => binding.database_id ?? binding.id)).size === 2 &&
               bindings.every((binding: { id?: string; database_id?: string }) => config.databases.map((db) => db.databaseId).includes(binding.database_id ?? binding.id ?? "")));
+            // Public immutable release identity is part of this exact retained
+            // native upload in both Discord modes, never a custody secret or a
+            // mutable runtime environment assertion.
+            for (const [name, text] of Object.entries({ SUPPORT_RELEASE_CANDIDATE: config.discord.release, SUPPORT_RELEASE_STAGE: config.stage })) {
+              const matches = metadata.bindings.filter((binding: { name: string }) => binding.name === name);
+              requireEvidence(matches.length === 1 && matches[0].type === "plain_text" && matches[0].text === text);
+            }
             const publicConfig: Record<string, string> = { GITHUB_APP_CLIENT_ID: config.app.clientId, GITHUB_APP_SLUG: config.app.slug, GITHUB_APP_ID: String(config.app.appId) };
             requireEvidence(metadata.bindings.every((binding: { type: string; name: string; text?: string }) =>
               ["d1", "plain_text"].includes(binding.type) || (binding.type === "secret_text" && Object.hasOwn(publicConfig, binding.name) && (binding.text === publicConfig[binding.name] || binding.text === JSON.stringify({ _tag: "Redacted", value: publicConfig[binding.name] })))));

@@ -1,3 +1,4 @@
+import { notePhaseFailure } from "./phase-observation.ts";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubIssue } from "./github-gateway.ts";
@@ -57,10 +58,11 @@ const suspendIfUnsafe = (options: DeliveryOptions, row: DeliveryRow, error: { re
       Effect.annotateLogs({ repository: row.repository_id, reason, alert: true })))) : Effect.void;
 };
 const log = (row: Pick<DeliveryRow, "id" | "request_id" | "generation"> & { owner?: string | null }, outcome: string, alert = false) =>
+  (alert || !["Delivered", "Reconciled", "NotApplied", "Superseded"].includes(outcome) ? notePhaseFailure : Effect.void).pipe(Effect.andThen(
   (alert ? Effect.logError("Support delivery requires review") : Effect.logInfo("Support delivery outcome")).pipe(
     Effect.annotateLogs({ request: row.request_id, intent: row.id, generation: row.generation,
       ...(row.owner ? { attempt: row.owner } : {}), outcome, alert }),
-  );
+  )));
 
 /** One bounded wake-up. D1, never this invocation, is the durable work queue. */
 export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, OutcomeUnknown, GitHubGateway> => Effect.gen(function* () {

@@ -128,3 +128,25 @@ describe.each(["prod", "staging"] as const)("%s broker stage isolation", (stage)
     expect(transport).not.toHaveBeenCalled();
   });
 });
+
+it.each(["missing", "candidate", "stage", "secret", "duplicate"])("refuses %s public release identity before any native upload", async (change) => {
+  const { broker, transport } = fixture();
+  const bindings: Array<{ type: string; name: string; text?: string; id?: string }> = [
+    { type: "d1", name: "DB", id: "db1" }, { type: "d1", name: "LEDGER", id: "db2" },
+    { type: "plain_text", name: "SUPPORT_RELEASE_CANDIDATE", text: discord.release },
+    { type: "plain_text", name: "SUPPORT_RELEASE_STAGE", text: "prod" },
+  ];
+  if (change === "missing") bindings.pop();
+  if (change === "candidate") bindings[2].text = "e".repeat(40);
+  if (change === "stage") bindings[3].text = "staging";
+  if (change === "secret") bindings[2].type = "secret_text";
+  if (change === "duplicate") bindings.push({ ...bindings[2] });
+  const form = new FormData();
+  form.append("metadata", JSON.stringify({ main_module: "main.js", bindings,
+    observability: { enabled: true, logs: { enabled: true, invocation_logs: true }, traces: { enabled: false } } }));
+  form.append("main.js", new File(["synthetic"], "main.js", { type: "application/javascript" }));
+  const encoded = new Response(form);
+  await expect(broker.handle({ op: "cloudflare", method: "PUT", url: script,
+    contentType: encoded.headers.get("content-type")!, body: Buffer.from(await encoded.arrayBuffer()).toString("base64") })).rejects.toThrow("apply blocked");
+  expect(transport).not.toHaveBeenCalled();
+});
