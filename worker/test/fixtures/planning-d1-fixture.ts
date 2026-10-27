@@ -19,7 +19,9 @@ import { requireEvidence, STACK } from "../../deploy/planning-state.ts";
 
 async function main() {
   const { stage, selected, fault } = JSON.parse(readFileSync(0, "utf8")) as { stage: "prod" | "staging"; selected: "SupportDB" | "SupportLedger" | "both"; fault?: string };
-  const input = confinedInput(stage), rows = input.rows[STACK][stage];
+  // A main-only update requires the integrated ledger already current. Ledger
+  // transition cases deliberately start before 0003/0004 instead.
+  const input = confinedInput(stage, selected === "SupportDB" ? "current" : "before-maintenance"), rows = input.rows[STACK][stage];
   const root = mkdtempSync("/tmp/d1-profile-");
   for (const dir of ["migrations", "ledger-migrations"]) cpSync(dir, join(root, dir), { recursive: true });
   const dbs = new Map<string, DatabaseSync>();

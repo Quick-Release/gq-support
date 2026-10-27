@@ -2,7 +2,7 @@ import { URL } from "node:url";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { ACCOUNT as accountId } from "../../deploy/planning-state.ts";
-export function confinedInput(stage: "prod" | "staging" = "prod") {
+export function confinedInput(stage: "prod" | "staging" = "prod", ledgerHistory: "current" | "before-maintenance" = "current") {
   const suffix = stage === "prod" ? "" : "-staging";
   const worker = `synthetic-worker${suffix}`;
   const database = (fqn: string, dir: string, id: number) => ({
@@ -17,6 +17,13 @@ export function confinedInput(stage: "prod" | "staging" = "prod") {
     Worker: { fqn: "Worker", namespace: undefined, logicalId: "Worker", instanceId: `instance-Worker${suffix}`, resourceType: "Cloudflare.Worker", providerVersion: 1, providerMode: "live" as const, status: "created" as const, downstream: ["GitHubAppSecret"], bindings: [], props: {}, attr: { accountId, workerName: worker, workerId: "00000000000000000000000000000001", url: "https://synthetic-worker.example.workers.dev", urls: ["https://synthetic-worker.example.workers.dev"], crons: ["* * * * *"], hash: {} } },
     GitHubAppSecret: { fqn: "GitHubAppSecret", namespace: undefined, logicalId: "GitHubAppSecret", instanceId: `instance-secret${suffix}`, resourceType: "GQSupport.GitHubAppSecret", providerVersion: 1, providerMode: "live" as const, status: "created" as const, downstream: [], bindings: [], props: { stage, workerName: worker }, attr: {} },
   };
+  // Explicit synthetic history for additive-transition tests. The default
+  // snapshot assumes all checkout migrations committed; neither represents a
+  // remotely observed database. Keep destructive ledger 0002 committed here.
+  if (ledgerHistory === "before-maintenance") {
+    delete rows.SupportLedger.attr.migrationsHashes["0003_maintenance.sql"];
+    delete rows.SupportLedger.attr.migrationsHashes["0004_discord_alerts.sql"];
+  }
   return { target: { stack: "GQSupportWorker" as const, stage }, databases: [rows.SupportDB, rows.SupportLedger].map((row) => ({
     fqn: row.fqn as "SupportDB" | "SupportLedger", instanceId: row.instanceId, databaseId: row.attr.databaseId, databaseName: row.attr.databaseName,
   })), rows: { GQSupportWorker: { [stage]: rows } }, output: { GQSupportWorker: { [stage]: {} } } };

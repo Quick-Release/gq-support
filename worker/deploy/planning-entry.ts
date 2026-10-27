@@ -10,6 +10,18 @@ import { continueProtectedPlan } from "./protected-plan-continuation.ts";
 import { trustedAppCustody } from "./trusted-app-custody.ts";
 import { approvalCommand, githubCandidateApproval } from "./github-candidate-approval.ts";
 
+// The PR110 ordinary provider performs Discord secret removal and trace
+// restoration outside the PR117 App custody protocol. That protocol cannot
+// express these operations. Do not let an otherwise valid native plan apply
+// while silently skipping them. Removing this gate requires a separately
+// reviewed custody/profile design and integrated continuation evidence.
+export const integrationCodeBlockers = Object.freeze([
+  "Discord secret/settings custody and verified trace restoration are unsupported by the protected apply protocol",
+]);
+export function assertIntegratedCustodyReady(): void {
+  requireEvidence(integrationCodeBlockers.length === 0);
+}
+
 // Explicit private delivery only; no profile, config cache, minting or discovery.
 function readPrivate(path: string | undefined): string {
   requireEvidence(typeof path === "string" && /^\/dev\/shm\/gq-protected\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(path));
@@ -41,6 +53,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
     const approval = { ...config.approval, head: env.GITHUB_SHA!, run: Number(env.GITHUB_RUN_ID), attempt: Number(env.GITHUB_RUN_ATTEMPT) };
     const repo = new URL("../../", import.meta.url).pathname;
     const { manifest: sourceManifest, ...originalSource } = sourceEvidence(repo, approval.head);
+    assertIntegratedCustodyReady(); // before owner-window acquisition or private delivery
     const window = exclusiveLocalWindow(`/dev/shm/gq-support-${stage}-writer.lock`, config.window);
     try {
       const githubToken = readPrivate(env.GITHUB_APPROVAL_READ_TOKEN_FILE);
@@ -88,7 +101,8 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
   } catch { throw refusal(); }
 });
 export const planningPrerequisites = Object.freeze({ endpointContract: productionEndpointContract, stagingEndpointContract, reviewedPlannerConfig,
-  status: "blocked until reviewed metadata, private delivery, protected runner, writer exclusion and candidate approval are supplied",
+  integrationCodeBlockers,
+  status: "CODE blocked on integrated Discord custody; LIVE metadata, private delivery, protected runner, writer exclusion and candidate approval also required",
 });
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   Effect.runPromise(protectedPlanningEntry(process.env.ALCHEMY_STATE_BEARER_FILE ?? "")).catch(() => {

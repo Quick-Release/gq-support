@@ -9,6 +9,7 @@ import { SupportDB, SupportLedger } from "./src/support-db.ts";
 import Worker from "./src/worker.ts";
 import { defaultDeploymentGuard, refusal } from "./deploy/planning-state.ts";
 import { validateWebhookSecrets } from "./deploy/github-webhook-secrets.ts";
+import { validateDiscordAlertConfig } from "./deploy/discord-alert-secret.ts";
 
 export interface PlanningDeclaration {
   readonly preflight: Effect.Effect<void>;
@@ -35,6 +36,7 @@ export const supportStack = (state: Parameters<typeof Alchemy.Stack>[1]["state"]
         try: async () => {
           const app = await verifyApp(appConfig(stack.stage, process.env), process.env.GITHUB_APP_PRIVATE_KEY ?? "");
           validateWebhookSecrets(process.env, app.appId);
+          validateDiscordAlertConfig(process.env);
         },
         catch: () => new Error("GitHub App preflight failed; see the key custody runbook"),
       }).pipe(Effect.orDie);

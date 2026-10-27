@@ -8,7 +8,7 @@ import { confinedInput } from "./fixtures/confined-input.ts";
 const fixtureSql = (name: string) => readFileSync(new URL(`./fixtures/additive-d1/${name}.fixture`, import.meta.url), "utf8");
 const maintenance = fixtureSql("0003_maintenance.sql"), discord = fixtureSql("0004_discord_alerts.sql");
 function fixture(stage: "prod" | "staging" = "prod", fqn: "SupportDB" | "SupportLedger" = "SupportLedger") {
-  const input = confinedInput(stage), row = JSON.parse(JSON.stringify(input.rows.GQSupportWorker[stage][fqn]));
+  const input = confinedInput(stage, "before-maintenance"), row = JSON.parse(JSON.stringify(input.rows.GQSupportWorker[stage][fqn]));
   const identity = input.databases.find((db) => db.fqn === fqn)!;
   const files = Object.fromEntries(Object.keys(row.attr.migrationsHashes).map((name) => [name, readFileSync(new URL(`../${row.props.migrations}/${name}`, import.meta.url), "utf8")]));
   Object.assign(files, { "0003_maintenance.sql": maintenance, "0004_discord_alerts.sql": discord });
@@ -34,6 +34,7 @@ describe("closed additive SQLite grammar", () => {
     const sources = JSON.parse(readFileSync(new URL("./fixtures/additive-d1/sources.json", import.meta.url), "utf8"));
     for (const [name, source] of Object.entries(sources) as [string, { sha256: string }][]) {
       const sql = fixtureSql(name); expect(sha256(sql)).toBe(source.sha256); expect(() => validateAdditiveSql(sql)).not.toThrow();
+      expect(readFileSync(new URL(`../ledger-migrations/${name}`, import.meta.url), "utf8")).toBe(sql);
     }
   });
   it.each([

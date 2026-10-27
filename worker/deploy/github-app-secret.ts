@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { provisionAppKey } from "./github-app.ts";
 import { provisionWebhookSecrets } from "./github-webhook-secrets.ts";
 import { checkDeployedGitHubApp, DeployedGitHubAppCheckError } from "./check-deployed-github-app.ts";
+import { provisionDiscordAlertSecret } from "./discord-alert-secret.ts";
 
 type GitHubAppSecret = Resource<
   "GQSupport.GitHubAppSecret",
@@ -19,7 +20,12 @@ export interface AppSecretCustody {
   check: typeof checkDeployedGitHubApp;
 }
 export const GitHubAppSecretProvider = (custody: AppSecretCustody = {
-  provisionKey: provisionAppKey, provisionWebhook: provisionWebhookSecrets, check: checkDeployedGitHubApp,
+  provisionKey: provisionAppKey,
+  provisionWebhook: async (worker, appId) => {
+    await provisionWebhookSecrets(worker, appId);
+    await provisionDiscordAlertSecret(worker);
+  },
+  check: checkDeployedGitHubApp,
 }) => Provider.succeed(GitHubAppSecret, {
   // Worker uploads can drop out-of-band secrets. Reapply after the Worker on
   // every deploy, including no-op code deployments and rotations.

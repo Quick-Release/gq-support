@@ -49,6 +49,14 @@ describe.each(["prod", "staging"] as const)("%s protected target", (stage) => {
       }
       await expect(Effect.runPromise(protectedPlanningEntry("PRIVATE_PATH_CANARY", config, env, transport))).rejects.toThrow("apply blocked");
       expect(source).toHaveBeenCalledOnce(); expect(transport).not.toHaveBeenCalled();
+      // Even otherwise-valid source cannot acquire the window or private
+      // delivery while the integrated Discord custody path is unsupported.
+      source.mockReturnValue({ manifest: [], source: "synthetic", lockfiles: "synthetic", migrations: "synthetic" });
+      const window = vi.spyOn(evidence, "exclusiveLocalWindow").mockImplementation(() => { throw new Error("window reached"); });
+      try {
+        await expect(Effect.runPromise(protectedPlanningEntry("PRIVATE_PATH_CANARY", config, env, transport))).rejects.toThrow("apply blocked");
+        expect(window).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
+      } finally { window.mockRestore(); }
     } finally { source.mockRestore(); }
   });
   it("exports only the acquired stage and rejects other-stage native resource/output references", async () => {

@@ -73,6 +73,15 @@ describe("offline shared declaration and installed providers", () => {
     const input = fixture(); delete (input.rows.GQSupportWorker.prod as Partial<typeof input.rows.GQSupportWorker.prod>)[fqn];
     await expect(runConfinedPlan(repo, input, preflight)).rejects.toThrow(/^Protected planning evidence unavailable; apply blocked$/);
   }, 90_000);
+  it("refuses an independently tracked DiscordAlertSecret until its graph/provider/custody contract is reviewed", async () => {
+    const input = fixture();
+    Object.assign(input.rows.GQSupportWorker.prod, { DiscordAlertSecret: {
+      ...input.rows.GQSupportWorker.prod.GitHubAppSecret,
+      fqn: "DiscordAlertSecret", logicalId: "DiscordAlertSecret", instanceId: "synthetic-discord",
+      resourceType: "GQSupport.DiscordAlertSecret",
+    } });
+    await expect(runConfinedPlan(repo, input, preflight)).rejects.toThrow(/^Protected planning evidence unavailable; apply blocked$/);
+  }, 90_000);
   it("sanitizes preflight failure and refuses without executing the graph", async () => {
     await expect(runConfinedPlan(repo, fixture(), () => Promise.reject(new Error("PLANNING_CONFIDENTIAL_CANARY"))))
       .rejects.toThrow(/^Protected planning evidence unavailable; apply blocked$/);
