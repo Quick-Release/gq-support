@@ -367,6 +367,18 @@ public records use sanitized outcome plus private-record reference, never contac
 - [ ] Canary pairing, measurement/abort criteria, expansion plan, human sign-off
   and residual risks recorded with approver and timestamp. **Not signed off.**
 
+## External observation proposal — 2026-10-27
+
+The [bounded external observer design](external-incident-observer.md) extends the
+unmerged integration candidate with source/permission evidence and concrete next
+slices for the remaining platform, Cron, workflow, route and receipt gaps. It
+implements/enables no live observer or sender and verifies no live setting. Its
+proposed windows are not approved SLOs; Discord remains the main route, with no
+approved fallback or acknowledgment/escalation policy. Read it alongside the
+[integration readiness gates](mvp-integration-readiness.md#remaining-code-and-live-gates).
+Historical “no routing implementation” and direct-deploy statements above describe
+the original main assessment, not the newer unmerged candidate. #20/#29 stay open.
+
 ## Proposed next slices
 
 1. Add the fleet/release record and confirmed policy to the existing release/deploy

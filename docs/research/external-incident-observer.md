@@ -1,0 +1,294 @@
+# External incident observation for MVP #20
+
+Research/design only, 2026-10-27. **Disabled; no observer, heartbeat, sender,
+scheduler, credentials or live proof supplied. #20 and #29 remain open.**
+Recommendation: use GitHub Actions outside the support Worker for bounded HTTP
+and workflow observations; add an explicit Cron progress contract before claiming
+missing-work coverage. Keep Discord as the main route. Begin with read-only
+verdicts; enable automated sending only after durable sender custody is proven.
+No new vendor, monitoring platform, privileged proxy or Cloudflare resource is
+needed for that first slice.
+
+## Evidence boundary
+
+This dedicated `t3/external-incident-observer` checkout was fast-forwarded to the
+authoritative PR120 SHA `6f57bf1381d80fb42c7d30b76eef2f7f0321310d` before edits.
+Local/remote `t3/outer-runtime-alerts` was absent. GitHub PR metadata and remote
+refs instead identify `t3/outer-runtime-failures` at that SHA. Source branches
+were untouched. PR120 remains unmerged; its reported Standards 0 / Spec 0 and 21
+focused tests are supplied review context, not tests rerun here.
+
+Read [domain](../../CONTEXT.md), ADRs [0013](../adr/0013-shared-cloudflare-resources-per-stage.md),
+[0016](../adr/0016-restores-never-rewind-revocations-or-deliveries.md),
+[0019](../adr/0019-uncertain-creates-require-review.md),
+[integration readiness](mvp-integration-readiness.md),
+[operational readiness](operational-readiness.md), [Discord runbook](../runbooks/discord-alerts.md),
+[CI](../../.github/workflows/ci.yml), [deployment workflow](../../.github/workflows/deploy-worker.yml),
+[protected entry](../../worker/deploy/planning-entry.ts),
+[unset live configuration](../../worker/deploy/reviewed-planner-config.ts),
+[runtime](../../worker/src/worker.ts), [phases](../../worker/src/scheduled.ts),
+[maintenance](../../worker/src/maintenance.ts) and [alert transport](../../worker/src/discord-alerts.ts).
+Internal failure capture is wired after usable bindings; platform/pre-binding
+failures, absent ticks, outside workflow failures and receipt remain external gaps.
+A returned tick is insufficient evidence: phases catch failures/timeouts, and
+maintenance can deny work. The nominal 57-second phase sum is cooperative.
+
+No dependencies were installed in this checkout. To check the exact locked
+contracts without running package scripts, the published `alchemy@2.0.0-beta.83`
+and `@cloudflare/workers-types@5.20261015.1` tarballs were extracted only in `/tmp`.
+Alchemy `src/Cloudflare/Workers/CronEventSource.ts:202–247` passes a
+`ScheduledController` to the callback, then applies `Effect.ignoreCause`;
+workers-types `index.d.ts:2648` declares `scheduledTime`, `cron`, `noRetry`.
+The current callback discards that controller. These are package-source facts,
+not installed-runtime or deployment proof. [Published Alchemy source](https://www.npmjs.com/package/alchemy/v/2.0.0-beta.83),
+[published type package](https://www.npmjs.com/package/@cloudflare/workers-types/v/5.20261015.1).
+
+## Requirements and usable sources
+
+`NOW` means adapters can be implemented/tested without production changes;
+`CODE` requires a new heartbeat/readiness contract; `LIVE` means scoped configuration
+and evidence are still required; `POLICY` is a human operational decision.
+All stages use Tipme account `8f38791a8c37b182239af2a385ab3c31`. Separately reviewed
+stage manifests must supply actual Worker name, HTTPS origin, candidate/deployment
+identity and activation time; no names, zone IDs, database IDs or run IDs are
+invented here. Reject cross-account/stage/revision evidence. REST Cloudflare paths
+below are relative to `https://api.cloudflare.com/client/v4`.
+
+| Signal / level | Exact source, scope and time | Reliability, normalization and missing evidence |
+| --- | --- | --- |
+| Total route, platform 5xx, pre-binding failure: NOW + LIVE | External Actions HTTPS GET to reviewed stage origin, fixed `/internal/observer/v1/readiness` after CODE below. Before that, optional GET of fixed `/__gq_observer_probe__`, expecting the existing exact 404 `{"code":"not_found"}` contract. No auth/body/query, redirect, cookie or support endpoint; runner records UTC start/end and status class. | Current unknown-path request still enters maintenance admission and binding resolution; it can write admission bookkeeping, although it never invokes support CRUD. It is only reachability evidence. If strictly zero runtime writes are required, wait for CODE readiness. DNS/TLS/timeout/5xx is observed unavailability at this vantage point, not proven platform root cause. A 404 or 200 cannot prove GitHub delivery, Cron, App validity or Discord. Never save response body/headers/URL. |
+| Worker errors corroboration: NOW + LIVE | `POST /graphql`, `viewer.accounts(filter:{accountTag: reviewed account})`, `workersInvocationsAdaptive(limit:100, filter:{scriptName:reviewed Worker,datetime_geq:start,datetime_leq:end})`; request only `dimensions{datetime scriptName status}` and `sum{requests errors}`. Deduplicate overlapping boundary buckets. | Official [query](https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/) provides these fields, not complete invocation records or a guaranteed HTTP-5xx breakdown. [Adaptive sampling](https://developers.cloudflare.com/analytics/graphql-api/sampling/) applies. Positive errors corroborate; zero/empty never establishes health or Cron absence. If row limit/pagination or GraphQL errors prevent complete query processing, label partial. Effective retention, ingestion lag, dataset entitlement and sampling remain LIVE unknowns; the [metrics page](https://developers.cloudflare.com/workers/observability/metrics-and-analytics/#metrics-retention) describes historical availability, not this query's completeness. |
+| Cron configured: NOW + LIVE | `GET /accounts/{account}/workers/scripts/{reviewed Worker}/schedules`; require exact `* * * * *`, record fetch time and returned schedule metadata. | [Schedules API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/schedules/methods/get/) returns configuration, **not executions**. Missing expected configuration is configuration drift only after successful authenticated, schema-valid response. 401/403/empty envelope/timeout is unavailable. No invocation start/completion inferred. |
+| Cron start vs terminal work: CODE + LIVE | New bounded progress snapshot described below, keyed by stage, candidate, scheduled UTC minute and attempt; separate observed start, terminal result and completed phases. External observer compares expected minutes after activation/maintenance exclusions. | No documented complete start/completion API established here. [Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) distinguishes scheduled time from execution time; Past Events status reflects promise failure, not successful business phases. Current caught failures and Alchemy ignoring causes further prevent treating platform “success” as completion. Missing heartbeat means **missing evidence**, not proof Cron never ran. |
+| Logs / Cron Events: optional LIVE investigation | `POST /accounts/{account}/workers/observability/telemetry/query`, explicit dataset + reviewed Worker equality + event type + fixed failure class, UTC millisecond `timeframe:{from,to}`. Invocation selector is `$cloudflare.$metadata.type = cf-worker-event`. Exact service/event keys and dataset must first be discovered and reviewed; refuse to query all datasets. | [Query API](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/) currently requires **Workers Observability Write**. Exclude from default read-only observer rather than silently grant it. Filter keys are discovery-dependent, so this is not a runnable query manifest. [Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) can be sampled/truncated and retained for a limited period; effective settings/lag are unverified. [Cron Events](https://developers.cloudflare.com/workers/configuration/cron-triggers/#view-past-events) is a dashboard investigation surface, not a complete machine-readable completion contract. No raw logs exported. |
+| Deployment / workflow failure: NOW + LIVE | `GET https://api.github.com/repos/Quick-Release/gq-support/actions/workflows/{file}/runs?branch=main&event={expected event}&created={bounded UTC range}&per_page=100`; allowlist `deploy-worker.yml` (`workflow_dispatch`), `ci.yml` (`push`), `release-plugin.yml` (`workflow_dispatch` on main). Also query `release-plugin.yml` with `event=push` and **without** `branch=main`, then accept only privately expected `plugin-v*` tag/head identities; the actual workflow supports tag pushes. Use run ID + `run_attempt`, `head_sha`, `created_at`, `run_started_at`, `updated_at`, status/conclusion; `GET .../actions/runs/{run_id}/jobs?filter=all&per_page=100` for bounded job/attempt evidence. | [Runs API](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow), [jobs API](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run). Terminal failure/timed_out/action_required are incidents; cancellation/skipped require expectation reconciliation, never health. Run `updated_at` is not exact deployment failure time. Do not infer stage from display text: join deploy run to private approved request/run/stage/candidate record; unmatched means stage unknown. Use a maximum 24-hour discovery window and fetch each outstanding run directly via `GET .../actions/runs/{run_id}` even when created earlier, so old reruns/waits cannot fall out of observation. No deploy is expected periodically. A successful workflow is not live deployment/readiness proof. Truncated pages, missing tracked attempts and permission failures are unknown. |
+| Active deployment corroboration: NOW + LIVE | `GET /accounts/{account}/workers/scripts/{Worker}/deployments`; compare latest deployment ID, versions and creation time with approved stage candidate record, fetched at observer time. | [Deployments API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/methods/list/) lists active deployments, not failed attempts before a deployment exists. Missing/mismatched identity is drift/unknown, never auto-approve or auto-redeploy. Retention and propagation lag unverified. |
+| Alert-route state and Discord receipt: CODE + LIVE | New snapshot exposes only finite local route state (`disabled`, `ready`, `blocked_unknown`, `rate_limited`) and last attempt/confirmed time. External sender records its own durable attempt. Future authorized `POST https://discord.com/api/webhooks/{private id}/{private token}?wait=true`, no redirects. | Local ready is configuration/state evidence only. [Discord execute](https://docs.discord.com/developers/resources/webhook#execute-webhook) server confirmation is separate from human acknowledgment. No secret URL exists here; no test is sent. Timeout/5xx/unknown response leaves receipt uncertain; broken Discord cannot announce its outage through Discord. Transport confirmation of an external message does not prove the Worker's sender works. |
+| Operator receipt and observer absence: POLICY + LIVE | Explicit acknowledgment by vvaz **or** gmarques in existing restricted incident record, bound to incident generation and UTC time. GitHub observer run metadata can show last started/completed run only when independently inspected. | No ack API, owner deadline, escalation destination or fallback is approved. GitHub failed run is independent visible evidence; notification settings and human receipt are unverified. A missing observer cannot send its own alarm; another check in the same scheduler adds no independent scheduling guarantee. |
+
+## Smallest implementation and custody
+
+One reviewed observer entry in this repository, independently executed by Actions,
+with separate jobs/manifests/credentials for `staging` and `prod`. Start as manual,
+read-only validation with sending and scheduling explicitly off. Later propose UTC
+`2-59/5 * * * *` to avoid the hourly boundary. GitHub documents a minimum five-minute
+interval, default-branch execution, delays/dropped jobs and public-repository
+inactivity disablement; this is **best-effort observation, no maximum detection
+delay**. A delayed run evaluates wall-clock evidence age and reports the uncovered
+interval, rather than replaying every missed poll. [Schedule limitations](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
+```text
+Actions outside Worker
+  bounded HTTP + GitHub reads (+ optional account analytics/metadata)
+  -> strict decoder -> finite verdict + coverage/unknown reasons
+  -> sanitized failed run / private evidence
+  -> [disabled until durable custody] one bounded Discord attempt
+Worker progress snapshot -> evidence input only; never its own absence detector
+```
+
+Use `permissions: {contents: read, actions: read}` and checkout only a reviewed
+immutable default-branch observer revision with persisted Git credentials off.
+Never check out the triggering run's code, consume PR artifacts/caches as trusted
+inputs, interpolate titles into shell, or expose secrets in PR runs. A future
+`workflow_run` listener is optional; if added, it only reads trusted run metadata,
+verifies repository/workflow/event/head against the private expectation record,
+and executes the pinned observer. It never inherits approval to deploy or reads
+untrusted run artifacts. GitHub warns privileged `workflow_run` code can access
+secrets even after an unprivileged workflow. [Event security](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run),
+[secure use](https://docs.github.com/en/actions/reference/security/secure-use).
+
+Default credentials: this repository's short-lived Actions read token; a distinct
+per-stage snapshot-read capability authorizing **only** the fixed aggregate GET,
+when implemented. No App key, installation credential, broad Alchemy state bearer,
+SupportDB/ledger SQL token, deployment token or ambient CF profile. Optional
+analytics needs a separately delivered Tipme `Account Analytics:Read` token;
+this is account-scoped telemetry, not a script-only permission merely because a
+query filters a script. Separate stage credentials do not alone establish stage
+isolation. Omit that adapter unless its actual scope is acceptable.
+[Analytics token](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/).
+For schedules/deployments prefer the documented Individual Workers Metadata
+Read-Only permission bound to the reviewed Worker **only after live scope proof**;
+do not substitute an account-wide script read grant silently. See the linked API
+permission lists in the matrix. No token is created or requested here.
+
+Keep secret delivery in trusted private parent custody using existing one-shot
+owner-only file/session conventions; no secrets in workflow inputs, command lines,
+URLs in diagnostics, summaries, artifacts or public manifests. A later GitHub
+Environment secret setup is a separate reviewed custody change, not assumed from
+the existing deployment's private-file model. Do not forward the deployment
+session wholesale. Stage-read capability and Discord send URL are separate.
+Preserve the approved Worker Logs-on/traces-off exception while Discord is enabled,
+and credential-removal-before-traces restoration when disabled. The Node sender
+must also disable HTTP debugging/tracing and discard raw provider errors/bodies.
+
+### Durable send ownership is a real prerequisite
+
+Recommendation: reuse the **future verified protected runner's private durable
+journal**, separate per stage, outside the support Worker and its restore domain.
+This avoids granting Actions broad D1 write access or adding a privileged API
+proxy. The actual workflow uses `ubuntu-latest`; neither persistent storage nor
+a protected runner is established. Therefore this is a **required runner/storage
+capability**, not an implementation available now. If existing runner custody
+cannot provide it, keep sending disabled and return with a narrowly scoped storage
+proposal; do not silently add a Cloudflare resource/provider or broaden grants.
+
+The journal needs exclusive ownership across every runner/restart, atomic
+compare/update, fsync of file and directory before dispatch, and durable reads
+after runner loss. A local `flock` plus rename is sufficient only after proving
+one persistent filesystem and no other writers; hosted-runner workspace, Actions
+cache/artifact, job concurrency and “latest run succeeded” are not that proof.
+GitHub concurrency controls overlap/queuing, not send-receipt atomicity.
+[Concurrency](https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency).
+D1 is transactional storage but its [SQL query API](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/)
+is not a table-limited incident capability. Do not hand an observer a general SQL
+credential to existing private support databases to solve deduplication.
+
+Proposed finite keys: stage × eight classes (`http_unavailable`, `worker_errors`,
+`cron_start_missing`, `cron_incomplete`, `workflow_failure`, `deployment_drift`,
+`telemetry_unavailable`, `alert_route_unavailable`). Keep one active generation per
+key, saturating count at 999999, first/last event and observation times, latest
+candidate, last covered watermark, cooldown and receipt state. Bound the approved
+run expectation list to 20 outstanding runs per stage; overflow becomes unknown,
+never eviction of unresolved ownership. Quiet terminal history expires after
+seven days; retain unresolved receipt latches until explicit reconciliation.
+No per-Client/Reporter/request/URL dimensions.
+
+Before sending, durably transition `pending -> dispatching` with generation and
+attempt. A crash while dispatching becomes `blocked_unknown`, even if no POST
+actually reached Discord. Never expire/reassign that send automatically. Confirmed
+200 advances only that generation to `transport_confirmed`; an outdated response
+cannot close a newer incident. Apply the existing bounded transport rules:
+one attempt/minute/stage, only valid explicit 429 permits bounded retry (three
+attempts maximum, honor server delays); timeout/5xx/redirect/unsupported responses
+latch unknown. No automatic resend, reminder or takeover on an uncertain receipt.
+Recovery requires new affirmative source evidence; never silence, expiry or an
+empty query. Send at most one recovery for an active generation, subject to the
+same receipt ownership. vvaz or gmarques may reconcile a route; neither is primary,
+and no action clears support/restore/provider ownership.
+
+## Bounded contracts and proposed windows
+
+A future CODE slice adds a fixed authenticated aggregate snapshot
+`GET /internal/observer/v1/snapshot` (read-only, no support records) and a data-free
+readiness GET **before** support admission. Readiness may check binding availability
+without listing/creating support data; its success claims only its listed checks.
+Snapshot reads existing stage-local state; no new side-effecting probe or hidden
+GitHub/Discord test. Neither endpoint is implemented by this document.
+
+Record a bounded 60-minute ring of scheduled slots: scheduled UTC minute from the
+controller, attempt ordinal (at most four retained attempts/slot, overflow explicitly partial), actual start time, terminal time and finite
+phase outcomes (`ok`, `failed`, `timed_out`, `contained`, `not_run`). Record start
+before work, terminal **after** phase outcomes settle, and notification-drain result
+separately. Do not record success in an unconditional finalizer. Existing caught
+phase failures/denials need explicit result plumbing before a completion marker
+is trustworthy; preserve current deadlines, ordering and restore admissions.
+Snapshot has generated-at time, stage/candidate, activation/maintenance generation,
+ring coverage start/end and storage-read outcome. Missing bindings/write failure
+can prevent heartbeat evidence and must remain unknown. A heartbeat producer
+cannot prove its own absence; Actions owns deadline evaluation. [Controller semantics](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/).
+
+Proposals for review, **not approved SLOs**:
+
+| Observation | Proposed threshold / reason | Required interpretation |
+| --- | --- | --- |
+| HTTP | One GET/run, 10s total budget; incident after two failures on separate runs | Reduces one-off noise; isolated 5xx still recorded. Two successes can establish route recovery, not delivery recovery. No extra mutating retry. |
+| Cron starts | At observer UTC minute T, evaluate the ten slots in [T−12 minutes, T−2 minutes), allowing 2 minutes settling | No starts in those ten expected slots means `cron_start_missing` evidence incident only with fresh, valid snapshot covering those slots. Unavailable snapshot is telemetry unavailable. Delay can exceed 10 minutes: no notification deadline promised. |
+| Cron completion | Start exists, terminal absent after 3 minutes; any explicit failed/timed_out phase is failure | 3 minutes exceeds nominal cooperative 57s plus persistence/drain allowances; it is an investigation threshold, not cancellation or proof work stopped. Latest success cannot erase an earlier unresolved slot. |
+| Analytics | Overlapping last 15 minutes ending 2 minutes before observer time | Settling allowance is a proposal requiring measured lag. Positive error count is corroboration; zero is no reported errors in sampled data. No percentage SLO or zero-traffic health claim. |
+| Workflows/deploy | Failure immediately when observed; tracked nonterminal run older than 30 minutes becomes stalled/unknown | Queue/reviewer waits are distinguished from job failures. 30 minutes is a review threshold, not apply timeout; retained apply owners never expire. |
+| Route/observer | Blocked route immediately when observed; last observer completion older than 20 minutes is a review gap when independently checked | No Discord self-outage alert or independent scheduler claimed. Disabled/maintenance windows remain explicit exclusions, never healthy ticks. |
+
+Input budget proposal: per stage/run at most 64 KiB per response, 1 MiB total,
+100 aggregate rows/query, 3 GitHub pages/workflow and 20 tracked job lookups;
+stop at budget and label coverage partial. Bound all streaming reads even without
+Content-Length. HTTPS allowlists, redirects refused, no arbitrary user URLs.
+Only fixed stage/class/outcome enums, reviewed SHA, integer UTC times/durations,
+counts and coverage flags reach the evaluator; discard raw inputs after decoding.
+Public output is at most 2 KiB of stage/class/count/times/verdict, no IDs/links to
+private topology, message content, raw URLs/headers/errors, support data or hashes
+of personal data. Discord payload uses the same finite fields and no mentions.
+
+Required decoder/evaluator vectors for the next offline slice:
+
+| Fixture / negative control | Required verdict |
+| --- | --- |
+| Missing/null/malformed/wrong-stage/wrong-account/wrong-candidate; 401/403; bad TLS | unavailable or invalid; never normal or missing Cron proof |
+| Valid empty analytics vs empty heartbeat envelope | no reported sampled errors vs invalid/missing evidence; neither healthy |
+| GraphQL HTTP 200 with errors, partial pages, truncated response, unknown sampling/lag | partial/unknown coverage; preserve independently valid positive failure evidence |
+| Fresh ring containing expected slot with start only; explicit timeout/containment | incomplete after grace; failed/contained is not success |
+| Valid ring covering ten expected slots with no starts | missing start evidence, not proven non-execution |
+| Late/stale/future/out-of-order/duplicate evidence | reject impossible times, do not regress watermarks or double count; old success cannot recover newer failure |
+| HTTP readiness 200 while tracked GitHub deploy fails; Discord 200 without human ack | route available + independent workflow failure; transport confirmed + acknowledgment unknown |
+| Crash before/after dispatch, lost response, concurrent sender, recovery racing failure | retain durable uncertain ownership; no automatic resend/recovery/reset |
+| Oversized body/row count, injected PII/unknown fields, redirect to private host | bounded rejection without logging payload or following redirect |
+
+No executable prototype is included: adapters, transport and durable custody are
+unwired. These are acceptance vectors, not passing tests or a functional monitor.
+A pure evaluator can be implemented next without live permission; no Worker entry
+stub or enabled workflow belongs in that slice.
+
+## Subsequent implementation and live acceptance checklist
+
+1. **Offline observer protocol (no policy/credentials needed):** strict decoders,
+   expectation joins and finite evaluator in an isolated tool, fake clock/HTTP only.
+   Pass the vectors above and leak canaries; negative controls must fail on
+   empty-as-healthy, completion-from-start, stale recovery and unknown resend.
+   No production entry or enabled scheduler. Review thresholds before enabling.
+2. **CODE heartbeat/readiness:** bounded ring and snapshot-read capability scoped
+   separately per stage; explicit phase results and maintenance exclusions. Tests
+   exercise actual scheduled callback, failed/denied phases, binding failure,
+   concurrent/out-of-order slots and read-only/no-support-data probe. Independently
+   reading progress must never release retained restore/provider admissions.
+3. **Custody/state integration, still disabled:** prove protected runner identity,
+   exclusive persistent journal/crash recovery and per-stage separation. If not
+   possible under current grants, publish the specific missing storage/grant
+   requirement before designing/provisioning anything. Read credentials authorize
+   only chosen sources; do not inherit planning/App/deployment credentials. Parent
+   privately supplies capabilities and destination only for authorized live work.
+4. **LIVE source proof (separately authorized):** record actual account/stage/Worker
+   and endpoint identity; token resource scope/expiry; authenticated permission
+   failures; finite response schema; measured lag, sampling, retention and access.
+   Bind expected deployment run/attempt/candidate/stage privately. Verify configured
+   Cron separately from start and phase completion. Prove journal survives runner
+   loss and duplicate dispatch refusal. No account/profile discovery is implied.
+5. **Authorized staging drills, exact candidate/targets/window/restoration owner:**
+   synthetic readiness failure without support CRUD, withheld start/terminal
+   heartbeat, failed workflow before apply, stale/partial/denied telemetry, runner
+   cancellation, Discord explicit rejection/uncertain receipt and recovery. First
+   prove with fake transport. Real Discord send requires later authorization,
+   private destination and access/retention review; record server confirmation and
+   a separate vvaz-or-gmarques human acknowledgment. No production disruption or
+   deployment/restore drill is authorized by this checklist.
+6. **Production enablement:** approved dedup/receipt policy, independent-outage
+   coverage decision below, candidate-specific release approval and measured pilot
+   evidence. Managed Composer/tested-ZIP upgrades remain MVP policy. Live manifests,
+   protected runner/reviewers, writer exclusion, private credentials, post-plan
+   candidate approval, remote RPC, Test F and recovery drills remain unverified;
+   this docs PR closes none of them or #20/#29.
+
+## Minimal user decision frontier — parent review only
+
+Proceed with offline CODE without requesting secrets or permission. Technical
+schema, scope and persistence proofs are engineering work, not questions to shift
+to the user. Preserve vvaz **or** gmarques authority with no hierarchy.
+
+To claim timely notification during Discord failure or Actions scheduler loss,
+an independently observed destination/owner coverage arrangement is unavoidable:
+the failed component cannot establish its own timely receipt. Recommend accepting
+GitHub failed-run visibility as a **temporary manual investigation surface**, while
+leaving this automatic-outage/receipt gate open. It is not an approved fallback:
+GitHub notification delivery, recipient access and monitoring frequency are
+unverified, and no run may exist when scheduling fails. After reviewing this
+proposal, the parent may ask only whether that limitation is acceptable for the
+pilot, or which existing independent destination/coverage and acknowledgment
+window to approve. Do not invent one, enroll a vendor, or send a test now.
+
+## Publication validation
+
+Docs-only diff against pinned PR120: 62 local documentation links/anchors checked;
+`git diff --check`, `scripts/ci/gitleaks.sh dir docs`, workflow policy and runtime
+matrix policy passed. Affected-suite classification is empty for these Markdown
+paths; JS lint/types and Worker tests are not affected and were not rerun. No
+protocol executable/tests were added. These checks establish documentation hygiene,
+not live observation, alert delivery or readiness. Current GitHub issue metadata
+confirms #20 and #29 OPEN; hosted PR checks/reviews remain uninspected.
