@@ -1,10 +1,11 @@
 // Trusted launcher only. All authentication is read from GitHub HTTPS responses;
 // no timestamp, verifier or approval flag supplied by the graph is authoritative.
 import { boundedBody, wireJson } from "./planning-read.ts";
-import { requireEvidence, refusal } from "./planning-state.ts";
+import { requireEvidence, refusal, checkStage, type ProtectedStage } from "./planning-state.ts";
 
 export const REPOSITORY = "Quick-Release/gq-support";
 export interface ApprovalPolicy {
+  readonly stage: ProtectedStage;
   readonly repositoryId: number;
   readonly approvers: Readonly<Record<"vvaz" | "gmarques", number>>;
   readonly run: number;
@@ -20,7 +21,7 @@ export interface ApprovalCandidate {
 }
 const root = `https://api.github.com/repos/${REPOSITORY}`;
 export function approvalCommand(policy: ApprovalPolicy, candidate: ApprovalCandidate) {
-  return `approve-plan ${REPOSITORY} ${policy.run}/${policy.attempt} ${policy.head} ${candidate.candidate} ${candidate.nonce}`;
+  return `approve-plan ${REPOSITORY} ${policy.stage} ${policy.run}/${policy.attempt} ${policy.head} ${candidate.candidate} ${candidate.nonce}`;
 }
 
 // A comment on #20 is an explicit post-plan command, not a deployment approval
@@ -28,8 +29,11 @@ export function approvalCommand(policy: ApprovalPolicy, candidate: ApprovalCandi
 // Only creation is accepted: editing a pre-plan comment into an approval fails.
 export function githubCandidateApproval(policy: ApprovalPolicy, token: string, transport: typeof fetch, now = Date.now) {
   policy = structuredClone(policy);
+  checkStage(policy.stage);
+  // Review history has no attempt identity/timestamp. A rerun cannot prove
+  // its environment review is fresh; require a new workflow dispatch.
   requireEvidence(Number.isSafeInteger(policy.repositoryId) && policy.repositoryId > 0 &&
-    Number.isSafeInteger(policy.run) && policy.run > 0 && Number.isSafeInteger(policy.attempt) && policy.attempt > 0 &&
+    Number.isSafeInteger(policy.run) && policy.run > 0 && policy.attempt === 1 &&
     /^[a-f0-9]{40}$/.test(policy.head) && policy.workflow === ".github/workflows/deploy-worker.yml" &&
     Object.keys(policy.approvers).sort().join() === "gmarques,vvaz" &&
     Object.values(policy.approvers).every((id) => Number.isSafeInteger(id) && id > 0) &&
@@ -57,6 +61,8 @@ export function githubCandidateApproval(policy: ApprovalPolicy, token: string, t
       const run = obj(await get(`/actions/runs/${policy.run}`));
       requireEvidence(run.id === policy.run && run.run_attempt === policy.attempt && run.head_sha === policy.head &&
         run.head_branch === "main" && run.path === policy.workflow && run.event === "workflow_dispatch" &&
+        typeof run.display_title === "string" &&
+        (run.display_title === `Deploy Support Worker (${policy.stage})` || run.display_title.startsWith(`Deploy Support Worker (${policy.stage}) `)) &&
         run.status === "in_progress" && run.conclusion === null && obj(run.repository).id === policy.repositoryId &&
         obj(run.repository).full_name === REPOSITORY && obj(run.head_repository).id === policy.repositoryId);
       const branch = obj(await get("/branches/main"));
@@ -66,9 +72,9 @@ export function githubCandidateApproval(policy: ApprovalPolicy, token: string, t
         obj(protection.required_pull_request_reviews).required_approving_review_count !== undefined &&
         Number(obj(protection.required_pull_request_reviews).required_approving_review_count) >= 1 &&
         obj(protection.allow_force_pushes).enabled === false && obj(protection.allow_deletions).enabled === false);
-      const environment = obj(await get("/environments/prod"));
+      const environment = obj(await get(`/environments/${policy.stage}`));
       const deployment = obj(environment.deployment_branch_policy);
-      requireEvidence(environment.name === "prod" && Number.isSafeInteger(environment.id) &&
+      requireEvidence(environment.name === policy.stage && Number.isSafeInteger(environment.id) &&
         deployment.protected_branches === true && deployment.custom_branch_policies === false && Array.isArray(environment.protection_rules));
       const reviewers = environment.protection_rules.map(obj).filter((rule) => rule.type === "required_reviewers");
       requireEvidence(reviewers.length === 1 && reviewers[0].prevent_self_review === true && Array.isArray(reviewers[0].reviewers));
@@ -81,7 +87,7 @@ export function githubCandidateApproval(policy: ApprovalPolicy, token: string, t
       const reviews = await get(`/actions/runs/${policy.run}/approvals`);
       requireEvidence(Array.isArray(reviews));
       const relevant = reviews.map(obj).filter((review) => Array.isArray(review.environments) &&
-        review.environments.some((env) => obj(env).id === environment.id && obj(env).name === "prod"));
+        review.environments.some((env) => obj(env).id === environment.id && obj(env).name === policy.stage));
       requireEvidence(relevant.length === 1 && relevant[0].state === "approved" &&
         policy.approvers[obj(relevant[0].user).login as keyof typeof policy.approvers] === obj(relevant[0].user).id);
       for (const login of ["vvaz", "gmarques"] as const) {

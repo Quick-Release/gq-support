@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { encodeState } from "alchemy/State/StateEncoding";
 import * as Effect from "effect/Effect";
 import type { StateService } from "alchemy/State/State";
-import { requireEvidence, STACK } from "./planning-state.ts";
+import { requireEvidence, checkTarget, type Target } from "./planning-state.ts";
 
 // Integrity observations, NOT a backend revision/CAS/ABA proof.
 export const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -15,7 +15,7 @@ const git = (repo: string, args: string[]) => execFileSync("/usr/bin/git", ["-c"
 export function sourceEvidence(repo: string, head?: string) {
   if (head) {
     const workflow = readFileSync(join(repo, ".github/workflows/deploy-worker.yml"), "utf8").split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
-    requireEvidence(["if: github.ref == 'refs/heads/main'", 'environment: ${{ inputs.stage }}', 'group: deploy-worker-${{ inputs.stage }}', 'cancel-in-progress: false',
+    requireEvidence(['run-name: Deploy Support Worker (${{ inputs.stage }}) ${{ inputs.request_id }}', "if: github.ref == 'refs/heads/main'", 'environment: ${{ inputs.stage }}', 'group: deploy-worker-${{ inputs.stage }}', 'cancel-in-progress: false',
       'node --import ./deploy/planning-loader.mjs deploy/planning-entry.ts'].every((required) => workflow.includes(required)) &&
       !/alchemy (?:deploy|plan)|workflow_run:|upload-artifact/.test(workflow));
     requireEvidence(git(repo, ["rev-parse", "HEAD"]).trim() === head);
@@ -30,14 +30,15 @@ export function sourceEvidence(repo: string, head?: string) {
   return Object.freeze({ manifest: rows, source: digest(rows), lockfiles: digest(rows.filter(([file]) => /lock|package.json|pnpm-workspace/.test(file))),
     migrations: digest(rows.filter(([file]) => /migrations\//.test(file))) });
 }
-export async function snapshotInput(snapshot: StateService) {
-  const target = { stack: STACK, stage: "prod" };
+export async function snapshotInput(snapshot: StateService, target: Target) {
+  checkTarget(target);
   const rows: Record<string, unknown> = {};
   for (const fqn of [...await Effect.runPromise(snapshot.list(target))].sort()) rows[fqn] = encodeState(await Effect.runPromise(snapshot.get({ ...target, fqn })));
   const output = encodeState(await Effect.runPromise(snapshot.getOutput(target)));
-  return { rows: { [STACK]: { prod: rows } }, output: { [STACK]: { prod: output } } };
+  return { rows: { [target.stack]: { [target.stage]: rows } }, output: { [target.stack]: { [target.stage]: output } } };
 }
 export interface OwnerWindow {
+  readonly target: Target;
   readonly id: string;
   readonly startsAt: number;
   readonly expiresAt: number;
@@ -48,6 +49,7 @@ export interface OwnerWindow {
 }
 export function exclusiveLocalWindow(path: string, window: OwnerWindow, now = Date.now) {
   window = structuredClone(window);
+  checkTarget(window.target);
   requireEvidence(/^[a-f0-9]{64}$/.test(window.id) && window.duty === "exclude-every-state-writer-and-endpoint-deployer" &&
     window.startsAt <= now() && now() < window.expiresAt && window.expiresAt - window.startsAt <= 20 * 60_000);
   // Fixed owner-controlled path on the protected runner, shared with every

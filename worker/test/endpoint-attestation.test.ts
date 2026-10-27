@@ -14,7 +14,7 @@ const bindings = [
   { type: "secrets_store_secret", name: "AUTH", store_id: "b".repeat(32), secret_name: "synthetic-auth" },
   { type: "secrets_store_secret", name: "ENCRYPTION", store_id: "b".repeat(32), secret_name: "synthetic-encryption" },
 ];
-async function fixture() {
+async function fixture(stage: "prod" | "staging" = "prod") {
   const form = new FormData();
   form.append("main.js", new Blob(["export default {fetch(){}}"], { type: "application/javascript+module" }), "main.js");
   const content = new Response(form);
@@ -23,7 +23,7 @@ async function fixture() {
   const manifest: ReviewedEndpoint = {
     origin: "https://synthetic-store.synthetic-account.workers.dev", path: "/state", mainModule: "main.js", scriptEtag: "synthetic-content-hash", account: ACCOUNT,
     script: "synthetic-store", scriptDigest: await bundleDigest(bytes, type), protocol: 7,
-    target: { stack: STACK, stage: "prod" }, versionId, deploymentId, bindings,
+    target: { stack: STACK, stage }, versionId, deploymentId, bindings,
     graph: [["SupportDB", "Cloudflare.D1Database"], ["SupportLedger", "Cloudflare.D1Database"],
       ["Worker", "Cloudflare.Worker"], ["GitHubAppSecret", "GQSupport.GitHubAppSecret"]].map(([fqn, type]) => ({
         fqn, type, kind: "resource", instanceId: `instance-${fqn}`, providerVersion: 1, requiredPaths: [["attr"]],
@@ -49,17 +49,17 @@ async function fixture() {
 }
 function envelope(result: unknown) { return Response.json({ success: true, errors: [], result }); }
 afterEach(() => vi.restoreAllMocks());
-describe("authenticated bounded endpoint attestation with synthetic first-party HTTP", () => {
+describe.each(["prod", "staging"] as const)("%s authenticated bounded endpoint attestation with synthetic first-party HTTP", (stage) => {
   it("proves canonical account route, single active version, bundle, exact bindings and both physical DBs", async () => {
     const globalFetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error(secret));
-    const f = await fixture();
+    const f = await fixture(stage);
     const contract = await attestEndpoint(f.manifest, readToken, f.transport);
     expect(contract).not.toBe(f.manifest); expect(Object.isFrozen(contract.bindings[0])).toBe(true);
     expect(f.calls).toHaveLength(8);
     expect(globalFetch).not.toHaveBeenCalled();
   });
   it.each(["account", "origin", "alias", "path", "script", "digest", "protocol", "version", "database", "bindings", "entrypoint", "etag"])("refuses reviewed %s mismatch", async (failure) => {
-    const f = await fixture();
+    const f = await fixture(stage);
     const invalid = structuredClone(f.manifest);
     if (failure === "etag") Object.assign(invalid, { scriptEtag: "wrong" });
     if (failure === "entrypoint") Object.assign(invalid, { mainModule: "wrong.js" });
@@ -76,7 +76,7 @@ describe("authenticated bounded endpoint attestation with synthetic first-party 
     await expect(attestEndpoint(invalid, readToken, f.transport)).rejects.toThrow("Protected planning evidence unavailable; apply blocked");
   });
   it.each(["redirect", "redirected", "unavailable", "malformed", "missing", "version", "split", "changed", "route", "binding", "db", "oversized", "missing-etag", "content-version", "weak-etag"])("refuses %s metadata with sanitized diagnostics", async (failure) => {
-    const f = await fixture();
+    const f = await fixture(stage);
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     let deployments = 0;
@@ -110,14 +110,14 @@ describe("authenticated bounded endpoint attestation with synthetic first-party 
     expect(log).not.toHaveBeenCalled(); expect(error).not.toHaveBeenCalled();
   });
   it("cannot acquire state through a claimed verified flag and never sends state bearer to metadata", async () => {
-    const f = await fixture();
+    const f = await fixture(stage);
     const state = vi.fn<typeof fetch>();
     await expect(Effect.runPromise(acquireAttestedSnapshot(Object.assign(f.manifest, { verified: true }), stateToken, readToken,
       { cloudflare: async () => { throw new Error(secret); }, state }))).rejects.toThrow("Protected planning evidence unavailable; apply blocked");
     expect(state).not.toHaveBeenCalled();
   });
   it.each(["ok", "protocol", "graph", "path", "type", "instance", "db", "output"])("checks combined attestation and decoded %s state", async (failure) => {
-    const f = await fixture();
+    const f = await fixture(stage);
     const metadata = f.transport;
     const bypass = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error(secret));
     const sourceRows = Object.fromEntries(f.manifest.graph.map((expected) => [expected.fqn, {
@@ -137,7 +137,7 @@ describe("authenticated bounded endpoint attestation with synthetic first-party 
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${stateToken}`);
       const url = new URL(String(input)); expect(url.origin).toBe(f.manifest.origin);
       const path = url.pathname;
-      return Response.json(path === "/version" ? { version: failure === "protocol" ? 5 : 7 } : path.endsWith("/stages") ? ["prod"] :
+      return Response.json(path === "/version" ? { version: failure === "protocol" ? 5 : 7 } : path.endsWith("/stages") ? [stage] :
         path.endsWith("/replaced-resources") ? [] : path.endsWith("/resources") ? Object.keys(sourceRows).filter((key) => failure !== "graph" || key !== "Worker") :
         path.endsWith("/output") ? (failure === "output" ? {} : { workerName: "synthetic-worker" }) : sourceRows[path.split("/").at(-1)!]);
     });
@@ -146,12 +146,23 @@ describe("authenticated bounded endpoint attestation with synthetic first-party 
     else await expect(result).rejects.toThrow("Protected planning evidence unavailable; apply blocked");
     expect(metadata).toHaveBeenCalledTimes(8); expect(state).toHaveBeenCalled(); expect(bypass).not.toHaveBeenCalled();
   });
+  it("refuses the other stage's manifest against stage-confined State before any write", async () => {
+    const f = await fixture(stage);
+    const other = stage === "prod" ? "staging" : "prod";
+    const state = vi.fn<typeof fetch>(async (url, init) => {
+      expect(init?.method).toBe("GET");
+      const path = new URL(String(url)).pathname;
+      return Response.json(path === "/version" ? { version: 7 } : path.endsWith("/stages") ? [other] : []);
+    });
+    await expect(Effect.runPromise(acquireAttestedSnapshot(f.manifest, stateToken, readToken, { cloudflare: f.transport, state }))).rejects.toThrow("apply blocked");
+    expect(state.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
   it("bounds streaming responses without Content-Length", async () => {
     const response = new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(MAX_BODY + 1)); controller.close(); } }));
     await expect(boundedBody(response)).rejects.toThrow("Protected planning evidence unavailable; apply blocked");
   });
   it("hashes multipart modules independently of boundary and refuses duplicate modules", async () => {
-    const f = await fixture();
+    const f = await fixture(stage);
     const form = new FormData();
     form.append("main.js", new Blob(["export default {fetch(){}}"], { type: "application/javascript+module" }), "main.js");
     const response = new Response(form);

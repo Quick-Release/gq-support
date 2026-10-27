@@ -2,11 +2,12 @@
 import { appConfig, verifyApp } from "./github-app.ts";
 import { validateWebhookSecrets } from "./github-webhook-secrets.ts";
 import { boundedBody, wireJson } from "./planning-read.ts";
-import { refusal, requireEvidence } from "./planning-state.ts";
+import { refusal, requireEvidence, checkStage, type ProtectedStage } from "./planning-state.ts";
 
-export async function planningPreflight(env: NodeJS.ProcessEnv, transport: typeof fetch) {
+export async function planningPreflight(env: NodeJS.ProcessEnv, transport: typeof fetch, stage: ProtectedStage = "prod") {
   try {
-    const config = appConfig("prod", env);
+    checkStage(stage);
+    const config = appConfig(stage, env);
     const result = await verifyApp(config, env.GITHUB_APP_PRIVATE_KEY ?? "", async (input, init) => {
       requireEvidence(input === "https://api.github.com/app" && (init?.method ?? "GET") === "GET" &&
         init?.body === undefined && init?.redirect === "error");
@@ -21,6 +22,7 @@ export async function planningPreflight(env: NodeJS.ProcessEnv, transport: typeo
       const value = wireJson(await boundedBody(response, 64 * 1024));
       return Response.json(value);
     });
+    requireEvidence(String(result.appId) === env.GITHUB_APP_ID);
     validateWebhookSecrets(env, result.appId);
     return result;
   } catch { throw refusal(); }

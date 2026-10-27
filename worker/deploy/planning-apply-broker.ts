@@ -4,20 +4,22 @@ import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { makeHttpStateStore } from "alchemy/State/HttpStateStore";
+import type { DatabaseIdentity } from "./native-plan-policy.ts";
 import type { PersistedState } from "alchemy/State/State";
 import { planningBundleDigest } from "./planning-bundle.ts";
-import { requireEvidence, refusal, ACCOUNT, STACK } from "./planning-state.ts";
+import { requireEvidence, refusal, ACCOUNT, STACK, checkStage, protectedAppSlugs, type ProtectedStage } from "./planning-state.ts";
 import { boundedBody, checkWire } from "./planning-read.ts";
 import { checkChannelFrame, type BrokerOperation } from "./retained-child-channel.ts";
 import type { AppSecretCustody } from "./github-app-secret.ts";
 
 export interface ApplyBrokerConfig {
+  readonly stage: ProtectedStage;
   readonly instances: Readonly<Record<"Worker" | "GitHubAppSecret", string>>;
   readonly bundle: string;
   readonly worker: string;
   readonly stateOrigin: string;
   readonly app: Awaited<ReturnType<AppSecretCustody["provisionKey"]>>;
-  readonly databaseIds: readonly string[];
+  readonly databases: readonly DatabaseIdentity[];
 }
 export interface ApplyBrokerCustody {
   readonly cloudflareToken: string;
@@ -28,6 +30,8 @@ export interface ApplyBrokerCustody {
 }
 export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBrokerCustody, check: () => Promise<void>, dispatch: () => void) {
   config = structuredClone(config);
+  checkStage(config.stage);
+  requireEvidence(config.app.stage === config.stage && config.app.slug === protectedAppSlugs[config.stage]);
   requireEvidence(/^[a-z0-9][a-z0-9-]{0,62}$/.test(config.worker) && new URL(config.stateOrigin).origin === config.stateOrigin &&
     new URL(config.stateOrigin).protocol === "https:" && custody.cloudflareToken.length > 0 && custody.stateBearer.length > 0 &&
     !/\s/.test(custody.cloudflareToken + custody.stateBearer));
@@ -70,7 +74,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
   let statePermit = false;
   const stateClient = HttpClient.make((req, url) => Effect.promise(async () => {
     requireEvidence(statePermit); statePermit = false; // native retry cannot resend an uncertain commit
-    const stage = `/state/stacks/${STACK}/stages/prod`;
+    const stage = `/state/stacks/${STACK}/stages/${config.stage}`;
     requireEvidence(url.origin === config.stateOrigin && !url.search && !url.hash && !url.username && !url.password && req.method === "PUT" &&
       [stage + "/output", stage + "/resources/Worker", stage + "/resources/GitHubAppSecret"].includes(url.pathname) && req.body._tag === "Uint8Array" && req.body.body.byteLength <= 8 * 1024 * 1024);
     const bytes = await request(String(url), "PUT", Buffer.from(req.body.body), "application/json", true);
@@ -104,7 +108,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
               !metadata.tail_consumers && !metadata.streaming_tail_consumers && Array.isArray(metadata.bindings));
             const bindings = metadata.bindings.filter((binding: { type: string }) => binding.type === "d1");
             requireEvidence(bindings.length === 2 && new Set(bindings.map((binding: { id?: string; database_id?: string }) => binding.database_id ?? binding.id)).size === 2 &&
-              bindings.every((binding: { id?: string; database_id?: string }) => config.databaseIds.includes(binding.database_id ?? binding.id ?? "")));
+              bindings.every((binding: { id?: string; database_id?: string }) => config.databases.map((db) => db.databaseId).includes(binding.database_id ?? binding.id ?? "")));
             const publicConfig: Record<string, string> = { GITHUB_APP_CLIENT_ID: config.app.clientId, GITHUB_APP_SLUG: config.app.slug, GITHUB_APP_ID: String(config.app.appId) };
             requireEvidence(metadata.bindings.every((binding: { type: string; name: string; text?: string }) =>
               ["d1", "plain_text"].includes(binding.type) || (binding.type === "secret_text" && Object.hasOwn(publicConfig, binding.name) && (binding.text === publicConfig[binding.name] || binding.text === JSON.stringify({ _tag: "Redacted", value: publicConfig[binding.name] })))));
@@ -138,12 +142,28 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
             // partial failure rather than erasing native recovery evidence.
             if (row.old) requireEvidence(row.status === "updating" && row.old.fqn === fqn && row.old.instanceId === row.instanceId &&
               ["created", "updated"].includes(row.old.status) && !row.old.old);
-            if (fqn === "SupportDB" || fqn === "SupportLedger") requireEvidence(row.resourceType === "Cloudflare.D1Database" && config.databaseIds.includes(row.attr?.databaseId ?? ""));
-          } else requireEvidence(checked); // output is a commit only after custody verification
+            for (const value of [operation.value, row.old].filter(Boolean)) {
+              const saved = value as { props?: { stage?: string; workerName?: string }; attr?: { workerName?: string; accountId?: string; stage?: string; slug?: string } };
+              if (fqn === "GitHubAppSecret") {
+                requireEvidence(saved.props?.stage === config.stage && saved.props.workerName === config.worker);
+                if (saved.attr?.stage !== undefined) requireEvidence(saved.attr.stage === config.stage && saved.attr.slug === config.app.slug);
+              } else if (saved.attr?.workerName !== undefined) requireEvidence(saved.attr.workerName === config.worker && saved.attr.accountId === ACCOUNT);
+            }
+          } else {
+            requireEvidence(checked); // output is a commit only after custody verification
+            const output = operation.value as Record<string, unknown>;
+            const db = config.databases.find((db) => db.fqn === "SupportDB");
+            const ledger = config.databases.find((db) => db.fqn === "SupportLedger");
+            requireEvidence(output && Object.keys(output).sort().join() === "databaseId,databaseName,ledgerDatabaseId,ledgerDatabaseName,url,workerName" &&
+              output.workerName === config.worker && typeof output.url === "string" &&
+              new RegExp(`^https://${config.worker}\\.[a-z0-9][a-z0-9-]{0,62}\\.workers\\.dev$`).test(output.url) &&
+              output.databaseId === db?.databaseId && output.databaseName === db?.databaseName &&
+              output.ledgerDatabaseId === ledger?.databaseId && output.ledgerDatabaseName === ledger?.databaseName);
+          }
           requireEvidence(!statePermit); statePermit = true;
           const writer = await stateWriter();
-          if (fqn) await Effect.runPromise(writer.set({ stack: STACK, stage: "prod", fqn, value: operation.value as PersistedState }).pipe(Effect.provideService(HttpClient.HttpClient, stateClient)));
-          else await Effect.runPromise(writer.setOutput({ stack: STACK, stage: "prod", value: operation.value }).pipe(Effect.provideService(HttpClient.HttpClient, stateClient)));
+          if (fqn) await Effect.runPromise(writer.set({ stack: STACK, stage: config.stage, fqn, value: operation.value as PersistedState }).pipe(Effect.provideService(HttpClient.HttpClient, stateClient)));
+          else await Effect.runPromise(writer.setOutput({ stack: STACK, stage: config.stage, value: operation.value }).pipe(Effect.provideService(HttpClient.HttpClient, stateClient)));
           if (!fqn) completed = true;
           return null;
         }
@@ -153,7 +173,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
           requireEvidence(Object.keys(operation).sort().join() === "op,worker" && !key);
           // Reserve before awaiting: an uncertain upload cannot replay.
           requireEvidence(!once.has("app-key")); once.add("app-key"); mutations++;
-          key = await custody.app.provisionKey("prod", config.worker);
+          key = await custody.app.provisionKey(config.stage, config.worker);
           requireEvidence(sameApp(key));
           return key;
         }

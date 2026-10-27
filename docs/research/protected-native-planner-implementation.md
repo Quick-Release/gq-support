@@ -772,3 +772,112 @@ resources, including a native no-op, as well as persisted retention.
 
 Staging and D1 update/migration profiles remain unimplemented in this revision.
 These corrections do not enable them or establish any live readiness evidence.
+
+## Bounded staging target slice (2026-10-27, stacked on PR115/f587ff5)
+
+This section supersedes the historical **prod-only CODE restriction** above.
+Staging and prod now support the same narrow native apply profile: BOTH D1s must
+be native **noop**, with independently reviewed physical identities, persisted
+retention and desired `RemovalPolicy.retain`; Worker and GitHubAppSecret must
+both update. D1 updates/migrations, bootstrap, replacement, deletion, adoption,
+new resources and all other previously refused surfaces remain **CODE gates**.
+No staging drill, live plan/apply or readiness claim is enabled by this slice.
+
+The reviewed endpoint target selects the closed `prod | staging` union. The
+entry cross-checks the environment locator, approval policy, owner-window target
+and pinned App slug before private delivery. It binds the full reviewed endpoint
+(script/origin/protocol/version/ETag/bundle/bindings/graph/physical D1 identities),
+Worker and public App/approval metadata into the target digest. Stage-specific
+local lock paths and window digests retain exclusion from acquisition through
+apply. Endpoint attestation and protocol-7 acquisition still execute independently;
+metadata is never inferred from desired configuration. Both live manifests and
+the reviewed launcher configuration remain **unset**.
+
+Only one exact stack/stage may enter the native State input/outputs. The trusted
+launcher cross-checks that target against verified App metadata, approval policy,
+reviewed broker Worker and both independent D1 identities before starting the
+child. The child supplies this same stage to Alchemy's Stage service, snapshot,
+plan evidence, retained native object/context and scoped State writer. Cross-stage
+native references refuse. Candidate identity additionally includes stage, public
+App, broker and approval policy metadata; source/lockfile/SQL/state/window and
+cached native bundle integrity remain bound without serializing/replanning.
+
+`ApprovalPolicy.stage` is mandatory. The existing reviewed workflow run-name
+binds dispatch stage through authenticated `display_title`, checked with the
+exact run/attempt/head/main/provenance policy. The exact Environment and approved
+run-environment history must match that stage. Only initial run attempt 1 is
+supported: the documented history response has no attempt identity or review
+timestamp, so a rerun could otherwise reuse its earlier Environment review.
+Reruns fail closed; a new dispatch and fresh gate/candidate approval are required.
+This is an explicit remaining CODE restriction for both stages. Both profiles require current
+numeric vvaz/gmarques identities, permissions and required reviewers with
+prevent-self-review. The post-plan command is now:
+
+```text
+approve-plan Quick-Release/gq-support STAGE RUN/ATTEMPT HEAD CANDIDATE NONCE
+```
+
+An old command, other-stage command/environment review, edited/stale approval,
+missing reviewer metadata, cancellation or changed exclusion cannot authorize
+this candidate. Explicit fresh production approval remains mandatory. No comment,
+workflow dispatch, environment setting or approval was created by this work.
+The implementation uses the documented [workflow-run metadata and approval
+history](https://docs.github.com/en/rest/actions/workflow-runs) and [environment
+policy](https://docs.github.com/en/rest/deployments/environments), with the reviewed
+workflow source as the run-title trust anchor; run titles alone grant no authority.
+
+The broker derives native HTTP State paths from its trusted stage, accepts only
+Worker/AppSecret rows with their original instances, checks row App stage/Worker
+identity and validates the six shared stack outputs against the reviewed Worker
+and D1 identities. It grants no D1 State write or D1 API mutation. The existing
+exact [Worker module upload](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/)
+route remains fixed to the reviewed Worker and cached bundle bytes. Key custody
+pins `getquick-support-staging` or `getquick-support`, verified App ID/client ID,
+organization, permissions/events and current key fingerprint before secret
+writes. Webhook and final remote RPC use that same Worker/App. Fake remote-binding
+tests validate only the local boundary; they create no Wrangler remote session.
+No installation-token API or new installation authority is introduced.
+
+The parent cancellation/expiry/window dispatch guards, synchronous revocation on
+child/owner lifetime end, post-request GitHub freshness checks, native desired
+D1 retention check, Linux offline/read-only graph, unusable child SDK credentials,
+private RPC framing/drain and completed-output requirements remain in force.
+
+Local validation uses separate synthetic staging/prod Worker names, D1 IDs/names/
+instances, App IDs/client IDs/slugs and generated ephemeral keys. Both profiles
+exercise the actual shared declaration, native retained Plan/Apply/session,
+fake authenticated GitHub approval, installed Worker reconcile and native HTTP
+State commits. Native D1 update refusals, source/target/state/window changes,
+cancellation during authentication, uncertain upload, post-upload revocation and
+partial secret reconciliation are exercised for both profiles. Additional tests
+cover stage interchange, endpoint acquisition, scoped output/resource references,
+missing metadata, fake remote RPC and existing namespace/secret canaries.
+
+Remaining **LIVE gates** are unchanged: reviewed real endpoint/graph/physical DB
+and App/Worker identities; authoritative state representability; current numeric
+reviewers/protected GitHub policy and permissions; protected-runner toolchain/
+namespace proof; exclusion of every external state writer/endpoint deployer;
+private credentials; fresh candidate-specific approval; and a separately authorized
+staging drill/Test F for both D1s. The approved existing broad backend bearer
+custody and disclosed cross-stack scope remain unchanged. No live prerequisite
+has been established; #20/#29 remain open. D1 migration support is a subsequent
+implementation task.
+
+Final fixed-source validation: **376 tests / 15 files passed** on Node 26.12.1,
+`--maxWorkers=1` (343.74 seconds). This includes **32 retained-continuation cases
+(16 per stage)**, with two actual installed-Worker/native-State happy paths,
+and **106 approval/broker/custody/RPC/target boundary tests** across five files.
+The latter also passed separately after final changes, as did both native happy
+paths (2 passed, 30 unrelated cases filtered out). The existing real namespace,
+provider/SDK denial, state/endpoint/decoder, native retention and secret canaries
+are included. Worker typecheck/lint, 22 affected workflow/release-policy tests,
+workflow/runtime policies, affected deploy/test/research/workflow secret scans and
+`git diff --check` pass.
+
+An earlier run was started before the final attempt guard and picked up its two
+new tests with the older cached verifier; those two failed. The fresh focused
+run and final fixed-source 376-test run both pass. A new in-memory snapshot test
+also initially used installed protocol 5; it now uses the same explicit synthetic
+protocol-7 adapter as the established confined fixtures. The production protocol
+check was preserved. None of these fixtures establishes live protocol/identity,
+reviewer policy, a remote RPC session or staging readiness.
