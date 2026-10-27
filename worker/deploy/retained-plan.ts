@@ -1,6 +1,6 @@
-// Process-local continuation primitive. There is deliberately no workflow/CLI
-// authorization adapter yet. A callback supplied by untrusted input is NOT an
-// authorization verifier and must never be wired to this module.
+// Process-local same-object primitive. The retained child supplies the writer
+// only after its private launcher protocol authenticates GitHub approval. A
+// caller-created verifier remains a test seam, never human authorization.
 import { createHash } from "node:crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

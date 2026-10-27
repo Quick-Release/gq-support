@@ -23,7 +23,7 @@ test('direct destructive commands fail in manual workflows and local actions too
 test('safe-plan, provenance, compatibility and environment barriers cannot be removed unnoticed', () => {
   const deploy = '.github/workflows/deploy-worker.yml';
   const release = '.github/workflows/release-plugin.yml';
-  assert.match(check(readFileSync(deploy, 'utf8').replace('release-evidence.mjs plan', 'removed'), deploy).join('\n'), /safe-plan/);
+  assert.match(check(readFileSync(deploy, 'utf8').replace('deploy/planning-entry.ts', 'removed'), deploy).join('\n'), /safe-plan/);
   for (const required of ['needs: [candidate, installed, compatibility]', 'environment: prod', 'release-evidence.mjs approval prod', 'release-evidence.mjs candidate']) {
     assert.match(check(readFileSync(release, 'utf8').replace(required, 'removed'), release).join('\n'), /publish must retain/, required);
   }
@@ -111,4 +111,13 @@ test('pull-request code may pass a secret by name to a reusable workflow, which 
   const caller = (secrets) => `name: CI\n\non:\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  cells:\n    uses: ./.github/workflows/lane.yml\n    with:\n      cell: x\n${secrets}`;
   assert.deepEqual(check(caller('    secrets:\n      TOKEN: ${{ secrets.TOKEN }}\n')), []);
   assert.match(check(caller('    secrets: inherit\n')).join('\n'), /`cells` .*secret/);
+});
+
+ test('retained continuation cannot regain CLI replanning or lose exclusion', () => {
+  const path = '.github/workflows/deploy-worker.yml';
+  const original = readFileSync(path, 'utf8');
+  for (const required of ["if: github.ref == 'refs/heads/main'", 'environment: ${{ inputs.stage }}', 'cancel-in-progress: false', 'group: deploy-worker-${{ inputs.stage }}']) {
+    assert.match(check(original.replace(required, 'removed'), path).join('\n'), /safe-plan/);
+  }
+  assert.match(check(original + '\n      - run: pnpm exec alchemy deploy --stage prod\n', path).join('\n'), /forbids replan/);
 });
