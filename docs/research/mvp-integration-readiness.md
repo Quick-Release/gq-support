@@ -281,17 +281,25 @@ closed on encountering it. Alert state needs review under existing controls;
 this is not permission to release support/provider ownership or reopen a route.
 Inherited PR119 evidence above is not new proof for these runtime changes.
 
-## External observer design follow-up (DOCS only)
+## External observer design and offline protocol follow-up
 
 [External incident observation](external-incident-observer.md) specifies bounded
 Actions observations, source/permission limits, separate Cron start/terminal
 heartbeat requirements, durable sender ownership and the remaining receipt policy
 frontier. It is based on PR120's pinned `6f57bf1381d80fb42c7d30b76eef2f7f0321310d`;
 actual head branch is `t3/outer-runtime-failures`, not `t3/outer-runtime-alerts`.
-No observer, workflow, scheduler, heartbeat, transport or live configuration is
-implemented or enabled. A protected persistent journal is a prerequisite, not an
+The [offline protocol/evaluator](../../worker/tools/observer/README.md) now has
+77 passing isolated tests and five detected broken variants (Node 26.12.1, one
+Vitest worker). It adds strict proposed contracts, finite verdicts and bounded
+in-memory failure carry only. Snapshot/heartbeat/readiness remain proposed until
+the next producer slice implements controller-minute start, settled phase/drain
+results, maintenance/activation/coverage and scoped read-only endpoints. No running
+observer, workflow, scheduler, heartbeat producer, HTTP transport or live
+configuration is implemented or enabled. Wire identity/scope/lag/sampling, runner
+custody, receipt reconciliation and authorized LIVE proof remain required. A protected persistent journal is a prerequisite, not an
 assumed property of hosted Actions runners. GitHub failure visibility is not an
-approved or verified fallback notification route. #20 and #29 remain open.
+approved or verified fallback notification route. The parent visibility versus
+independent fallback choice remains pending. #20 and #29 remain open.
 
 ## Remaining CODE and LIVE gates
 
@@ -327,3 +335,13 @@ LIVE prerequisites, after CODE compatibility is reviewed:
    incident receipt/acknowledgment arrangements without inventing a responder order.
 6. Explicit live authorization and fresh staging/production candidate approval.
    No policy decision or this draft grants them. #20/#29 remain open.
+
+### Offline observer review corrections
+
+PR122 independent review found three P2 Spec defects and one P3 test-convention
+breach. All were corrected: same-time HTTP samples cannot confirm recovery,
+samples cannot pair across candidate/maintenance generations, late older Cron
+failures retain unresolved ownership after a previous recovery, and privacy
+fixtures use runtime-generated artifact-scanner canaries. Four added regression
+cases reproduced the defects before correction; all 81 protocol tests pass after.
+No transport, producer, scheduler, durable sender or LIVE evidence is implied.

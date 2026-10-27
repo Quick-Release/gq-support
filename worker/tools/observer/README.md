@@ -1,0 +1,89 @@
+# Offline observer protocol
+
+Pure library only; no monitor entry point, network, scheduler, persistence or send.
+Based on the [observer design](../../../docs/research/external-incident-observer.md).
+
+`decodeBatch(reviewedContext, trustedReads)` checks proposed normalized JSON and
+returns bounded evidence; `evaluate(context, batch, priorState?)` returns private
+in-memory carry plus a separate public eight-class verdict. Only `public` is
+publishable. `State` contains private candidate/workflow identities and must never
+be serialized as public output. Carry is trusted output from this module within
+a process, not a durable journal or an untrusted persistence format.
+
+The private context pins Tipme, stage, reviewed SHA, activation, maintenance
+generation/exclusions and at most 20 run expectations. `Read` provenance comes
+from a future trusted adapter: transport result, observation identity, UTC times,
+coverage and page count cannot come from a response's health/authentication
+assertions. HTTP bodies are empty normalized objects; availability is the trusted
+transport's `vantage` classification. No HTTP transport exists, so TLS, redirect
+refusal, endpoint allowlisting, streaming byte caps and private-host rejection
+are **not implemented or tested**. Byte caps apply to already received byte arrays.
+There are no example live identities, secrets or full fabricated provider replies.
+
+Snapshot/heartbeat JSON is **proposed until a producer exists**. It includes
+exact finite phases (delivery, cleanup, refresh, sweep, notification drain),
+terminal time only with phase results, storage result and coverage. Maximum ring
+span is 60 minutes, four attempts per minute, 100 rows/response. Failed phases,
+three-minute incomplete starts, missing starts and explicit maintenance exclusions
+remain different evidence. Configured Cron is not input execution proof.
+
+Workflow JSON is a proposed projection, **not** a GitHub API response. The adapter
+must join a private expectation on repository/workflow/event/run/attempt/head/
+stage/candidate, retain direct lookups beyond 24-hour discovery and propagate
+queue/cancel/skip/missing/partial as unknown. No GitHub, schedules or deployments
+wire adapter is provided. A successful workflow is only workflow evidence.
+Deployment JSON is likewise a proposed candidate projection, not the Cloudflare
+deployments envelope; live deployment/version matching is still adapter work.
+
+`analytics-wire.ts` projects only the selected documented GraphQL query envelope
+already cited in the design. It strips all fields except bucket time and numeric
+counts, checks the expected script name, and never establishes account/stage,
+entitlement, sampling or lag. GraphQL errors preserve valid positive error rows
+with partial coverage; absent errors still leave unknown sampling/lag. Zero/empty
+analytics can never clear an error incident. Error incidents therefore remain
+latched until a separately reviewed affirmative recovery contract exists.
+
+Bounds are 64 KiB/body, 1 MiB/batch, 32 reads, 100 rows/query, at most 20 workflow
+lookups and three discovery pages per batch (a conservative cap across workflows).
+Outstanding expectations are private input, never discovered/evicted here. State
+holds eight saturating counters, at most 32 HTTP observations, 100 unresolved Cron
+attempts and 20 unresolved workflow identities. Overflow latches and cannot recover
+through dropped ownership. Counts measure distinct advancing failure watermarks,
+not requests, invocation totals or duplicate observations.
+
+Unknown/partial/stale input cannot clear an incident. Recovery needs fresh
+source evidence newer than the failure observation, same candidate/generation
+and sufficient coverage. Cron recovery additionally needs a later successful
+attempt for each retained failed slot, or a late terminal after the incomplete-start
+observation for that same attempt; old successes cannot replace failures.
+A ring still containing an explicit failed attempt conservatively remains an
+incident even alongside a retry. Missing old slots or changing maintenance/
+candidate generation cannot reset retained incidents. Workflow retry recovery
+requires the exact same expectation identity except a higher attempt; an unrelated
+successful run cannot recover it. HTTP uses the latest two distinct trusted
+observations within a proposed 15-minute window, with a fresh current observation.
+This is availability at one vantage, not platform root cause or delivery health.
+
+`receiptView` is only a negative-vector model. Dispatch/uncertain state cannot be
+reconciled by this evaluator, even by a later confirmation. External durable
+journal ownership and authenticated human reconciliation are absent. Discord
+transport confirmation always leaves human acknowledgment unknown. Config has no
+policy-approval field. No verdict claims whole-MVP readiness.
+
+Run from the repository root with Node 26.12.1:
+
+```sh
+pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts
+node worker/tools/observer/negative-controls.mjs
+pnpm exec eslint worker/tools/observer --max-warnings=0
+pnpm --filter gq-support-worker exec tsc -b
+```
+
+The isolated Vitest config uses one worker and no D1/global Worker setup.
+
+Review corrections require strictly advancing HTTP timestamps and scope retained
+HTTP samples to the current candidate and maintenance generation. A newly
+observed unresolved Cron attempt retains its incident even when its slot is
+older than a recovered coverage watermark; the watermark never moves backward.
+Four new regression cases failed before correction and pass afterward. Privacy
+fixtures now use runtime-generated scanner-compatible canaries.
