@@ -1,8 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { wp } from '../performance/test-site.cjs';
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
-const wp = (args: string[]) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.test-site', 'wp', ...args], { encoding: 'utf8' }).trim();
 const setConnection = (connection: string) => wp(['eval', `GQ_Support_State::update( array( 'connection' => '${connection}' ) );`]);
 
 // Run against a disposable DDEV site: plugin is symlinked under wp-content/plugins.

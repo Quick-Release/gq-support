@@ -182,6 +182,26 @@ pnpm load-test   # about 90 s; LOAD_SLOTS / LOAD_REPORTERS / LOAD_CONCURRENCY sc
 Tests exercise the HTTP handler and operator command interface against workerd
 D1 via Miniflare. They do not access a remote Cloudflare account.
 
+Vitest uses 25% of available CPUs for test workers (one on the four-vCPU CI
+runner), leaving capacity for each worker's workerd process. The default five-second
+test timeout stays in force. To reproduce the resource-sensitive timeout from
+CI run `40420984700` on Linux with a user systemd session, run from the repo root
+with Node 26:
+
+```sh
+systemd-run --user --scope -p CPUQuota=100% --quiet taskset -c 0-3 \
+  pnpm --filter gq-support-worker test test/status-refresh.test.ts \
+  test/status-operations.test.ts test/status-sweep.test.ts --maxWorkers=3
+```
+
+Three competing workers reproduced the timeout at `status-operations.test.ts:81`
+(65 passed, one timed out). With `--maxWorkers=1`, all 66 passed under the same
+quota; that test took 2.62 seconds including setup. Remove the `--maxWorkers`
+override to verify the configured budget. The quota deliberately stresses CPU
+contention; it does not claim to reproduce the hosted runner's exact CPU speed.
+Tests that exercise overlapping operations within a file still run those
+operations concurrently.
+
 Platform behavior checked against the installed Wrangler and Cloudflare docs:
 [D1 atomic batches](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch),
 [primary reads and Sessions](https://developers.cloudflare.com/d1/best-practices/read-replication/),
