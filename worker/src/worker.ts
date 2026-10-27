@@ -18,13 +18,11 @@ import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
-import { restoreGate } from "./ledger.ts";
+import { contained } from "./maintenance.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
 let titleDigestKey: Promise<CryptoKey | null> | undefined;
-// Per isolate: nothing serves or sweeps until a recorded restore has been replayed (src/ledger.ts).
-const restored = restoreGate();
 
 export default Cloudflare.Worker(
   "Worker",
@@ -63,9 +61,9 @@ export default Cloudflare.Worker(
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const ledger = yield* ledgerDatabase.raw;
-      yield* sweepDelivery({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]` }).pipe(
-        Effect.provide(GitHubGateway.live({ clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY })),
-      );
+      yield* contained(db, ledger, sweepDelivery({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]` }).pipe(
+        Effect.provide(GitHubGateway.live({ clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY, ledger })),
+      ), undefined);
     }).pipe(Effect.timeoutOption(25_000), Effect.catchCause(() => Effect.logError("Support delivery sweep failed")));
     // Delivery and reconciliation first, then the status sweep (src/scheduled.ts).
     const tick = Effect.gen(function* () {
@@ -73,8 +71,7 @@ export default Cloudflare.Worker(
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const ledger = yield* ledgerDatabase.raw;
-      if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) return yield* Effect.logError("Support restore replay pending");
-      const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
+      const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY, ledger };
       const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
       yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
@@ -101,21 +98,19 @@ export default Cloudflare.Worker(
           ? digestKey(env.GITHUB_APP_PRIVATE_KEY) : Promise.resolve(null));
         const ledger = yield* ledgerDatabase.raw;
         const db = yield* database.raw;
-        if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) {
-          return HttpServerResponse.fromWeb(Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } }));
-        }
-        const response = yield* handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
+        const unavailable = Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } });
+        const response = yield* contained(db, ledger, handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
           (task) => context.raw.waitUntil(task), {
             mappings: repositoryMappings, botLogin: `${slug}[bot]`,
             database: () => Effect.runPromiseWith(services)(database.raw),
-            refresh: (db) => Effect.runPromise(Effect.gen(function* () {
+            refresh: (db) => Effect.runPromise(contained(db, ledger, Effect.gen(function* () {
               if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
               yield* refreshStatus({ db, config: refresh }).pipe(Effect.provide(GitHubReader.live({
                 clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY,
               })));
-            }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
+            }), undefined).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
-          }, { digestKey: key, ledger });
+          }, { digestKey: key, ledger }), unavailable);
         // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
         if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
           response.status === 202) {
