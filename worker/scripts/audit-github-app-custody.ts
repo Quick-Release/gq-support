@@ -60,6 +60,9 @@ try {
   if (process.env.DISCORD_ALERTS_ENABLED === "true") {
     const discord = settings.result.bindings.find((entry) => entry.name === "DISCORD_ALERT_WEBHOOK_URL");
     if (discord?.type !== "secret_text" || discord.text !== undefined || settings.result.observability?.traces?.enabled !== false) throw new Error();
+  } else {
+    if (settings.result.bindings.some((entry) => ["DISCORD_ALERT_WEBHOOK_URL", "DISCORD_ALERT_RELEASE"].includes(entry.name)) ||
+        settings.result.observability?.traces?.enabled !== true) throw new Error();
   }
   assertClean(JSON.stringify(settings));
   step = "Worker bundle";

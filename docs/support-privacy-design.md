@@ -254,5 +254,7 @@ quiet days during an admitted drain; bounded class cardinality limits active
 rows. Control/admission obstructions do not expire. Operators own access and
 cleanup. Discord channel copies require their own access/retention and synthetic
 drill cleanup review; local expiry does not remove those copies. This policy
-is proposed, not approved or live-verified. Automatic fetch traces are disabled
-in the candidate to keep URL-path credentials out of stored traces.
+is proposed, not approved or live-verified. The maintainer separately approved
+structured Logs with automatic fetch traces disabled while Discord is enabled,
+to protect URL-path credentials. When Discord is disabled, credential absence
+is verified before traces are restored; the post-apply audit checks that state.

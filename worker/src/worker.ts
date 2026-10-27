@@ -30,8 +30,9 @@ export default Cloudflare.Worker(
   {
     main: import.meta.url,
     compatibility: { date: "2026-10-17" },
-    // Discord authenticates in the URL path. Automatic fetch spans record url.full.
-    // Retain structured logs; no live enablement until deployed trace custody is verified.
+    // Upload with traces off so an old credential cannot leak during a transition.
+    // The apply-only custody provider restores traces when Discord is disabled,
+    // after verifying credential removal. Logs remain enabled in both modes.
     observability: { enabled: true, traces: { enabled: false } },
   },
   Effect.gen(function* () {

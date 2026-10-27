@@ -253,11 +253,33 @@ it("provisions optional secret_text via apply-only custody, enabling last and re
     { name: "DISCORD_ALERTS_ENABLED", type: "secret_text", text: "true" },
   ]);
   fake.mockClear();
+  fake.mockImplementation(async (_url, init) => init?.method === undefined
+    ? Response.json({ success: true, result: { bindings: [], observability: { enabled: true,
+      logs: { enabled: true, invocation_logs: true }, traces: { enabled: fake.mock.calls.some((c) => c[1]?.method === "PATCH") } } } })
+    : Response.json({ success: true }));
   await provisionDiscordAlertSecret("worker", { CLOUDFLARE_API_TOKEN: "synthetic" }, fake);
-  expect(fake.mock.calls.map((c) => c[1]!.method)).toEqual(["PUT", "DELETE", "DELETE"]);
+  expect(fake.mock.calls.map((c) => c[1]!.method)).toEqual(["PUT", "DELETE", "DELETE", undefined, "PATCH", undefined]);
+  expect(JSON.parse(fake.mock.calls[4]![1]!.body as string)).toEqual({ observability: { enabled: true,
+    logs: { enabled: true, invocation_logs: true }, traces: { enabled: true } } });
   expect(() => validateDiscordAlertConfig({ DISCORD_ALERTS_ENABLED: "true", DISCORD_ALERT_WEBHOOK_URL: URL })).toThrow("Discord alert configuration invalid");
   fake.mockRejectedValue(new Error(URL));
   await expect(provisionDiscordAlertSecret("worker", { CLOUDFLARE_API_TOKEN: "synthetic" }, fake)).rejects.toThrow(/^Discord alert Worker secret update failed$/);
+});
+
+it.each([undefined, [{ name: "DISCORD_ALERT_WEBHOOK_URL", type: "secret_text" }]])("never restores traces unless credential absence is verified: %j", async (bindings) => {
+  const fake = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => init?.method === undefined
+    ? Response.json({ success: true, result: { bindings, observability: { enabled: true, traces: { enabled: false } } } })
+    : Response.json({ success: true }));
+  await expect(provisionDiscordAlertSecret("worker", { CLOUDFLARE_API_TOKEN: "synthetic" }, fake)).rejects.toThrow(/^Discord alert Worker secret update failed$/);
+  expect(fake.mock.calls.some((c) => c[1]?.method === "PATCH")).toBe(false);
+});
+
+it("fails the deployment when trace restoration is not confirmed", async () => {
+  const fake = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => init?.method === undefined
+    ? Response.json({ success: true, result: { bindings: [], observability: { enabled: true, traces: { enabled: false } } } })
+    : Response.json({ success: true }));
+  await expect(provisionDiscordAlertSecret("worker", { CLOUDFLARE_API_TOKEN: "synthetic" }, fake)).rejects.toThrow(/^Discord alert Worker secret update failed$/);
+  expect(fake.mock.calls.filter((c) => c[1]?.method === "PATCH")).toHaveLength(1);
 });
 
 

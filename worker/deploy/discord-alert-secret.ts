@@ -15,13 +15,20 @@ export async function provisionDiscordAlertSecret(workerName: string, env = proc
   const base = `https://api.cloudflare.com/client/v4/accounts/${SUPPORT_ACCOUNT_ID}/workers/scripts/${encodeURIComponent(workerName)}/secrets`;
   try {
     if (!env.CLOUDFLARE_API_TOKEN) throw new Error();
-    if (enabled) {
+    const headers = { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, "Content-Type": "application/json" };
+    const settings = async () => {
       const response = await request(`${base.slice(0, -8)}/settings`, {
-        headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}` },
-        redirect: "error", signal: AbortSignal.timeout(15_000),
+        headers, redirect: "error", signal: AbortSignal.timeout(15_000),
       });
-      const settings = await response.json() as { success?: boolean; result?: { observability?: { traces?: { enabled?: boolean } } } };
-      if (!response.ok || settings.success !== true || settings.result?.observability?.traces?.enabled !== false) throw new Error();
+      const body = await response.json() as { success?: boolean; result?: {
+        bindings?: Array<{ name: string; type: string }>;
+        observability?: { enabled?: boolean; traces?: { enabled?: boolean }; [key: string]: unknown };
+      } };
+      if (!response.ok || body.success !== true || !body.result) throw new Error();
+      return body.result;
+    };
+    if (enabled) {
+      if ((await settings()).observability?.traces?.enabled !== false) throw new Error();
     }
     // Disable first. Enable only after URL and revision binding are installed.
     for (const [name, value] of [
@@ -37,6 +44,23 @@ export async function provisionDiscordAlertSecret(workerName: string, env = proc
       });
       if (!value && response.status === 404) continue;
       if (!response.ok || (await response.json() as { success: boolean }).success !== true) throw new Error();
+    }
+    if (!enabled) {
+      // Worker upload temporarily keeps traces off even during disablement.
+      // Only restore them after the API confirms removal of the credential.
+      const removed = await settings();
+      if (!Array.isArray(removed.bindings) || removed.bindings.some((binding) =>
+        ["DISCORD_ALERT_WEBHOOK_URL", "DISCORD_ALERT_RELEASE"].includes(binding.name)) ||
+        removed.observability?.enabled !== true) throw new Error();
+      const response = await request(`${base.slice(0, -8)}/script-settings`, {
+        method: "PATCH", headers, redirect: "error", signal: AbortSignal.timeout(15_000),
+        body: JSON.stringify({ observability: { ...removed.observability,
+          traces: { ...removed.observability.traces, enabled: true } } }),
+      });
+      if (!response.ok || (await response.json() as { success: boolean }).success !== true) throw new Error();
+      const verified = await settings();
+      if (verified.observability?.traces?.enabled !== true || !Array.isArray(verified.bindings) ||
+          verified.bindings.some((binding) => ["DISCORD_ALERT_WEBHOOK_URL", "DISCORD_ALERT_RELEASE"].includes(binding.name))) throw new Error();
     }
   } catch { throw new Error("Discord alert Worker secret update failed"); }
 }

@@ -124,26 +124,37 @@ accepted; custom hosts, user info, explicit ports, query, fragment, escaped path
 API-version variants, forum/thread options and redirects fail closed. Workers
 uses `redirect: manual`; Node custody calls use `error`.
 
-**Review the tracing tradeoff:** automatic Cloudflare outbound fetch spans contain
+**Approved tracing policy (2026-10-27):** the requesting maintainer approved
+structured logs with automatic traces disabled while Discord alerts are enabled,
+and traces enabled when Discord is disabled after verified credential removal.
+Automatic Cloudflare outbound fetch spans contain
 `url.full` and `url.path`; query redaction cannot protect a credential in a path.
-The candidate disables automatic Worker traces while retaining structured Logs.
-This intentionally departs from the general workers-best-practices tracing
-recommendation for secret custody. Before secret upload the apply-only provider
+Worker uploads temporarily disable traces so an existing credential cannot leak
+during enablement or disablement. The apply-only custody provider leaves traces
+off when Discord is enabled. When disabled, it disables sending, removes the URL
+and release bindings, verifies their absence, restores traces through the
+script-settings API while preserving observed Logs settings, then verifies
+traces enabled and bindings still absent. Missing bindings metadata, incomplete
+removal, failed settings updates or failed read-back stops the deployment.
+Structured Logs remain enabled in both final states; a failed apply can leave
+traces temporarily off and requires investigation before readiness is claimed.
+Before secret upload the apply-only provider
 reads settings and refuses enabled/unknown trace configuration. The post-apply
-custody audit also checks traces disabled, `secret_text` without `text`, state,
+custody audit checks traces disabled with enabled Discord, or traces enabled
+and credential bindings absent with disabled Discord. It also checks
+`secret_text` without `text`, state,
 bundle and local logs/files for the exact URL/token. It prints no credential.
 External setting drift, debugger/network capture and third-party log destinations
 still require access review. Never enable HTTP debug logging. No live custody
 or effective retention verification has occurred.
 
-Alternatives if disabling traces is unacceptable: retain this feature disabled
-until Cloudflare offers verified per-fetch suppression/path redaction; or approve
-a separate isolated sender design. No such sender is provisioned here. Do not
-solve this by exposing a URL credential to automatic traces.
+A future requirement for traces during Discord sending would need verified
+per-fetch suppression/path redaction or a separately reviewed isolated sender.
+No such sender is provisioned here. Do not expose a URL credential to traces.
 
 ## Private provisioning and scoped drill — parent only after review
 
-1. Review the concrete PR, tracing tradeoff, proposed class dedup/expiry/recovery,
+1. Review the concrete PR and proposed class dedup/expiry/recovery,
    route ownership and independent observation gaps with vvaz or gmarques.
    Preserve managed Composer/tested ZIP upgrades, enrolled v1 until verified
    upgrades, additive v1 and expand-only migrations. No implicit rollout approval.
@@ -205,4 +216,5 @@ compatibility date `2026-10-17`:
 - [Workers Request](https://developers.cloudflare.com/workers/runtime-apis/request/): manual redirects; `error` mode unsupported in Workers.
 - [Workers context](https://developers.cloudflare.com/workers/runtime-apis/context/): waitUntil shared 30-second post-response lifetime, not guaranteed execution.
 - [Workers automatic span attributes](https://developers.cloudflare.com/workers/observability/traces/spans-and-attributes/): outbound url.full/path/query exposure.
+- [Patch script settings](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/settings/methods/edit/): script-level observability update; preserve the observed Logs configuration.
 - [Script settings API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/settings/methods/get/): deployed observability metadata for custody checks.
