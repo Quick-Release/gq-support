@@ -1,3 +1,4 @@
+import { PhaseFailure } from "../src/phase-observation.ts";
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -36,8 +37,8 @@ const accept = async (context?: object) => {
   expect(response.status).toBe(202);
   return await response.json() as { id: string };
 };
-const sweep = (mappings = [mapping], db: QueryDatabase = stage.databases.shared) => Effect.runPromise(sweepDelivery({ db, mappings, botLogin: `${SLUG}[bot]`,
-  now: () => now, random: () => 0 }).pipe(Effect.provide(GitHubGateway.layer({ clientId: CLIENT_ID, slug: SLUG,
+const sweep = (mappings = [mapping], db: QueryDatabase = stage.databases.shared, note: () => void = () => {}) => Effect.runPromise(sweepDelivery({ db, mappings, botLogin: `${SLUG}[bot]`,
+  now: () => now, random: () => 0 }).pipe(Effect.provideService(PhaseFailure, note), Effect.provide(GitHubGateway.layer({ clientId: CLIENT_ID, slug: SLUG,
     privateKeyPem: github.privateKeyPem }).pipe(Layer.provide(github.layer)))));
 const read = async (id: string) => (await installation.send("GET", `/v1/requests/${id}?reporter_subject=${subject}&scope=mine`)).json();
 
@@ -176,9 +177,11 @@ it("paces additive repairs without creating a second issue", async () => {
   expect(github.issues[0]!.labels).toEqual([{ name: 'client-support' }]);
   expect(github.issues[0]!.assignees).toEqual([]);
   advance(10_000);
-  await sweep();
+  const failure = vi.fn();
+  await sweep([mapping], stage.databases.shared, failure);
   expect(github.issues[0]!.assignees).toEqual([{ login: 'developer' }]);
   expect(github.issues).toHaveLength(1);
+  expect(failure).not.toHaveBeenCalled();
 });
 
 it("a claim response delayed beyond the execution deadline never dispatches", async () => {

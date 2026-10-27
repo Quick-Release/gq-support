@@ -23,6 +23,7 @@ export function confinedInput(stage: "prod" | "staging" = "prod", ledgerHistory:
   if (ledgerHistory === "before-maintenance") {
     delete rows.SupportLedger.attr.migrationsHashes["0003_maintenance.sql"];
     delete rows.SupportLedger.attr.migrationsHashes["0004_discord_alerts.sql"];
+    delete rows.SupportLedger.attr.migrationsHashes["0005_cron_progress.sql"];
   }
   return { target: { stack: "GQSupportWorker" as const, stage }, databases: [rows.SupportDB, rows.SupportLedger].map((row) => ({
     fqn: row.fqn as "SupportDB" | "SupportLedger", instanceId: row.instanceId, databaseId: row.attr.databaseId, databaseName: row.attr.databaseName,

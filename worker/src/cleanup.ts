@@ -1,3 +1,4 @@
+import { notePhaseFailure } from "./phase-observation.ts";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubTarget } from "./github-gateway.ts";
@@ -425,12 +426,14 @@ type Store = ReturnType<typeof cleanupStore>;
 class CleanupStorageFailed extends Error {}
 const io = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: () => new CleanupStorageFailed() });
 const log = (requestId: string, outcome: string, alert = false) =>
+  (alert ? notePhaseFailure : Effect.void).pipe(Effect.andThen(
   (alert ? Effect.logError("Support cleanup requires review") : Effect.logInfo("Support cleanup outcome")).pipe(
     Effect.annotateLogs({ request: requestId, outcome, alert }),
-  );
+  )));
 /** Runs one step so that its failure is logged and never stops the rest of the pass. */
 const isolated = <R>(step: string, effect: Effect.Effect<unknown, unknown, R>) =>
-  effect.pipe(Effect.asVoid, Effect.catchCause(() => Effect.logError("Support cleanup step failed").pipe(Effect.annotateLogs({ step, alert: true }))));
+  effect.pipe(Effect.asVoid, Effect.catchCause(() => notePhaseFailure.pipe(Effect.andThen(
+    Effect.logError("Support cleanup step failed").pipe(Effect.annotateLogs({ step, alert: true }))))));
 
 /** Where a drained request goes next. Delivered issues stay with the Client unless an erasure redacts them. */
 const afterDrain = (row: DrainedRequest, now: number): Transition => {
@@ -454,6 +457,7 @@ const reconcileRecord = (record: CleanupRecord, target: GitHubTarget, botLogin: 
       expectedIssue: null, erasurePending: true,
     }, record.reconciliation_json ? JSON.parse(record.reconciliation_json) as ReconciliationProgress : undefined));
     if (Result.isFailure(result)) {
+      yield* notePhaseFailure;
       const error = result.failure;
       return { state: "reconciling", error: error._tag,
         next: retry(error._tag === "RateLimited" ? error.until : now() + RETRY_MS),
@@ -525,6 +529,7 @@ const processRecord = (record: CleanupRecord, store: Store, options: CleanupOpti
       return yield* redactRecord(record, target, options, authorize, now, retry);
     });
   yield* io(() => store.finish(record, owner, now(), change));
+  if (change.error || change.state === "unresolved") yield* notePhaseFailure;
   yield* log(record.request_id, change.error ?? change.outcome ?? change.state, change.state === "unresolved");
 }).pipe(Effect.withSpan("support.cleanup", { attributes: { request: record.request_id } }));
 
@@ -536,11 +541,15 @@ const processRecord = (record: CleanupRecord, store: Store, options: CleanupOpti
 const searchErasure = (search: PendingSearch, store: Store, options: CleanupOptions, now: () => number) => Effect.gen(function* () {
   const mapping = mappingFor(options.mappings, search.slot);
   const reference = search.reporter_reference;
-  if (!mapping?.githubInstallationId || !reference) return yield* io(() => store.searched(search, "failed", null, now()));
+  if (!mapping?.githubInstallationId || !reference) {
+    yield* notePhaseFailure;
+    return yield* io(() => store.searched(search, "failed", null, now()));
+  }
   const target = { installationId: mapping.githubInstallationId, repositoryId: mapping.repositoryId };
   const gateway = yield* GitHubGateway;
   const result = yield* Effect.result(gateway.searchIssues(target, `in:body "${reference}" author:app/${options.botLogin.replace(/\[bot\]$/, "")}`));
   if (Result.isFailure(result)) {
+    yield* notePhaseFailure;
     const error = result.failure;
     if (now() >= search.recorded_at + DAY) return yield* io(() => store.searched(search, "failed", null, now()));
     return yield* io(() => store.searched(search, "pending", Math.max(now() + SEARCH_RETRY_MS, error._tag === "RateLimited" ? error.until : 0), now()));
@@ -552,6 +561,7 @@ const searchErasure = (search: PendingSearch, store: Store, options: CleanupOpti
   const offboarded = yield* io(() => store.offboarded(search.slot));
   yield* io(() => store.adopt(search, { githubInstallationId: mapping.githubInstallationId!, repositoryId: mapping.repositoryId },
     found, offboarded, result.success.incomplete, now()));
+  if (result.success.incomplete) yield* notePhaseFailure;
   yield* Effect.logInfo("Support erasure search outcome").pipe(Effect.annotateLogs({ erasure: search.id, found: found.length,
     incomplete: result.success.incomplete }));
 });
@@ -578,7 +588,7 @@ export const sweepCleanup = (options: CleanupOptions): Effect.Effect<void, never
   }));
   // A few rounds, so a scan continuation or a found issue's redaction need not wait a minute.
   for (let round = 0; round < 3 && now() < deadline; round++) {
-    const due = yield* io(() => store.due(now())).pipe(Effect.orElseSucceed(() => []));
+    const due = yield* io(() => store.due(now())).pipe(Effect.catch(() => notePhaseFailure.pipe(Effect.as([]))));
     if (due.length === 0) break;
     for (const record of due) {
       if (now() >= deadline) break;

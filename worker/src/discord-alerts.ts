@@ -1,3 +1,4 @@
+import type { PhaseOutcome } from "./cron-progress.ts";
 import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
 import { CurrentLogAnnotations } from "effect/References";
@@ -104,29 +105,30 @@ interface Row { signal: Signal; active: number; count: number; first_at: number;
 
 /** At most one POST per minute across competing isolates. Unknown delivery latches the route closed. */
 export async function drainAlerts(main: QueryDatabase, ledger: QueryDatabase, config: AlertConfig,
-  request: typeof fetch = fetch, now = Date.now(), clock = Date.now) {
+  request: typeof fetch = fetch, now = Date.now(), clock = Date.now): Promise<PhaseOutcome> {
   const url = config.enabled ? webhookURL(config.webhook) : null;
-  if (!url || !["prod", "staging"].includes(config.stage) || !/^(?:[a-f0-9]{40}|unrecorded)$/.test(config.release)) return;
-  await Effect.runPromise(contained(main, ledger, Effect.promise(async () => {
+  if (!url || !["prod", "staging"].includes(config.stage) || !/^(?:[a-f0-9]{40}|unrecorded)$/.test(config.release)) return "not_run";
+  return await Effect.runPromise(contained(main, ledger, Effect.promise(async (): Promise<PhaseOutcome> => {
     const owner = crypto.randomUUID();
     const lock = await ledger.prepare(`UPDATE discord_alert_control SET owner = ?, next_at = ?
       WHERE id = 1 AND owner IS NULL AND blocked = 0 AND next_at <= ? RETURNING id`)
       .bind(owner, now + MINUTE, now).first();
-    if (!lock) return;
+    if (!lock) return "contained";
     // A lost drain owner never silently expires. No D1 restore rewinds this independent state.
     await ledger.prepare("DELETE FROM discord_alert WHERE last_at < ?").bind(now - RETENTION).run();
     const row = await ledger.prepare(`SELECT * FROM discord_alert WHERE sent_version < version AND attempts < 3
       ORDER BY first_at, signal LIMIT 1`).first<Row>();
-    if (!row) { await unlock(ledger, owner); return; }
+    if (!row) { await unlock(ledger, owner); return "ok"; }
     if (!classes.has(row.signal) || ![0, 1].includes(row.active) ||
         ![row.count, row.first_at, row.last_at, row.version, row.attempts].every(Number.isSafeInteger) ||
-        row.count < 1 || row.count > 999999 || row.first_at < 0 || row.last_at < row.first_at) { await block(ledger, owner); return; }
+        row.count < 1 || row.count > 999999 || row.first_at < 0 || row.last_at < row.first_at) { await block(ledger, owner); return "failed"; }
     const operation = await admitOperation(ledger, "provider", "discord-alert");
-    if (!operation) { await unlock(ledger, owner); return; }
+    if (!operation) { await unlock(ledger, owner); return "contained"; }
     await ledger.prepare("UPDATE discord_alert SET attempts = attempts + 1 WHERE signal = ?").bind(row.signal).run();
     let response: Response;
+    const signal = AbortSignal.timeout(2_000);
     try {
-      response = await request(url, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(2_000),
+      response = await request(url, { method: "POST", redirect: "manual", signal,
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({
           content: `Support ${row.active ? "incident" : "recovery"}: ${row.signal}; stage=${config.stage}; release=${config.release}; count=${row.count}; first_ms=${row.first_at}; last_ms=${row.last_at}`,
           allowed_mentions: { parse: [] },
@@ -136,7 +138,7 @@ export async function drainAlerts(main: QueryDatabase, ledger: QueryDatabase, co
       // replay its data. Latch alert uncertainty locally, not in restore drain.
       await block(ledger, owner);
       await finishOperation(ledger, operation);
-      return;
+      return signal.aborted ? "timed_out" : "failed";
     }
     const receivedAt = Math.max(now, clock());
     // Never consume or log the upstream body, including on errors.
@@ -149,20 +151,23 @@ export async function drainAlerts(main: QueryDatabase, ledger: QueryDatabase, co
       const remaining = response.headers.get("X-RateLimit-Remaining");
       const reset = seconds(response.headers.get("X-RateLimit-Reset-After"), receivedAt);
       if (remaining === "0") {
-        if (reset === null) { await block(ledger, owner); return; }
+        if (reset === null) { await block(ledger, owner); return "failed"; }
         await defer(ledger, owner, receivedAt + Math.max(MINUTE, reset));
       } else await unlock(ledger, owner);
+      return "ok";
     } else if (response.status === 429) {
       const retry = seconds(response.headers.get("Retry-After"), receivedAt);
       // Header is the documented alternative to body.retry_after. Unsupported/missing header fails closed.
-      if (retry === null) await block(ledger, owner);
+      if (retry === null) { await block(ledger, owner); return "failed"; }
       else await defer(ledger, owner, receivedAt + Math.max(MINUTE, retry));
+      return "contained";
     } else {
       // Unsupported outcomes stop this notification route without obstructing
       // support recovery. Existing GitHub write obstructions are unchanged.
       await block(ledger, owner);
     }
-  }), undefined));
+    return "failed";
+  }), "contained"));
 }
 const seconds = (value: string | null, receivedAt: number): number | null => {
   if (value === null || !/^\d+(?:\.\d+)?$/.test(value)) return null;

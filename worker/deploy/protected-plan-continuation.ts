@@ -114,7 +114,7 @@ export async function continueProtectedPlan(config: ProtectedContinuation) {
   const lifetimeMs = 15 * 60_000;
   try {
     const result = await runOfflineModule(config.repo, "deploy/retained-planning-child.ts", {
-      ...config.input, app: config.app, binding, nonce, sourceManifest: config.sourceManifest,
+      ...config.input, release: config.policy.head, app: config.app, binding, nonce, sourceManifest: config.sourceManifest,
     }, { lifetimeMs, signal: config.signal, message: async (raw, runtimeSignal) => {
       watch(runtimeSignal);
       alive = AbortSignal.any([config.signal, runtimeSignal]);

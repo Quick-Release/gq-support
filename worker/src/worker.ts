@@ -1,3 +1,7 @@
+import { ReviewedRelease } from "./release-identity.ts";
+import * as Exit from "effect/Exit";
+import * as Cause from "effect/Cause";
+import { emptyPhases, progressIdentity, progressIO, startProgress, writeProgress } from "./cron-progress.ts";
 import * as Output from "alchemy/Output";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Cloudflare from "alchemy/Cloudflare";
@@ -31,10 +35,12 @@ export default Effect.gen(function* () {
   // Stable IDs may resolve before migrations finish. Depend on whole D1
   // results so application updates cannot race schema additions.
   const databasesReady = Output.all(Output.of(yield* SupportDB), Output.of(yield* SupportLedger));
+  const releaseIdentity = yield* ReviewedRelease;
   return yield* Cloudflare.Worker(
   "Worker",
   {
     main: import.meta.url,
+    env: { SUPPORT_RELEASE_CANDIDATE: releaseIdentity?.candidate ?? "unknown", SUPPORT_RELEASE_STAGE: releaseIdentity?.stage ?? "unknown" },
     workersDev: Output.map(databasesReady, () => ({ enabled: true, previewsEnabled: false })),
     compatibility: { date: "2026-10-17" },
     // Upload with traces off so an old credential cannot leak during a transition.
@@ -78,24 +84,52 @@ export default Effect.gen(function* () {
       ), undefined)), 25_000, "Support delivery sweep failed"), db, ledger, alertConfig(env, slug), "Support delivery sweep failed").pipe(Effect.catchCause(() => Effect.void));
     }).pipe(Effect.catchCause(() => Effect.logError("Support delivery sweep failed")));
     // Delivery and reconciliation first, then the status sweep (src/scheduled.ts).
-    const tick = Effect.gen(function* () {
-      const env = yield* WorkerEnvironment;
-      if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
-      const db = yield* database.raw;
-      const ledger = yield* ledgerDatabase.raw;
-      if (!db || !ledger) return yield* Effect.logError("Support scheduled tick failed");
-      const completed = yield* observeRuntime(Effect.gen(function* () {
-        const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY as string, ledger };
-        const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
-        yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
-          Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
-        );
-        return true;
-      }), db, ledger, alertConfig(env, slug), "Support scheduled tick failed").pipe(Effect.catchCause(() => Effect.succeed(false)));
-      if (completed) yield* Effect.promise(() => drainAlerts(db, ledger, alertConfig(env, slug))).pipe(
-        Effect.catchCause(() => Effect.logError("Support alert drain unavailable")));
+    const tick = (scheduledTime: number) => Effect.suspend(() => {
+      const started = Date.now();
+      const phases = emptyPhases();
+      return Effect.gen(function* () {
+        const env = yield* WorkerEnvironment;
+        const ledger = yield* ledgerDatabase.raw;
+        const identity = progressIdentity(env.SUPPORT_RELEASE_STAGE, env.SUPPORT_RELEASE_CANDIDATE);
+        const owner = ledger && identity
+          ? yield* progressIO(() => startProgress(ledger, identity, scheduledTime, started))
+          : yield* Effect.logError("Support Cron progress unavailable").pipe(Effect.as(null));
+        const observe = (phase: keyof typeof phases, outcome: typeof phases.delivery) => Effect.gen(function* () {
+          phases[phase] = outcome;
+          if (ledger && owner) yield* progressIO(() => writeProgress(ledger, owner, { ...phases }));
+        });
+        const work = Effect.gen(function* () {
+          if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return yield* Effect.die("Support scheduled configuration unavailable");
+          const db = yield* database.raw;
+          if (!db || !ledger) return yield* Effect.die("Support scheduled bindings unavailable");
+          const completed = yield* observeRuntime(Effect.gen(function* () {
+            const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY as string, ledger };
+            const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
+            yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key,
+              observePhase: observe }).pipe(
+              Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
+            );
+            return true;
+          }), db, ledger, alertConfig(env, slug), "Support scheduled tick failed");
+          if (completed) {
+            // drainAlerts owns an independently running Promise/Effect. If this
+            // fiber is cancelled, await its local settlement in the finalizer;
+            // do not claim terminal while its cleanup is still running.
+            const draining = drainAlerts(db, ledger, alertConfig(env, slug));
+            const outcome = yield* Effect.promise(() => draining).pipe(
+              Effect.onExit((exit) => Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause) ? Effect.promise(() => draining.catch(() => "failed" as const)).pipe(
+                Effect.flatMap((result) => observe("drain", result))) : Effect.void),
+              Effect.catchCause(() => Effect.logError("Support alert drain unavailable").pipe(Effect.as("failed" as const))));
+            yield* observe("drain", outcome);
+          }
+        });
+        // onExit runs after all nested work/finalizers settle. Interruption is
+        // explicit; a terminal record says local work settled, not remote writes.
+        yield* work.pipe(Effect.onExit((exit) => ledger && owner ? progressIO(() => writeProgress(ledger, owner, { ...phases }, Date.now(),
+          Exit.isSuccess(exit) ? "settled" : Cause.hasInterrupts(exit.cause) ? "interrupted" : "failed")).pipe(Effect.asVoid) : Effect.void));
+      });
     }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));
-    yield* Cloudflare.Workers.cron("* * * * *", () => tick.pipe(Effect.asVoid));
+    yield* Cloudflare.Workers.cron("* * * * *", (controller) => tick(controller.scheduledTime).pipe(Effect.asVoid));
 
     return {
       checkGitHubAppKey: Effect.fn(function* (clientId: string, slug: string) {

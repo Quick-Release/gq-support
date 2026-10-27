@@ -1,7 +1,7 @@
 # External incident observation for MVP #20
 
-Design plus offline protocol implementation, 2026-10-27. **Disabled; no running
-observer, heartbeat producer, sender, scheduler, credentials or live proof supplied.
+Design, offline protocol and internal Cron producer CODE, 2026-10-27. **External
+observer disabled; no running external observer, sender, scheduler, credentials or live proof supplied.
 #20 and #29 remain open.**
 Recommendation: use GitHub Actions outside the support Worker for bounded HTTP
 and workflow observations; add an explicit Cron progress contract before claiming
@@ -34,13 +34,14 @@ failures, absent ticks, outside workflow failures and receipt remain external ga
 A returned tick is insufficient evidence: phases catch failures/timeouts, and
 maintenance can deny work. The nominal 57-second phase sum is cooperative.
 
-No dependencies were installed in this checkout. To check the exact locked
+At the original design slice, no dependencies were installed. To check the exact locked
 contracts without running package scripts, the published `alchemy@2.0.0-beta.83`
 and `@cloudflare/workers-types@5.20261015.1` tarballs were extracted only in `/tmp`.
 Alchemy `src/Cloudflare/Workers/CronEventSource.ts:202–247` passes a
 `ScheduledController` to the callback, then applies `Effect.ignoreCause`;
 workers-types `index.d.ts:2648` declares `scheduledTime`, `cron`, `noRetry`.
-The current callback discards that controller. These are package-source facts,
+The callback at that original slice discarded the controller; the internal
+producer below now retains it. These were package-source facts,
 not installed-runtime or deployment proof. [Published Alchemy source](https://www.npmjs.com/package/alchemy/v/2.0.0-beta.83),
 [published type package](https://www.npmjs.com/package/@cloudflare/workers-types/v/5.20261015.1).
 
@@ -243,7 +244,9 @@ pins account/stage/candidate/activation/generation and exact workflow expectatio
 response fields cannot authenticate themselves. Public output is at most 2 KiB
 and excludes private identities, topology, raw content and error causes.
 
-Snapshot/heartbeat/readiness wire contracts remain **proposed, with no producer**.
+Snapshot/readiness wire contracts remain **proposed and unwired**. The internal
+Cron producer CODE below now records local progress; it supplies no external read
+capability or activation/coverage proof.
 Workflow/deployment JSON is explicitly a normalized projection, not a fabricated
 complete provider response. Only the selected documented analytics envelope has a
 wire projection; its output still requires independently trusted provenance.
@@ -272,12 +275,13 @@ fixtures and hygiene checks, not live source/transport or operational proof.
 HTTP/TLS/redirect/private-host enforcement and streaming byte limits are unwired;
 protocol byte limits apply before JSON decoding of supplied byte arrays.
 
-Minimum next CODE slice is still the producer: preserve controller scheduled UTC
-minute; persist bounded start and settled per-phase terminal results plus drain;
-retain attempt/coverage/overflow and maintenance generations; add a separately
-scoped authenticated aggregate snapshot and data-free readiness before support
-admission. Test actual scheduled callback failures/containment/binding loss and
-out-of-order/concurrent writes, without altering restore/provider ownership.
+The internal producer slice below now preserves controller UTC minute, start,
+settled phase/drain results, attempts, overflow and maintenance generations.
+The next CODE slice is a separately scoped authenticated aggregate reader and
+data-free readiness before support admission, with independently verified
+activation and an explicit partial/coverage contract. The 100-row consumer must
+not silently truncate the 240-row producer. Restore/provider ownership remains
+outside observation authority.
 Only after that come trusted wire adapters, LIVE identity/scope/schema/lag/sampling
 proof and separately authorized drills. Durable journal/runner survival and human
 receipt proof remain separate prerequisites before sending or scheduling.
@@ -352,3 +356,142 @@ protocol executable/tests were added in that original docs-only publication.
 These checks establish documentation hygiene,
 not live observation, alert delivery or readiness. Current GitHub issue metadata
 confirms #20 and #29 OPEN; hosted PR checks/reviews remain uninspected.
+
+## Internal Cron producer CODE slice (2026-10-27)
+
+This dedicated `t3/cron-progress-producer` checkout started at PR122 head
+`66a7c74c5236b538091f0068bb1ee6d758ebe6e8`; source branches were untouched.
+Frozen dependencies were installed for this implementation.
+The internal producer is now wired to the actual installed Alchemy
+`CronEventSource` callback in `worker/src/worker.ts`. It keeps the controller's
+UTC `scheduledTime` separately from invocation start (`Date.now()`); retries
+allocate distinct attempts rather than replace a finished tick. This establishes
+local invocation observations only. Cron cannot observe its own absence, and a
+platform-successful callback does not prove business success.
+
+`SupportLedger` migration `0005_cron_progress.sql` adds aggregate tables only;
+it changes no historical migration, database identity, retention, restore epoch,
+maintenance admission or provider ownership. Remote migration applicability is
+**unknown**: native offline tests use explicit synthetic prior histories;
+ledger 0002 must already be committed and is never rewritten or converted.
+Progress tables are outside `ledger_entry` replay/mirroring and outside
+`maintenance_operation` drain. Their writes never unblock recovery or authorize
+work. The producer stores only stage, exact reviewed 40-hex source candidate,
+maintenance generation, scheduled minute, attempt 1–4, UTC start/terminal and
+finite phase/terminal enums. No Client, Reporter, request, repository, provider
+identity, URL, payload or error cause is copied.
+
+Delivery, cleanup, refresh and sweep preserve their order, original deadlines,
+caught errors, HTTP contracts and cancellation. A local finite failure signal
+also covers isolated item failures/retries; it carries no error data. `ok`
+means that the bounded local pass returned without an observed failure, not
+that every durable intent or uncertain remote write was resolved. Maintenance
+refusal is `contained`, timeout is `timed_out`, failure is `failed`, and work
+never reached is `not_run`. Notification drain reports independently. Disabled
+notifications are `not_run`; denied/rate-limited drain is `contained`. Terminal
+`settled` describes local settlement, including caught phase failures; consumers
+must inspect every phase. Outer failure/interruption uses `failed`/`interrupted`.
+Terminal is written only after nested work and finalizers settle. The nominal
+57-second support budget is cooperative: noncooperative finalizers and D1 or
+notification cleanup can exceed it. No 57-second completion is fabricated.
+
+Each progress operation has a 100ms cooperative observation deadline: start,
+four support phase updates, drain update, terminal (at most 700ms total added
+cooperative overhead). A hung/failed write emits only fixed
+`Support Cron progress unavailable`; support continues without a recovery
+obstruction. A timed-out D1 request may settle late. Updates compare the full
+immutable owner, require the current maintenance generation and an unfinished
+row in the retained window; phase values only move from `not_run` to a finite
+result. They cannot rewind a terminal or newer owner. An interrupted invocation
+never resumes support work to obtain evidence. A stale generation cannot
+terminalize its previous work; its old incomplete row remains evidence.
+
+The ring has exactly 240 addressable cells: 60 scheduled minutes × four
+attempts. Concurrent allocations are serialized by an atomic D1 batch. A fifth
+attempt or a too-old invocation is rejected and latches `partial`. Eviction of
+an unfinished or nonhealthy row also latches `partial` before reuse. Old rows
+can remain physically present until reused, so the fixed row bound is stronger
+than a TTL claim. The marker is deliberately sticky: no later successful tick
+proves that lost unresolved evidence was reconciled. Late failures within the
+ring retain their original attempt; finished rows are immutable.
+
+Protected retained planning explicitly supplies the reviewed source head to the
+shared Worker declaration through a declaration-only context service (no
+ambient Config/environment lookup), as public `plain_text` bindings
+`SUPPORT_RELEASE_CANDIDATE` and `SUPPORT_RELEASE_STAGE`. The actual native upload
+broker requires exactly one of each with the retained head/stage, in both
+Discord modes. It does not accept a custody secret or ambient runtime setting
+as release authority. Unprotected declarations without this explicit identity
+produce `unknown` and the runtime skips progress, while support still runs.
+The binding is release identity, **not** activation proof. Activation time and
+snapshot coverage remain **unknown/unimplemented**.
+
+### Next read-only capability and snapshot contract (unwired)
+
+No endpoint, new secret, external reader, broker resource, workflow, scheduler,
+sender, journal or observer enablement is supplied here. A next slice must
+provide an independently authenticated read-only capability limited to the two
+aggregate progress tables, never the Worker's broad SupportLedger SQL binding
+or admin/restore capability. It must bind account/stage/candidate, independently
+verify activation and maintenance generation, and return a bounded coherent
+projection of scheduled minute/attempt/start/terminal/phase outcomes plus
+storage availability and explicit partial/overflow status. Missing identity,
+stale generation, failed writes, absent entitlement, missing activation or a
+partial marker cannot establish complete coverage.
+
+The existing offline snapshot decoder caps a response at 100 rows, whereas this
+producer can retain 240. That protocol is unchanged. A future adapter must use
+bounded pagination with an audited coherent coverage contract, or return a
+smaller explicitly **partial** window; it cannot truncate 240 to 100 and claim
+complete coverage. Sticky partial/lost evidence needs an explicit reconciliation
+contract before it can be cleared. The current decoder has no field for the
+producer's terminal outcome, partial marker or unknown activation; it must not be fed fabricated
+activation or complete provenance. Real external source/authentication is still
+required. #20 and #29 remain open; all LIVE manifests, permissions, reviewers,
+runner/exclusion, credentials, approvals, RPC/Test F and drills remain unverified.
+The parent's pending fallback choice is neither required nor approved by this
+independent CODE slice.
+
+
+### Producer validation (CODE only)
+
+All runs used Node **26.12.1** and Vitest **`--maxWorkers=1`**.
+
+- RED against PR122's actual Worker registration/callback: the controller-minute
+  regression fails with no progress row; restore the implementation afterward.
+  The scheduled deadline regression also fails because the old scheduler returns
+  no finite results. Real cleanup storage failure with logging suppressed
+  reproduced false `ok`; explicit phase signals fix it. The real additive repair
+  regression reproduced a successful repair being mislabeled failed; it now
+  preserves success while incomplete repairs remain explicit.
+- Final focused producer/delivery/broker run: **93 tests / 6 files passed**.
+  Workerd D1 tests fill all **240** cells, allocate concurrent attempts, reject
+  the fifth attempt, retain a late older failure, fence out-of-order/finished and
+  stale-generation writes, and mark unresolved eviction partial. Callback tests
+  cover cancellation, noncooperative finalizers, separate drain failure, hung
+  observation I/O, missing identity and runtime-generated `gqcanary_` privacy
+  canaries. No literal private payload is used as an observation dimension.
+- Complete Worker run on unchanged committed runtime source
+  `dc02cff830c5184a123bcd4db8df075ab54b5860`: **1,289 tests / 53 files passed**,
+  **722.92 seconds**. This includes actual installed shared-graph/native upload,
+  both stages/Discord modes, additive migration policy/history/identity/retain,
+  authenticated dispatch, one-shot apply and retained failed-continuation locks.
+  All native HTTP/RPC/storage evidence is synthetic/offline; no remote settings,
+  permissions, migration applicability or live receipt is inferred.
+- After that full run, three additional test-only write-rejection/missing-ledger
+  cases were added: the final callback file passes **20 tests**. No runtime or
+  deployment source changed after the full run. Worker typecheck/lint pass.
+- Unchanged offline protocol: **81 tests passed**, preserving PR122 HTTP identity
+  pins and late-Cron-failure carry. **114 CI-script tests**, workflow/runtime
+  policies, root/app JS lint and **3** lint controls pass. Worker/docs and
+  candidate-reachable history secret scans and whole-slice whitespace checks pass.
+
+An exploratory native run while source was still being edited reported 61 passes
+and three failures; it is not passing evidence. Two partial full runs were stopped
+for the suppressed-log and metadata-repair corrections before the final complete
+run above. They are not counted as final validation. Only the final frozen-source
+run establishes the reported complete Worker result. Subsequent changes are tests
+and documentation only, so no additional expensive full run was performed.
+Hosted checks/reviews remain **uninspected**; no CI polling/watch or merge was
+performed. Pushes use `GQ_SUPPORT_SKIP_PRE_PUSH=1`; no shared DDEV/browser work ran.
+No LIVE operation, credential/profile access or notification was performed.

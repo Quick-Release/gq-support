@@ -291,11 +291,11 @@ actual head branch is `t3/outer-runtime-failures`, not `t3/outer-runtime-alerts`
 The [offline protocol/evaluator](../../worker/tools/observer/README.md) now has
 77 passing isolated tests and five detected broken variants (Node 26.12.1, one
 Vitest worker). It adds strict proposed contracts, finite verdicts and bounded
-in-memory failure carry only. Snapshot/heartbeat/readiness remain proposed until
-the next producer slice implements controller-minute start, settled phase/drain
-results, maintenance/activation/coverage and scoped read-only endpoints. No running
-observer, workflow, scheduler, heartbeat producer, HTTP transport or live
-configuration is implemented or enabled. Wire identity/scope/lag/sampling, runner
+in-memory failure carry only. The internal producer follow-up below now records
+controller-minute start and settled phase/drain results in the maintenance
+generation. Snapshot/readiness endpoints, activation/coverage proof and scoped
+read-only capabilities remain unwired. No running external observer, workflow,
+scheduler, HTTP transport or live configuration is implemented or enabled. Wire identity/scope/lag/sampling, runner
 custody, receipt reconciliation and authorized LIVE proof remain required. A protected persistent journal is a prerequisite, not an
 assumed property of hosted Actions runners. GitHub failure visibility is not an
 approved or verified fallback notification route. The parent visibility versus
@@ -345,3 +345,52 @@ failures retain unresolved ownership after a previous recovery, and privacy
 fixtures use runtime-generated artifact-scanner canaries. Four added regression
 cases reproduced the defects before correction; all 81 protocol tests pass after.
 No transport, producer, scheduler, durable sender or LIVE evidence is implied.
+
+### Internal Cron progress producer CODE follow-up
+
+The Cron callback now retains `ScheduledController.scheduledTime`, actual UTC
+start, finite support phase outcomes and separate notification drain results in
+new aggregate SupportLedger tables (`0005_cron_progress.sql`). Terminal records
+follow local work/finalizer settlement; they do not resolve uncertain provider
+writes. The 60-minute/four-attempt ring uses a sticky partial marker for overflow
+and lost unresolved evidence. Progress I/O is best effort with 100ms cooperative
+bounds per write and never joins restore drain/admission. Retained native upload
+requires public candidate/stage identity in both Discord modes. Missing identity
+leaves observation unknown while support continues.
+
+This is internal producer CODE only. Remote migration applicability, activation,
+external snapshot coverage/source/authentication and observer enablement remain
+unknown/unwired. The 100-row offline consumer cannot silently consume the
+240-row ring as complete; the next read-only adapter needs bounded coherent
+pagination or explicit partial coverage. See the exact next capability contract
+in [observer design](external-incident-observer.md#internal-cron-producer-code-slice-2026-10-27).
+All LIVE manifests/permissions/reviewers/runner/exclusion/credentials/approvals,
+RPC/Test F and drills remain unverified. #20/#29 stay open. No live operations,
+settings, credentials, notifications or external resources were changed.
+
+
+Producer validation: **1,289 Worker tests / 53 files passed** on committed runtime
+source `dc02cff830c5184a123bcd4db8df075ab54b5860` (722.92s), including native
+protected stage/mode, additive-history, identity/retain, dispatch/one-shot and
+failed-lock tests. **93** focused producer/delivery/broker tests and **81**
+unchanged offline protocol tests pass. Three subsequent test-only write-rejection
+and absent-ledger regressions bring the final callback file to **20 passing**
+tests; runtime/deployment source is unchanged after the full run. Typecheck/lint,
+114 CI-script tests, workflow/runtime policies, three lint controls, secret scans
+and whitespace pass. Exploratory failures and interrupted pre-correction runs are
+recorded in the observer design and are not final proof. Hosted checks/reviews
+remain uninspected. This establishes CODE behavior only; all LIVE gates above,
+external read authority, activation/coverage and the parent's fallback choice
+remain pending. #20/#29 remain open.
+
+### Cron producer review correction
+
+Independent review found no Standards issues and one P2 Spec defect: cleanup's
+failed due-selection query fell back to an empty list without signalling phase
+failure. The fallback now emits the invocation-local finite failure signal and
+still returns an empty list. It preserves typed-error continuation and cancellation
+semantics while preventing false cleanup success. A real scheduler/workerd D1
+regression rejects only that query; it reproduced cleanup `ok` before the fix and
+now proves cleanup `failed` with delivery/refresh/sweep still `ok`. All 48 focused
+cleanup/scheduler/callback tests, Worker typecheck, affected lint, secret and
+whitespace checks passed. No LIVE or DDEV operations were used.

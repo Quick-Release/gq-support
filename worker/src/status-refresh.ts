@@ -1,3 +1,4 @@
+import { notePhaseFailure } from "./phase-observation.ts";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
@@ -164,6 +165,7 @@ export const refreshStatus = (options: StatusRefreshOptions): Effect.Effect<void
     if (!claim) continue;
     const read = yield* Effect.result(reader.readIssue({ installationId: row.installationId, repositoryId: row.repository_id },
       row.issue_number, claim.status_etag ?? undefined));
+    if (Result.isFailure(read)) yield* notePhaseFailure;
     if (Result.isSuccess(read)) {
       // A reused issue number must never bind a different provider identity.
       if (read.success._tag === "NotModified" || read.success.issue.id === row.issue_id) {
@@ -176,6 +178,7 @@ export const refreshStatus = (options: StatusRefreshOptions): Effect.Effect<void
         Effect.annotateLogs({ request: row.id, repository: row.repository_id, alert: true }));
       continue;
     }
+    yield* notePhaseFailure;
     const cooldown = Result.isFailure(read) && read.failure._tag === "RateLimited" ? read.failure.until : null;
     const delay = Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** Math.min(claim.status_refresh_attempts - 1, 16));
     yield* io(() => store.retry(row, owner, Math.max(now() + delay * (1 + random()), cooldown ?? 0), cooldown));
