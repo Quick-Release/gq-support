@@ -178,3 +178,47 @@ it("retires a completed synchronous provider write, allowing exclusive recovery"
   await operator("maintenance-enter", "operator-1");
   await operator("maintenance-replay", "operator-1");
 });
+
+it.each([["status", "unknown-slot"], ["invalid-command"]])("retires CLI validation failure before mutation: %s", async (...args) => {
+  await expect(operator(...args)).rejects.toThrow();
+  expect((await operations()).results).toHaveLength(0);
+  await operator("maintenance-enter", "operator-1");
+  await operator("maintenance-mirror", "operator-1");
+});
+
+it("retains CLI ownership when a mutation may have completed before its response failed", async () => {
+  const original = options();
+  // The command is valid and attempts a write; losing its response is not proof
+  // that the main database was left unchanged.
+  const mapping = { slot: "synthetic/staging", client: "synthetic", project: "synthetic", environment: "staging", repositoryId: 42, defaultDeveloper: "operator-1" };
+  await expect(executeOperator(["enroll", mapping.slot], {
+    ...original, mappings: [mapping], query: async (sql, params) => {
+      const rows = await original.query(sql, params);
+      if (sql.startsWith("INSERT INTO enrollment_code")) throw new Error("lost write response");
+      return rows;
+    },
+  })).rejects.toThrow("lost write response");
+  expect((await operations()).results).toMatchObject([{ kind: "runtime" }]);
+  await operator("maintenance-enter", "operator-1");
+  await expect(operator("maintenance-mirror", "operator-1")).rejects.toThrow("exclusive drain");
+});
+
+it("retires a transferred-issue rejection without following the redirect or changing its state", async () => {
+  const github = makeFakeGitHub(); github.installation(7); github.repository({ id: 42, installationId: 7 });
+  await expect(Effect.runPromise(Effect.gen(function* () {
+    const gateway = yield* GitHubGateway;
+    yield* gateway.createIssue({ installationId: 7, repositoryId: 42 },
+      { title: "Synthetic", body: "Synthetic", labels: [], assignees: [] });
+    const issue = github.issues[0]!;
+    issue.movedTo = "https://api.github.com/repos/other/project/issues/99";
+    yield* gateway.setIssueState({ installationId: 7, repositoryId: 42 }, issue.number, "closed");
+  }).pipe(Effect.provide(GitHubGateway.layer({ clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem,
+    ledger: ledger() }).pipe(Layer.provide(github.layer))), Effect.provide(Logger.layer([]))))).rejects.toThrow();
+  expect(github.issues[0]!.state).toBe("open");
+  expect(github.requests.filter((r) => r.method === "PATCH").map((r) => r.path)).toEqual([
+    `/repos/Quick-Release/repo-42/issues/${github.issues[0]!.number}`,
+  ]);
+  expect((await operations()).results).toHaveLength(0);
+  await operator("maintenance-enter", "operator-1");
+  await operator("maintenance-mirror", "operator-1");
+});

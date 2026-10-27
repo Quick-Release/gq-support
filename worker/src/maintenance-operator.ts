@@ -78,8 +78,25 @@ export const executeOperator = async (args: readonly string[], options: Operator
     await finishOperation(independent, id);
     throw new Error("Replay required under containment");
   }
-  const result = await runOperator(args, options);
-  await finishOperation(independent, id);
-  return result;
+  // Validation and reads cannot have changed durable state. Once any write is
+  // attempted, a rejected response may conceal a completed side effect: retain
+  // its owner rather than treating that uncertainty as a drained execution.
+  let mutationAttempted = false;
+  const trackQuery = (query: OperatorOptions["query"]): OperatorOptions["query"] => async (sql, params) => {
+    if (!/^\s*SELECT\b/i.test(sql)) mutationAttempted = true;
+    return query(sql, params);
+  };
+  try {
+    const result = await runOperator(args, { ...options, query: trackQuery(options.query), ledger: trackQuery(ledger),
+      recordRevocation: async (key, revokedAt) => {
+        mutationAttempted = true;
+        await options.recordRevocation(key, revokedAt);
+      } });
+    await finishOperation(independent, id);
+    return result;
+  } catch (error) {
+    if (!mutationAttempted) await finishOperation(independent, id);
+    throw error;
+  }
 };
 

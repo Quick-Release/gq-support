@@ -20,6 +20,9 @@ blocks normal work. This uses the existing two databases, with no new service.
 The production adapter applies admission before installation/webhook processing,
 Cron and its separately timed phases, immediate delivery and webhook refresh.
 The CLI uses the same boundary, including ordinary resume, erase and enrollment.
+Validation/read failures retire their owner only if no durable write was
+attempted. A failed main/ledger write or revocation-file update retains it,
+because a missing response does not prove that the write did not complete.
 No auth, capability or repository-mapping checks are bypassed. Work admitted
 before containment may write until it finishes; **enter is not a drain receipt**.
 A background wake-up denied during containment leaves the durable accepted work
@@ -34,6 +37,9 @@ Token minting is not an issue mutation. Registrations contain only random ID,
 kind, generation, timestamp and numeric installation/repository/issue target plus
 method, never credentials, submitted text, Reporter subject or request bodies.
 Completed registrations are deleted; unresolved ones remain for investigation.
+A trusted issue-transfer `301` on an issue PATCH is a known non-mutation and
+retires its registration without following the redirect. Untrusted redirects
+remain unresolved.
 
 **Zero registrations is a local precondition, not a provider cancellation or
 safe-to-restore certificate.** GitHub may finish a side effect beyond the local

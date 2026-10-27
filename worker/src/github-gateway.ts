@@ -408,7 +408,11 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
     const result = yield* send(request, token.token);
     // 5xx/transport failure/interruption may still execute remotely. Never
     // expire that obstruction or mistake a local timeout for cancellation.
-    if (operation && [200, 201, 204, 400, 401, 403, 404, 410, 422, 429].includes(result.response.status)) {
+    // The same trusted 301 classified as IssueMoved below is a synchronous
+    // non-mutation; redirects are never followed. Other redirects stay unknown.
+    const movedIssue = result.response.status === 301 && request.method === "PATCH" &&
+      /\/issues\/\d+$/.test(request.url) && result.response.headers.location?.startsWith(`${API}/`);
+    if (operation && (movedIssue || [200, 201, 204, 400, 401, 403, 404, 410, 422, 429].includes(result.response.status))) {
       yield* Effect.promise(() => finishOperation(config.ledger!, operation!));
     }
     const status = result.response.status;
