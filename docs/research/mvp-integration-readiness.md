@@ -477,3 +477,23 @@ provider/hosted binding, TLS/DNS/account, storage or persistent custody proof.
 Parent fallback policy, real manifests/permissions/exclusion/credentials/approval,
 Test F, drills, receipt and human acknowledgment remain outstanding. #20/#29 stay
 open; no global MVP-ready claim or production enablement.
+
+### Exact tracked GitHub Actions adapter CODE delta (stacked on #129)
+
+[Official envelope decoding and exact tracked-run joins](../../worker/tools/observer/README.md#exact-tracked-github-actions-wire-adapter-stacked-on-129)
+now cover <=20 approved expectations, including runs older than 24h, using <=23
+fixed read-only GETs, 64 KiB/body, 512 KiB total and a 10-second total deadline.
+Fake HTTP reaches the real evaluator/private failure carry; it proves no live
+entitlement, lag, repo identity, permissions, custody or readiness. Workflow success
+is workflow evidence only; missing/partial/cancelled/skipped cannot recover retained
+failures. Dedicated explicit Actions:read input is not connected to the existing
+private bundle/approval purpose; expanded read scope needs future explicit review.
+
+Untracked discovery, Cloudflare adapters, continuous storage witness/durable carry,
+durable notification journal/sender, persistent runner/storage witness, genuine
+private LIVE inputs/approvals/scope/target attestation, Test F/drills/receipt and
+human acknowledgment remain. Parent fallback policy is pending; #20/#29 stay open
+and production stays disabled. #129's reviewed zero findings/two configured-date
+cases remain separate local evidence; runtime/CI pins are unchanged. Next smallest
+safe CODE slice is an offline separately reviewed Actions-read custody/purpose
+handoff binding exact tracked identities/refs without enabling a runner.

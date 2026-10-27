@@ -353,7 +353,7 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
     // A newly discovered unresolved attempt may precede a recovered coverage
     // watermark. Its identity still owns an incident; coverage is not a ledger
     // of all failures that could arrive later.
-    if (s.verdict === "incident" && (s.at >= old.watermark || (i === 3 && cronFailures.length > 0))) return {
+    if (s.verdict === "incident" && (s.at >= old.watermark || (i === 3 && cronFailures.length > 0) || (i === 4 && workflowFailures.length > 0))) return {
       active: true, count: Math.min(999999, old.count + Number(!old.active || s.at > old.watermark)),
       first: old.active ? old.first : s.at, last: Math.max(old.last, s.at), watermark: Math.max(old.watermark, s.at), observedAt: Math.max(old.observedAt, s.observedAt),
       candidate: old.active ? old.candidate : c.candidate, generation: old.active ? old.generation : c.generation,

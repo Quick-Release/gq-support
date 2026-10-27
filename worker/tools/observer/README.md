@@ -492,3 +492,113 @@ This does not provide live provider/TLS/account/DNS proof, parent fallback polic
 or persistent custody/storage proof. Those remain pending independently, along
 with operational approvals/Test F/drills/receipt/human acknowledgment and #20/#29.
 No production enablement or global MVP-ready claim follows.
+
+## Exact tracked GitHub Actions wire adapter (stacked on #129)
+
+`github-actions.ts` exports `observeGitHubActions(input, io)`, a trusted launcher
+library with **required injected HTTP**, explicit private source context and a
+separate dedicated `actionsReadToken`. It is not wired into #127/#128's manifest,
+credentials, approval purpose or launcher. Their existing `githubToken` is for
+identity/comment/permission reads; **Actions:read is a future explicit prerequisite**
+for this new purpose, never a silent scope increase. Caller-supplied context and
+fake HTTP establish neither private custody nor approval. #127 approval grants no
+deployment, notification, retry or other provider write authority.
+
+The parent supplies `repositoryId`, a validated existing `Context` with <=20 exact
+expectations, and exactly matching `tracked` entries. Each entry has a unique private
+64-hex `identity`, the exact existing expectation and an independently approved
+`ref`. Identity is a parent-owned join handle, not an API field or authentication
+claim; existing private `State.workflowFailures` retains the full expectation tuple.
+The context pins repo, allowlisted workflow filename, event, run ID/attempt/head,
+stage/candidate/generation. Every outstanding expectation, including one older than
+24 hours, is directly read. No discovery, list endpoint, pagination, age eviction,
+automatic replacement, deployment API or generic GitHub client is added.
+
+Fixed API origin: `https://api.github.com`, repo `Quick-Release/gq-support` only.
+At most **23 sequential GETs**: one metadata read per distinct allowlisted workflow
+(max 3), then one exact attempt read per expectation (max 20). Routes are only
+`/repos/Quick-Release/gq-support/actions/workflows/{allowlisted_filename}` and
+`/repos/Quick-Release/gq-support/actions/runs/{positive_run}/attempts/{positive_attempt}`.
+Response links are compared but never followed. `pages:0` in normalized `Read`
+means no list pagination; it does not conceal HTTP request cost. Metadata is cached
+only within this invocation. There are no retries, cancel/rerun calls, scheduler,
+CLI, sender, enabled workflow or added privileges.
+
+Metadata's numeric `id`, exact `.github/workflows/{filename}` path, URL and active
+state join `workflow_id`/`workflow_url` from the actual run object. Run and head
+repository numeric IDs/full names/API URLs must match independently supplied repo
+identity and the fixed repo. Run ID, attempt, event, SHA and head branch must match.
+CI is push/main; deploy is workflow_dispatch/main; release is workflow_dispatch/main
+or push of the exact approved `plugin-v` version tag. These restrictions reflect
+the checked-in workflows and are deliberately narrower than arbitrary dispatch.
+Names, display titles, run path strings, jobs and actor text provide **no** stage,
+pipeline identity or deployment-readiness authority. Stage/candidate come solely
+from the independent expectation. Unknown/additional API fields are ignored only
+after bounded decoding; documented GitHub object envelopes are decoded and joined,
+never accepted as the old normalized fixture contract.
+
+Timestamps must be real canonical UTC instants, nonfuture and ordered
+created <= started <= updated (started required for in_progress/completed).
+Status/conclusion consistency is enforced. Completed failure/timed_out/action_required
+becomes finite `workflow_failure` evidence. Queue/in-progress/stall, waiting/unknown
+states, cancellation, skipped, missing/deleted/denied, malformed or incomplete reads
+cannot prove success. Exact complete success is **workflow evidence only**, never
+service readiness, deployment receipt, runtime health or notification delivery.
+Unrelated/older/equal-time success cannot recover retained failures. Only an
+independently approved exact higher attempt with complete affirmative proof may
+recover under the existing protocol's candidate/generation/time constraints.
+Newly observed old failures also remain visible below a prior recovered watermark.
+
+Limits: **10 seconds total**, additionally clipped by explicit `expiresAt` (at most
+5 minutes from start); **64 KiB/response**, **512 KiB total**, **1024 chunks/response**.
+Inputs and function references are copied/captured before awaits. Fixed headers:
+Accept `application/vnd.github+json`, Accept-Encoding `identity`, User-Agent
+`gq-support-observer`, X-GitHub-Api-Version `2026-03-10`, and the dedicated bearer.
+GET, redirect:error, credentials:omit, cache:no-store; exact final URL, nonredirected
+basic/cors/default response, JSON content type and status 200 required. Cookies,
+compression, inconsistent content length and unexpected status/type are refused.
+Streaming bounds, UTF-8/JSON validation and monotonic clock checks apply before
+normalization. Abort/expiry/deadline, permission refusal, malformed identity or
+uncertain I/O stop **all later reads**. Refused/pending/late streams are cancelled
+without awaiting noncooperative disposal; ownership precedes the post-await clock
+check, including the #126 deadline race. This bounds library waiting/bytes, not a
+noncooperative injected implementation's memory or remote execution.
+
+Successful normalized `Read[]` and `state` are **private**; only `result.public` is
+publishable. Finite public coverage is scoped to the exact tracked set: complete
+only after every exact read yields a valid decisive terminal result, partial when
+some valid evidence survives an unresolved read, unknown when none does. Positive
+failure evidence survives partial coverage and subsequent missing sources. The
+real `decodeBatch`/`evaluate` retain failure identities, HTTP observation fencing,
+unknown telemetry and all other source requirements. This adapter emits no HTTP,
+Cloudflare, readiness or snapshot evidence. Public output contains no raw responses,
+errors, URLs, headers, IDs, titles, topology, expectations, credentials or hashes.
+No ambient gh/env/profile/App/Alchemy/deploy/SQL credential discovery occurs.
+
+Minimum future entitlement: dedicated fine-grained repository **Actions:read** for
+this repository, with no Actions write permission. No token is configured here.
+The official endpoints also permit unauthenticated reads of public resources;
+GitHub's unauthenticated primary limit is 60 requests/hour/IP, with secondary limits
+also applicable. This library deliberately requires an explicit credential and does
+not fall back to unauthenticated or ambient auth. See the
+[official contract research](../../../docs/research/github-actions-tracked-runs.md)
+for source links/current API version and exact offline proof limits.
+
+Validation: the observer suite includes actual GitHub-shaped envelope/evaluator
+vectors and runtime canaries; all ten existing controls remain required plus
+`node worker/tools/observer/actions-negative-controls.mjs` (removed workflow/head
+joins, cancellation-as-success, empty-as-success). Run with Node **26.12.1**,
+`--config tools/observer/vitest.config.ts --maxWorkers=1`. No live entitlement,
+lag/completeness, permissions, real repo/workflow identity or custody proof follows
+from fake HTTP. The #129 configured-date gate's two passing cases and reviewed zero
+findings remain separate local evidence; production date/runtime/CI pins are unchanged.
+
+Remaining: untracked-run discovery, Cloudflare telemetry/deployment adapters,
+continuous storage witness and durable failure carry, durable notification
+journal/sender, persistent runner/storage/host-loss witness, genuine private LIVE
+inputs/source approvals/permissions and target attestation, Test F/drills/receipt
+and human acknowledgment. Parent fallback policy remains pending. #20/#29 stay open;
+production remains disabled. The next smallest safe slice is an offline, separately
+reviewed Actions-read purpose/credential handoff into the existing one-shot private
+custody path, binding exact tracked refs/identities and source scope without enabling
+execution or broadening the existing approval purpose. Discovery is later work.

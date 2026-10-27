@@ -454,3 +454,13 @@ Normal fixture tests retain their previous runtime/date behavior. No account or
 credentials are required. See [reproduction, pins, checks and limits](../docs/research/configured-runtime-validation.md).
 This is local runtime evidence only; parent fallback and persistent custody proof,
 #20/#29 and operational enablement remain pending.
+
+The disabled [exact tracked GitHub Actions adapter](tools/observer/README.md#exact-tracked-github-actions-wire-adapter-stacked-on-129)
+now decodes official workflow/exact-attempt envelopes through injected fake HTTP
+and the real evaluator. It covers <=20 already tracked runs, including outstanding
+runs older than 24h, within <=23 GETs, 64 KiB/body, 512 KiB total and 10 seconds.
+Workflow success is not deployment readiness. No dedicated Actions:read token,
+private approval scope, scheduler, sender or live execution is configured. Untracked
+discovery, Cloudflare adapters, continuous storage witness, durable notification
+journal/sender, persistent runner/private LIVE inputs/approvals/drills/receipt and
+parent fallback policy remain pending; #20/#29 stay open with no production enablement.
