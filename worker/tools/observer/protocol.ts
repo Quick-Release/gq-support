@@ -194,7 +194,7 @@ interface Cell {
   candidate: string; generation: number;
 }
 interface CronFailure { slot: number; attempt: number; terminal: number; open: boolean }
-interface HttpSample { observed: number; at: number; failed: boolean }
+interface HttpSample { observed: number; at: number; failed: boolean; candidate: string; generation: number }
 /** In-memory carry only. No persistence, durable ownership, send permission or receipt. */
 export interface State {
   stage: Stage; cells: readonly Cell[]; http: readonly HttpSample[];
@@ -234,7 +234,7 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
   const excluded = (slot: number) => c.exclusions.some(x => slot >= x.from && slot < x.to);
   let httpEvidence = false;
   const http = new Map<number, HttpSample>();
-  for (const h of previous?.http ?? []) if (h.at >= c.now - proposals.httpWindow) http.set(h.observed, { ...h });
+  for (const h of previous?.http ?? []) if (h.at >= c.now - proposals.httpWindow && h.candidate === c.candidate && h.generation === c.generation) http.set(h.observed, { ...h });
   let telemetryUnknown = batch.invalid || batch.evidence.length === 0;
   const seen = new Set<Source>();
   const workflows: { e: Evidence; w: Workflow }[] = [];
@@ -251,7 +251,7 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
       httpEvidence = true;
       const failed = (p as { result: string }).result === "unavailable";
       const old = http.get(r.observed);
-      if (!old || (old.at === r.at && failed)) http.set(r.observed, { observed: r.observed, at: old?.at ?? r.at, failed: old?.failed || failed });
+      if (!old || (old.at === r.at && failed)) http.set(r.observed, { observed: r.observed, at: old?.at ?? r.at, failed: old?.failed || failed, candidate: c.candidate, generation: c.generation });
     }
     if (r.source === "analytics") {
       // Sampling/lag unknown does not invalidate positive corroboration.
@@ -318,7 +318,7 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
   } else if (c.expected.length && !signals[4].at) telemetryUnknown = true;
   const samples = [...http.values()].sort((a, b) => b.at - a.at || Number(b.failed) - Number(a.failed)).slice(0, 32);
   const pair = samples.slice(0, 2);
-  if (httpEvidence && pair.length === 2 && pair[0].at >= c.now - proposals.freshness && pair.every(h => h.failed === pair[0].failed) && pair[1].at >= c.now - proposals.httpWindow) {
+  if (httpEvidence && pair.length === 2 && pair[0].at > pair[1].at && pair[0].at >= c.now - proposals.freshness && pair.every(h => h.failed === pair[0].failed) && pair[1].at >= c.now - proposals.httpWindow) {
     signals[0] = { verdict: pair[0].failed ? "incident" : "clear", at: pair[0].at, from: pair[1].at, observedAt: pair[0].at, coverage: "complete" };
   }
   if (["http", "analytics", "snapshot", "workflow", "deployment", "route"].some(s => !seen.has(s as Source))) telemetryUnknown = true;
@@ -326,9 +326,12 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
   const cells = classes.map((_, i): Cell => {
     const old = previous?.cells[i] ?? { active: false, count: 0, first: 0, last: 0, watermark: 0, observedAt: 0, candidate: c.candidate, generation: c.generation };
     const s = signals[i];
-    if (s.verdict === "incident" && s.at >= old.watermark) return {
+    // A newly discovered unresolved attempt may precede a recovered coverage
+    // watermark. Its identity still owns an incident; coverage is not a ledger
+    // of all failures that could arrive later.
+    if (s.verdict === "incident" && (s.at >= old.watermark || (i === 3 && cronFailures.length > 0))) return {
       active: true, count: Math.min(999999, old.count + Number(!old.active || s.at > old.watermark)),
-      first: old.active ? old.first : s.at, last: Math.max(old.last, s.at), watermark: s.at, observedAt: Math.max(old.observedAt, s.observedAt),
+      first: old.active ? old.first : s.at, last: Math.max(old.last, s.at), watermark: Math.max(old.watermark, s.at), observedAt: Math.max(old.observedAt, s.observedAt),
       candidate: old.active ? old.candidate : c.candidate, generation: old.active ? old.generation : c.generation,
     };
     if (!batch.invalid && s.verdict === "clear" && s.at > old.watermark && s.observedAt > old.observedAt &&

@@ -1,7 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { classes, decodeBatch, evaluate, receiptView, type Class, type Context, type Read, type Source, type State } from "./protocol.ts";
 import { projectAnalytics } from "./analytics-wire.ts";
 
+const canary = () => "gqcanary_" + randomBytes(16).toString("hex");
+const privateCanary = canary();
 const M = 60_000, NOW = 120 * M, SHA = "a".repeat(40), OTHER = "b".repeat(40);
 const clock = (offset = 0): Context => ({ now: NOW + offset, stage: "staging", account: "8f38791a8c37b182239af2a385ab3c31",
   candidate: SHA, activation: 0, generation: 1, exclusions: [], expected: [] });
@@ -32,17 +35,17 @@ describe("bounded proposed protocol", () => {
     expect(p.classes.every(x => x.verdict !== "clear")).toBe(true);
     expect(verdict("telemetry_unavailable", []).verdict).toBe("incident");
   });
-  it.each([null, {}, { healthy: true }, { rows: [], email: "canary@example.invalid" }])("rejects malformed/injected normalized input %#", value => {
+  it.each([null, {}, { healthy: true }, { rows: [], email: privateCanary }])("rejects malformed/injected normalized input %#", value => {
     const read = transport("analytics", value);
     expect(decodeBatch(clock(), [read]).invalid).toBe(true);
-    expect(JSON.stringify(run([read]).public)).not.toContain("canary");
+    expect(JSON.stringify(run([read]).public)).not.toContain(privateCanary);
   });
   it.each([{ status: "denied" }, { status: "unavailable" }, { stage: "prod" }, { candidate: OTHER },
     { account: "wrong" }, { generation: 2 }, { at: NOW + 1 }, { coverage: "partial" } ] as Partial<Read>[])("never accepts unavailable provenance %#", options => {
     expect(verdict("cron_start_missing", [transport("snapshot", snapshot([]), options)]).verdict).toBe("unknown");
   });
   it("rejects invalid UTF-8 and JSON without reflecting body", () => {
-    for (const body of [new Uint8Array([255]), encode("private canary"), new TextEncoder().encode('{"rows":')]) {
+    for (const body of [new Uint8Array([255]), encode(privateCanary), new TextEncoder().encode('{"rows":')]) {
       expect(decodeBatch(clock(), [transport("analytics", null, { body })]).invalid).toBe(true);
     }
   });
@@ -195,10 +198,10 @@ describe("analytics corroboration", () => {
   });
   it("projects real selected GraphQL shape separately; HTTP 200 errors/sampling never complete", () => {
     const body = encode({ data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ dimensions: {
-      datetime: new Date(NOW - M).toISOString(), scriptName: "reviewed-worker", status: "exception", private: "canary" },
-      sum: { requests: 10, errors: 1 } }] }] } }, errors: [{ message: "canary@example.invalid" }] });
+      datetime: new Date(NOW - M).toISOString(), scriptName: "reviewed-worker", status: "exception", private: privateCanary },
+      sum: { requests: 10, errors: 1 } }] }] } }, errors: [{ message: privateCanary }] });
     const p = projectAnalytics(body, "reviewed-worker")!;
-    expect(p.coverage).toBe("partial"); expect(new TextDecoder().decode(p.body)).not.toContain("canary");
+    expect(p.coverage).toBe("partial"); expect(new TextDecoder().decode(p.body)).not.toContain(privateCanary);
     expect(verdict("worker_errors", [transport("analytics", null, p)]).verdict).toBe("incident");
     expect(projectAnalytics(encode({ data: { viewer: { accounts: [] } } }), "reviewed-worker")).toBeNull();
   });
@@ -243,7 +246,7 @@ describe("independent HTTP vantage and workflow expectations", () => {
   });
   it("HTTP availability cannot clear independent workflow failure or establish readiness", () => {
     const c = { ...clock(), expected: [expectation()] };
-    const r = run([transport("http", { result: "available" }), transport("http", { result: "available" }, { observed: 2 }),
+    const r = run([transport("http", { result: "available" }, { at: NOW - M, to: NOW - M }), transport("http", { result: "available" }, { observed: 2 }),
       transport("workflow", workflow("failure"))], c);
     expect(r.public.classes[0].verdict).toBe("clear"); expect(r.public.classes[4].verdict).toBe("incident");
     expect(r.public.classes[3].verdict).toBe("unknown");
@@ -281,5 +284,44 @@ describe("receipt negative vectors only; no custody implementation", () => {
   });
   it("transport confirmation is never human acknowledgment", () => {
     expect(receiptView("none", "transport_confirmed")).toEqual({ receipt: "transport_confirmed", human: "unknown" });
+  });
+});
+
+describe("review regressions for advancing evidence and late failure ownership", () => {
+  it("cannot recover HTTP failure with different IDs at the same time", () => {
+    const failed = run([
+      transport("http", { result: "unavailable" }, { observed: 1, at: NOW - M, to: NOW - M }),
+      transport("http", { result: "unavailable" }, { observed: 2 }),
+    ]);
+    expect(failed.public.classes[0].verdict).toBe("incident");
+    const c = clock(M);
+    const recovered = run([
+      transport("http", { result: "available" }, { observed: 3 }, c),
+      transport("http", { result: "available" }, { observed: 4 }, c),
+    ], c, failed.state);
+    expect(recovered.public.classes[0].verdict).toBe("incident");
+    expect(recovered.state.cells[0].active).toBe(true);
+  });
+  it.each(["candidate", "generation"] as const)("does not pair HTTP samples across %s pins", (pin) => {
+    const state = run([transport("http", { result: "available" })]).state;
+    const c = { ...clock(M), ...(pin === "candidate" ? { candidate: OTHER } : { generation: 2 }) };
+    const next = run([transport("http", { result: "available" }, { observed: 2 }, c)], c, state);
+    expect(next.public.classes[0].verdict).toBe("unknown");
+    expect(next.state.http).toHaveLength(1);
+  });
+  it("retains a late older Cron failure after a previous incident recovered", () => {
+    const initial = run([transport("snapshot", snapshot([tick(undefined, { phases: { ...phases, drain: "failed" } })]))]);
+    const c = clock(M);
+    const recoveredTicks = [...ring().filter(t => t.slot !== NOW - 5 * M),
+      tick(undefined, { attempt: 2, start: NOW, terminal: NOW + 1000 }), tick(NOW - 2 * M)];
+    const recovered = run([transport("snapshot", snapshot(recoveredTicks, {}, c), {}, c)], c, initial.state);
+    expect(recovered.public.classes[3].verdict).toBe("clear");
+    const c2 = clock(2 * M);
+    const late = tick(NOW - 10 * M, { phases: { ...phases, delivery: "failed" } });
+    const discovered = run([transport("snapshot", snapshot([late], {}, c2), {}, c2)], c2, recovered.state);
+    expect(discovered.public.classes[3].verdict).toBe("incident");
+    expect(discovered.state.cronFailures).toHaveLength(1);
+    expect(discovered.state.cells[3].watermark).toBeGreaterThanOrEqual(recovered.state.cells[3].watermark);
+    expect(verdict("cron_incomplete", [], clock(3 * M), discovered.state).verdict).toBe("incident");
   });
 });

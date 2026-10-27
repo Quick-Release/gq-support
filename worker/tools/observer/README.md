@@ -80,3 +80,10 @@ pnpm --filter gq-support-worker exec tsc -b
 ```
 
 The isolated Vitest config uses one worker and no D1/global Worker setup.
+
+Review corrections require strictly advancing HTTP timestamps and scope retained
+HTTP samples to the current candidate and maintenance generation. A newly
+observed unresolved Cron attempt retains its incident even when its slot is
+older than a recovered coverage watermark; the watermark never moves backward.
+Four new regression cases failed before correction and pass afterward. Privacy
+fixtures now use runtime-generated scanner-compatible canaries.

@@ -335,3 +335,13 @@ LIVE prerequisites, after CODE compatibility is reviewed:
    incident receipt/acknowledgment arrangements without inventing a responder order.
 6. Explicit live authorization and fresh staging/production candidate approval.
    No policy decision or this draft grants them. #20/#29 remain open.
+
+### Offline observer review corrections
+
+PR122 independent review found three P2 Spec defects and one P3 test-convention
+breach. All were corrected: same-time HTTP samples cannot confirm recovery,
+samples cannot pair across candidate/maintenance generations, late older Cron
+failures retain unresolved ownership after a previous recovery, and privacy
+fixtures use runtime-generated artifact-scanner canaries. Four added regression
+cases reproduced the defects before correction; all 81 protocol tests pass after.
+No transport, producer, scheduler, durable sender or LIVE evidence is implied.
