@@ -32,6 +32,27 @@ export function checkWorkflow(path, text, { pullRequestCode = false } = {}) {
   const problems = [];
   const report = (index, message) => problems.push(`${path}:${index + 1}: ${message}`);
 
+  // Defense in depth, not a shell security parser: reject destructive command
+  // vocabulary anywhere in executable workflow/action text, even split across
+  // lines or routed through pnpm exec/npx. The guarded package script remains
+  // the only supported destroy entrypoint (and refuses durable stages).
+  const executable = lines.filter((line) => !/^\s*#/.test(line)).join('\n');
+  if (/\balchemy\b[\s\S]*?\b(?:destroy|delete|nuke|teardown)\b|\bwrangler\b[\s\S]*?\b(?:delete|destroy)\b/i.test(executable)) {
+    report(0, 'direct destructive commands are forbidden in workflows/actions; use the guarded pnpm run destroy wrapper outside durable-stage deployment');
+  }
+
+  if (path === '.github/workflows/deploy-worker.yml') {
+    const gate = executable.indexOf('release-evidence.mjs plan "$DEPLOY_STAGE"');
+    const apply = executable.indexOf('pnpm exec alchemy deploy');
+    if (gate < 0 || apply < gate) report(0, 'deploy requires the fail-closed safe-plan gate before apply');
+  }
+  if (path === '.github/workflows/release-plugin.yml') {
+    const publish = text.match(/^ {2}publish:\n([\s\S]*?)(?=^ {2}[\w-]+:|$(?![\s\S]))/m)?.[1] ?? '';
+    for (const required of ['needs: [candidate, installed, compatibility]', "if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'", 'environment: prod', 'release-evidence.mjs approval prod', 'release-evidence.mjs candidate']) {
+      if (!publish.includes(required)) report(0, `publish must retain ${required}`);
+    }
+  }
+
   lines.forEach((line, index) => {
     const uses = line.match(/^\s*(?:-\s+)?uses:\s*(\S+)(.*)$/);
     if (!uses) return;
