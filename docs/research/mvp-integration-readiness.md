@@ -394,3 +394,16 @@ regression rejects only that query; it reproduced cleanup `ok` before the fix an
 now proves cleanup `failed` with delivery/refresh/sweep still `ok`. All 48 focused
 cleanup/scheduler/callback tests, Worker typecheck, affected lint, secret and
 whitespace checks passed. No LIVE or DDEV operations were used.
+
+### Observer aggregate endpoint CODE delta
+
+The fixed data-free readiness GET precedes raw storage/App/support admission.
+A separate disabled-by-default stage-read capability protects the aggregate-only
+snapshot GET. The real v1 wire adapter accepts all 240 compact producer cells in
+one coherent fixed SELECT, with no-store headers and fixed unavailable errors.
+Activation and continuous coverage remain unknown, so this endpoint cannot prove
+missing starts or recover incidents. App-owned custody adds exact observer-secret
+writes/removals before Discord custody; no new resource/profile or live change.
+See [implemented contract](external-incident-observer.md#fixed-readiness-and-aggregate-wire-snapshot-this-code-slice).
+External transport, scheduler, durable sender/journal, POLICY fallback, private
+credential delivery and LIVE evidence remain absent/unverified. #20/#29 stay open.

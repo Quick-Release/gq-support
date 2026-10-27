@@ -87,3 +87,14 @@ observed unresolved Cron attempt retains its incident even when its slot is
 older than a recovered coverage watermark; the watermark never moves backward.
 Four new regression cases failed before correction and pass afterward. Privacy
 fixtures now use runtime-generated scanner-compatible canaries.
+
+The producer now implements the fixed readiness and authenticated aggregate wire
+GETs. The earlier proposed normalized snapshot remains a fixture contract;
+`protocol.ts` also adapts the actual version-1 DTO in
+`src/observer-snapshot.ts`. Only that heartbeat decoder accepts 240 compact rows;
+other queries keep 100. The producer supplies activation=null, coverage=unknown
+and sticky partial. It therefore supports positive finite failure evidence but
+cannot prove missing starts or recover an incident. No phase is remapped to ok.
+The adapter has real endpoint-byte fixtures, including a full 240-cell D1 ring.
+Network transport, scheduler, journal and sender remain absent. See the latest
+section of the observer design for exact schema, byte budget and custody order.

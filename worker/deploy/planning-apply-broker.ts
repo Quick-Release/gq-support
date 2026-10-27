@@ -1,3 +1,4 @@
+import { validateObserverBinding, type ObserverCustodyBinding } from "./observer-read-secret.ts";
 // Trusted, per-session first-party broker. No generic URL forwarding, state
 // bearer, response headers, error bodies or credential enters the graph.
 import { checkedObservability, validateDiscordBinding, type DiscordCustodyBinding } from "./discord-alert-secret.ts";
@@ -16,6 +17,7 @@ import { checkChannelFrame, type BrokerOperation } from "./retained-child-channe
 import type { AppSecretCustody } from "./github-app-secret.ts";
 
 export interface ApplyBrokerConfig {
+  readonly observer: ObserverCustodyBinding;
   readonly discord: DiscordCustodyBinding;
   readonly migrations?: readonly D1MigrationGrant[];
   readonly stage: ProtectedStage;
@@ -37,6 +39,8 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
   config = structuredClone(config);
   checkStage(config.stage);
   validateDiscordBinding(config.discord);
+  validateObserverBinding(config.observer);
+  requireEvidence(config.observer.stage === config.stage && config.observer.release === config.discord.release && isDeepStrictEqual(config.observer, custody.app.observer));
   requireEvidence(isDeepStrictEqual(config.discord, custody.app.discord));
   requireEvidence(config.app.stage === config.stage && config.app.slug === protectedAppSlugs[config.stage]);
   requireEvidence(/^[a-z0-9][a-z0-9-]{0,62}$/.test(config.worker) && new URL(config.stateOrigin).origin === config.stateOrigin &&

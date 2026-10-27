@@ -4,6 +4,7 @@ import type { ReviewedEndpoint } from "./endpoint-attestation.ts";
 import type { ApprovalPolicy } from "./github-candidate-approval.ts";
 import type { OwnerWindow } from "./planner-evidence.ts";
 export interface ReviewedPlannerConfig {
+  readonly observer?: { readonly enabled: boolean };
   readonly discord: { readonly enabled: boolean };
   readonly endpoint: ReviewedEndpoint;
   readonly approval: Omit<ApprovalPolicy, "run" | "attempt" | "head">;

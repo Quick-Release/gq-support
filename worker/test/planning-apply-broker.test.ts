@@ -1,4 +1,4 @@
-import { discord } from "./fixtures/discord-custody.ts";
+import { discord, observer } from "./fixtures/discord-custody.ts";
 import { describe, expect, it, vi } from "vitest";
 import { planningApplyBroker } from "../deploy/planning-apply-broker.ts";
 import { verifyDispatch } from "../deploy/protected-plan-continuation.ts";
@@ -10,8 +10,8 @@ function fixture(check = vi.fn(async () => {}), dispatch = () => {}, stage: "pro
   const metadata = { ...app, stage, slug: stage === "prod" ? "getquick-support" : "getquick-support-staging" };
   const transport = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: { observability: { issues: { enabled: false } } } }));
   const custody = { cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: transport, state: transport,
-    app: { discord, provisionDiscord: async () => {}, provisionKey: vi.fn(async () => metadata), provisionWebhook: vi.fn(async () => {}), check: vi.fn(async () => ({ appId: 123, checkedAt: new Date().toISOString() })) } };
-  const broker = planningApplyBroker({ discord, stage, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app: metadata }, custody, check, dispatch);
+    app: { observer: { ...observer, stage }, discord, provisionDiscord: async () => {}, provisionKey: vi.fn(async () => metadata), provisionWebhook: vi.fn(async () => {}), check: vi.fn(async () => ({ appId: 123, checkedAt: new Date().toISOString() })) } };
+  const broker = planningApplyBroker({ observer: { ...observer, stage }, discord, stage, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app: metadata }, custody, check, dispatch);
   return { broker, transport, custody, check };
 }
 describe("narrow real-provider broker", () => {
@@ -27,11 +27,11 @@ describe("narrow real-provider broker", () => {
     expect(transport).not.toHaveBeenCalled();
   });
   it.each(["enabled", "release", "commitment"] as const)("denies interchanged Discord %s before transport", (key) => {
-    const config = { discord, stage: "prod" as const, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [], app };
+    const config = { observer, discord, stage: "prod" as const, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [], app };
     const transport = vi.fn<typeof fetch>();
     const changed = { ...discord, [key]: key === "enabled" ? true : key === "release" ? "e".repeat(40) : "e".repeat(64) };
     expect(() => planningApplyBroker(config, { cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: transport, state: transport,
-      app: { discord: changed, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: vi.fn() } }, async () => {}, () => {})).toThrow("apply blocked");
+      app: { observer, discord: changed, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: vi.fn() } }, async () => {}, () => {})).toThrow("apply blocked");
     expect(transport).not.toHaveBeenCalled();
   });
   it("returns no private response fields or binding values to the child", async () => {
@@ -96,9 +96,9 @@ describe("narrow real-provider broker", () => {
 it("rejects changed approved bundle bytes before the script PUT", async () => {
   const app = { stage: "prod", clientId: "synthetic", slug: "getquick-support", appId: 123, fingerprint: "public" };
   const send = vi.fn<typeof fetch>();
-  const broker = planningApplyBroker({ discord, stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid", instances: { Worker: "i", GitHubAppSecret: "j" }, databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app, bundle: "b".repeat(64) }, {
+  const broker = planningApplyBroker({ observer, discord, stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid", instances: { Worker: "i", GitHubAppSecret: "j" }, databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app, bundle: "b".repeat(64) }, {
     cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: send, state: send,
-    app: { discord, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 123, checkedAt: new Date().toISOString() }) },
+    app: { observer, discord, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 123, checkedAt: new Date().toISOString() }) },
   }, async () => {}, () => {});
   const form = new FormData();
   form.append("metadata", JSON.stringify({ main_module: "main.js", bindings: [{ type: "d1", name: "DB", id: "db1" }, { type: "d1", name: "LEDGER", id: "db2" }] }));

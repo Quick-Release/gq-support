@@ -1,4 +1,4 @@
-import { discord } from "./discord-custody.ts";
+import { discord, observer } from "./discord-custody.ts";
 // Real shared graph/Plan/Apply/providers and native StateEncoding, fully offline.
 // SQLite implements the supported SQL subset; fake HTTP never opens a socket.
 import { DatabaseSync } from "node:sqlite";
@@ -55,9 +55,9 @@ async function main() {
   const state: Record<string, unknown>[] = [];
   let queries = 0, batches = 0, open = true;
   let broker: ReturnType<typeof planningApplyBroker>;
-  const createBroker = (bundle: string) => planningApplyBroker({ discord: binding, stage, worker: rows.Worker.attr.workerName, stateOrigin: "https://state.invalid", databases: input.databases, migrations: grants,
+  const createBroker = (bundle: string) => planningApplyBroker({ observer: { ...observer, stage }, discord: binding, stage, worker: rows.Worker.attr.workerName, stateOrigin: "https://state.invalid", databases: input.databases, migrations: grants,
     instances: { Worker: rows.Worker.instanceId, GitHubAppSecret: rows.GitHubAppSecret.instanceId }, app, bundle }, {
-    cloudflareToken: "FAKE_ONLY", stateBearer: "FAKE_ONLY", app: { discord: binding, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: app.appId, checkedAt: new Date().toISOString() }) },
+    cloudflareToken: "FAKE_ONLY", stateBearer: "FAKE_ONLY", app: { observer: { ...observer, stage }, discord: binding, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: app.appId, checkedAt: new Date().toISOString() }) },
     state: async (_url, init) => { state.push(JSON.parse(String(init?.body))); return Response.json({}); },
     cloudflare: async (url, init) => {
       const path = new URL(String(url)).pathname;

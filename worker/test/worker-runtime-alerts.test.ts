@@ -277,3 +277,85 @@ it("leaves an absent scheduled ledger binding unknown without starting support",
   expect(ran).toBe(false);
   expect((await stage.databases.ledger.prepare("SELECT * FROM cron_progress").all()).results).toEqual([]);
 });
+
+it("serves data-free readiness before raw bindings, digest, admission or support routing", async () => {
+  const canary = `gqcanary_${crypto.randomUUID()}`;
+  state.main = undefined; state.ledger = undefined;
+  state.digest = Effect.die(canary); state.request = Effect.die(canary);
+  const handler = await load();
+  const result = await Effect.runPromiseExit(handler.fetch.pipe(
+    Effect.provideService(WorkerEnvironment, env),
+    Effect.provideService(WorkerExecutionContext, fromExecutionContext({ waitUntil: () => { throw new Error("unexpected background work"); } } as unknown as ExecutionContext)),
+    Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(new Request("https://support.invalid/internal/observer/v1/readiness"))),
+  ));
+  expect(result._tag).toBe("Success");
+  if (result._tag === "Success") expect(result.value).toMatchObject({ status: 200 });
+  expect(pending).toEqual([]);
+});
+
+it("refuses default-disabled snapshot before raw bindings or execution context", async () => {
+  state.main = undefined; state.ledger = undefined;
+  const handler = await load();
+  const result = await Effect.runPromiseExit(handler.fetch.pipe(
+    Effect.provideService(WorkerEnvironment, env),
+    Effect.provideService(WorkerExecutionContext, fromExecutionContext({ waitUntil: () => { throw new Error("unexpected background work"); } } as unknown as ExecutionContext)),
+    Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(new Request("https://support.invalid/internal/observer/v1/snapshot"))),
+  ));
+  expect(result._tag).toBe("Success");
+  if (result._tag === "Success") expect(result.value).toMatchObject({ status: 404 });
+});
+
+it.each(["missing", "wrong", "cross-stage"])("rejects %s snapshot authority in the actual registration before DB/admission/App", async fault => {
+  state.main = undefined; state.ledger = undefined;
+  const canary = `gqcanary_${crypto.randomUUID()}`;
+  state.request = Effect.die(canary); state.digest = Effect.die(canary);
+  const token = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("");
+  const handler = await load();
+  const current = { ...env, SUPPORT_OBSERVER_ENABLED: "true", SUPPORT_OBSERVER_STAGE: "staging", SUPPORT_OBSERVER_RELEASE: env.SUPPORT_RELEASE_CANDIDATE,
+    ...(fault === "missing" ? {} : { SUPPORT_OBSERVER_READ_TOKEN: token }) };
+  const result = await Effect.runPromiseExit(handler.fetch.pipe(
+    Effect.provideService(WorkerEnvironment, current),
+    Effect.provideService(WorkerExecutionContext, fromExecutionContext({ waitUntil: () => { throw new Error(canary); } } as unknown as ExecutionContext)),
+    Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(new Request("https://support.invalid/internal/observer/v1/snapshot",
+      { headers: { Authorization: `Bearer ${fault === "wrong" ? "b".repeat(64) : "c".repeat(64)}` } }))),
+  ));
+  expect(result._tag).toBe("Success");
+  if (result._tag === "Success") expect(result.value).toMatchObject({ status: 401 });
+  expect(pending).toEqual([]);
+});
+
+it("serves an authenticated snapshot through the actual registration with SupportDB absent and no App/admission/support work", async () => {
+  const { timingSafeEqual, randomBytes } = await import("node:crypto");
+  const original = crypto;
+  vi.stubGlobal("crypto", { subtle: { digest: original.subtle.digest.bind(original.subtle),
+    timingSafeEqual: (a: ArrayBuffer, b: ArrayBuffer) => timingSafeEqual(new Uint8Array(a), new Uint8Array(b)) } });
+  try {
+    const canary = `gqcanary_${original.randomUUID()}`, token = randomBytes(32).toString("hex");
+    state.main = undefined; state.digest = Effect.die(canary); state.request = Effect.die(canary);
+    const handler = await load();
+    const current = { ...env, SUPPORT_OBSERVER_ENABLED: "true", SUPPORT_OBSERVER_STAGE: "staging", SUPPORT_OBSERVER_RELEASE: env.SUPPORT_RELEASE_CANDIDATE,
+      SUPPORT_OBSERVER_READ_TOKEN: token };
+    const result = await Effect.runPromiseExit(handler.fetch.pipe(
+      Effect.provideService(WorkerEnvironment, current),
+      Effect.provideService(WorkerExecutionContext, fromExecutionContext({ waitUntil: () => { throw new Error(canary); } } as unknown as ExecutionContext)),
+      Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(new Request("https://support.invalid/internal/observer/v1/snapshot", { headers: { Authorization: `Bearer ${token}` } }))),
+    ));
+    expect(result._tag).toBe("Success");
+    if (result._tag === "Success") expect(result.value).toMatchObject({ status: 200 });
+    expect(pending).toEqual([]);
+    expect(await state.ledger!.prepare("SELECT COUNT(*) AS n FROM maintenance_operation").first()).toEqual({ n: 0 });
+    expect(await state.ledger!.prepare("SELECT COUNT(*) AS n FROM cron_progress").first()).toEqual({ n: 0 });
+  } finally { vi.unstubAllGlobals(); }
+});
+it("executes readiness before malformed unrelated support configuration", async () => {
+  vi.stubEnv("GITHUB_WEBHOOK_DIAGNOSTICS", `gqcanary_${crypto.randomUUID()}`);
+  state.main = undefined; state.ledger = undefined;
+  const handler = await load();
+  const result = await Effect.runPromiseExit(handler.fetch.pipe(
+    Effect.provideService(WorkerEnvironment, env),
+    Effect.provideService(WorkerExecutionContext, fromExecutionContext({ waitUntil: () => {} } as unknown as ExecutionContext)),
+    Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(new Request("https://support.invalid/internal/observer/v1/readiness"))),
+  ));
+  expect(result._tag).toBe("Success");
+  if (result._tag === "Success") expect(result.value).toMatchObject({ status: 200 });
+});
