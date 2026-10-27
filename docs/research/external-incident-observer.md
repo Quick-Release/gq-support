@@ -1129,3 +1129,14 @@ scheduler, live account/State/settings access, notification, drill or deployment
 added. Minimal next step is parent review of delivery/storage custody and retention,
 then independently attested identity/target evidence before genuine delivery/approval.
 Configured 2026-10-17 runtime remains unproven under 2026-09-16 test runtime.
+
+### Private custody review correction
+
+Independent Standards review found no issues. Spec review found one P2:
+closing an ancestor descriptor could throw before ownership moved to the next
+opened directory, leaking that directory and retrying an ambiguously closed fd.
+Traversal now tracks the new descriptor before closing its predecessor. A new
+real-descriptor regression reproduced the leak, then passed five consecutive
+post-close failures with no leaked descriptors, no ambiguous-close retries and
+no network dispatch. All 339 observer tests, Worker typecheck and affected lint
+pass. This does not prove persistent runner/storage or host-loss durability.

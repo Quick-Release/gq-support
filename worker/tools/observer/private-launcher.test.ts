@@ -195,3 +195,26 @@ it("permanent hash-slot collision blocks a distinct session without deleting eit
   await f.run(); expect(f.github).toHaveBeenCalledTimes(calls);
   expect(fs.readFileSync(join(f.journal, slot))).toEqual(before);
 });
+
+it("tracks each opened directory before predecessor close can fail, without ambiguous-close retry", async () => {
+  const f = setup();
+  const owned = new Set<number>();
+  let retries = 0;
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      let closedOnce = false;
+      const io: CustodyFS = { ...fs,
+        openSync(...args) { const fd = fs.openSync(...args); owned.add(fd); return fd; },
+        closeSync(fd) {
+          if (!owned.delete(fd)) { retries++; throw new Error("ambiguous descriptor retried"); }
+          fs.closeSync(fd);
+          if (!closedOnce) { closedOnce = true; throw new Error("closed predecessor then failed"); }
+        },
+      };
+      expect((await f.run(io)).public.verdict).toBeNull();
+      expect(owned.size).toBe(0);
+    }
+    expect(retries).toBe(0);
+    expect(f.github).not.toHaveBeenCalled(); expect(f.worker).not.toHaveBeenCalled();
+  } finally { for (const fd of owned) fs.closeSync(fd); }
+});

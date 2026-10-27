@@ -29,7 +29,10 @@ function directory(path: string, io: CustodyFS): number {
   try {
     for (const part of path.split("/").slice(1)) {
       const next = io.openSync(fdpath(fd, part), flags.O_RDONLY | flags.O_DIRECTORY | flags.O_NOFOLLOW);
-      io.closeSync(fd); fd = next;
+      // Track the new descriptor before closing the predecessor: close may
+      // throw after releasing it, so cleanup must not retry that ambiguous fd.
+      const predecessor = fd; fd = next;
+      io.closeSync(predecessor);
       const s = io.fstatSync(fd);
       if (!s.isDirectory() || ![0, uid].includes(s.uid) || (s.mode & 0o022) !== 0) refuse();
     }
