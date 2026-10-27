@@ -136,3 +136,23 @@ it("keeps the maximum-width 240-cell valid wire budget below 40 KiB without incr
   expect(decodeObserverSnapshot(wire, generated).ticks).toHaveLength(240);
   expect(new TextEncoder().encode(JSON.stringify(wire)).byteLength).toBeLessThan(40 * 1024);
 });
+it("exposes only finite local alert configuration/control, never provider health or URLs", async () => {
+  cryptoShim(); const stage = await localStage(["ledger"]);
+  try {
+    const config = { ...env, DISCORD_ALERTS_ENABLED: "true", DISCORD_ALERT_RELEASE: candidate,
+      DISCORD_ALERT_WEBHOOK_URL: `https://discord.com/api/webhooks/123456789012345678/${"synthetic_".repeat(8)}` };
+    const read = async (current = config) => await (await observerRequest(req(), current, async () => stage.databases.ledger)).json();
+    expect(await read()).toMatchObject({ route: "ready" });
+    const canary = `gqcanary_${crypto.randomUUID()}`;
+    expect(await read({ ...config, DISCORD_ALERT_WEBHOOK_URL: canary })).toMatchObject({ route: "blocked_unknown" });
+    await stage.databases.ledger.prepare("UPDATE discord_alert_control SET blocked = 1").run();
+    expect(await read()).toMatchObject({ route: "blocked_unknown" });
+    await stage.databases.ledger.prepare("UPDATE discord_alert_control SET blocked = 0, next_at = ?").bind(Date.now() + 60_000).run();
+    expect(await read()).toMatchObject({ route: "rate_limited" });
+    expect(await read({ ...config, DISCORD_ALERTS_ENABLED: "false" })).toMatchObject({ route: "disabled" });
+    const owner = await startProgress(stage.databases.ledger, { stage: "staging", candidate }, 120_000, 120_001);
+    await stage.databases.ledger.prepare("UPDATE cron_progress SET candidate = ? WHERE cell = ?").bind(candidate + "\0" + canary, owner!.cell).run();
+    const malformed = await observerRequest(req(), config, async () => stage.databases.ledger);
+    expect(malformed.status).toBe(503); expect(await malformed.json()).toEqual({ code: "observer_unavailable" });
+  } finally { await stage.dispose(); }
+});

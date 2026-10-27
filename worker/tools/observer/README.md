@@ -20,10 +20,12 @@ refusal, endpoint allowlisting, streaming byte caps and private-host rejection
 are **not implemented or tested**. Byte caps apply to already received byte arrays.
 There are no example live identities, secrets or full fabricated provider replies.
 
-Snapshot/heartbeat JSON is **proposed until a producer exists**. It includes
+The original normalized snapshot fixture contract remains **proposed**. The actual
+version-1 producer wire is now separately adapted, with unknown activation/coverage
+and a specialized 240-cell bound as described below. The normalized fixture includes
 exact finite phases (delivery, cleanup, refresh, sweep, notification drain),
 terminal time only with phase results, storage result and coverage. Maximum ring
-span is 60 minutes, four attempts per minute, 100 rows/response. Failed phases,
+span is 60 minutes, four attempts per minute, 100 rows/normalized fixture response. Failed phases,
 three-minute incomplete starts, missing starts and explicit maintenance exclusions
 remain different evidence. Configured Cron is not input execution proof.
 

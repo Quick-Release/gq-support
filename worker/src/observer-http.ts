@@ -1,3 +1,4 @@
+import { webhookURL } from "./discord-alerts.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { decodeObserverSnapshot, exact, finiteInt, enumValue, release } from "./observer-snapshot.ts";
 
@@ -27,7 +28,7 @@ async function authorized(request: Request, env: Record<string, unknown>): Promi
  * Count + LIMIT rejects excess cells rather than silently truncating them. */
 const sql = `SELECT
  (SELECT CASE WHEN typeof(generation) = 'integer' THEN generation ELSE -1 END FROM maintenance_control WHERE id = 1) AS generation,
- (SELECT substr(mode, 1, 9) FROM maintenance_control WHERE id = 1) AS maintenance,
+ (SELECT CASE WHEN mode IN ('open', 'held', 'recorded', 'verified') THEN mode ELSE '' END FROM maintenance_control WHERE id = 1) AS maintenance,
  (SELECT CASE WHEN typeof(watermark) = 'integer' THEN watermark ELSE -1 END FROM cron_progress_control WHERE id = 1) AS watermark,
  (SELECT CASE WHEN typeof(partial) = 'integer' THEN partial ELSE -1 END FROM cron_progress_control WHERE id = 1) AS partial,
  (SELECT CASE WHEN typeof(blocked) = 'integer' THEN blocked ELSE -1 END FROM discord_alert_control WHERE id = 1) AS blocked,
@@ -41,7 +42,7 @@ const sql = `SELECT
    CASE sweep WHEN 'not_run' THEN 0 WHEN 'ok' THEN 1 WHEN 'failed' THEN 2 WHEN 'timed_out' THEN 3 WHEN 'contained' THEN 4 ELSE -1 END,
    CASE drain WHEN 'not_run' THEN 0 WHEN 'ok' THEN 1 WHEN 'failed' THEN 2 WHEN 'timed_out' THEN 3 WHEN 'contained' THEN 4 ELSE -1 END))
  FROM (SELECT CASE WHEN stage IN ('staging', 'prod') THEN stage ELSE '' END AS stage,
- CASE WHEN length(candidate) = 40 AND candidate NOT GLOB '*[^a-f0-9]*' THEN candidate ELSE '' END AS candidate,
+ CASE WHEN typeof(candidate) = 'text' AND length(CAST(candidate AS BLOB)) = 40 AND candidate NOT GLOB '*[^a-f0-9]*' THEN candidate ELSE '' END AS candidate,
  CASE WHEN typeof(generation) = 'integer' THEN generation ELSE -1 END AS generation,
  CASE WHEN typeof(minute) = 'integer' THEN minute ELSE -1 END AS minute,
  CASE WHEN typeof(attempt) = 'integer' THEN attempt ELSE -1 END AS attempt,
@@ -78,7 +79,7 @@ export async function observerRequest(request: Request, env: Record<string, unkn
         if (!Array.isArray(ticks) || ticks.length !== row.count) throw new Error();
         const generated = Date.now();
         const route = env.DISCORD_ALERTS_ENABLED === "false" || env.DISCORD_ALERTS_ENABLED === undefined ? "disabled" :
-          env.DISCORD_ALERTS_ENABLED !== "true" || env.DISCORD_ALERT_RELEASE !== candidate || typeof env.DISCORD_ALERT_WEBHOOK_URL !== "string" || !env.DISCORD_ALERT_WEBHOOK_URL ? "blocked_unknown" :
+          env.DISCORD_ALERTS_ENABLED !== "true" || env.DISCORD_ALERT_RELEASE !== candidate || !webhookURL(env.DISCORD_ALERT_WEBHOOK_URL) ? "blocked_unknown" :
           blocked ? "blocked_unknown" : next > generated ? "rate_limited" : "ready";
         const dto = decodeObserverSnapshot({ version: 1, generated, stage, candidate, generation: row.generation, maintenance: row.maintenance,
           watermark: row.watermark, partial: !!partial, activation: null, coverage: "unknown", route, ticks }, generated);

@@ -1,7 +1,7 @@
 import { decodeObserverSnapshot, observerOutcomes, terminalOutcomes } from "../../src/observer-snapshot.ts";
-/** Offline only. Bodies below are PROPOSED normalized contracts, not provider API
- * responses. A future adapter must project documented wire envelopes and establish
- * provenance separately. No body field authenticates an account, stage or source. */
+/** Offline only. Original normalized fixture contracts remain proposals. The v1
+ * snapshot branch adapts the actual producer wire; other sources still require
+ * wire/transport adapters. Provenance is independent of all body assertions. */
 export const classes = ["http_unavailable", "worker_errors", "cron_start_missing", "cron_incomplete",
   "workflow_failure", "deployment_drift", "telemetry_unavailable", "alert_route_unavailable"] as const;
 export type Class = typeof classes[number];

@@ -133,6 +133,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
               !metadata.tail_consumers && !metadata.streaming_tail_consumers && Array.isArray(metadata.bindings));
             requireEvidence(checkedObservability(metadata.observability).traces.enabled === false);
             requireEvidence(metadata.bindings.every((binding: { name?: string }) => ![
+              "SUPPORT_OBSERVER_ENABLED", "SUPPORT_OBSERVER_READ_TOKEN", "SUPPORT_OBSERVER_STAGE", "SUPPORT_OBSERVER_RELEASE",
               "DISCORD_ALERTS_ENABLED", "DISCORD_ALERT_WEBHOOK_URL", "DISCORD_ALERT_RELEASE",
               "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_WEBHOOK_PREVIOUS_SECRET",
             ].includes(binding.name ?? "")));

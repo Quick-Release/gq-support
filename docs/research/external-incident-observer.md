@@ -1,6 +1,6 @@
 # External incident observation for MVP #20
 
-Design, offline protocol and internal Cron producer CODE, 2026-10-27. **External
+Design, offline protocol, Cron producer and fixed observer endpoint CODE, 2026-10-27. **External
 observer disabled; no running external observer, sender, scheduler, credentials or live proof supplied.
 #20 and #29 remain open.**
 Recommendation: use GitHub Actions outside the support Worker for bounded HTTP
@@ -9,6 +9,12 @@ missing-work coverage. Keep Discord as the main route. Begin with read-only
 verdicts; enable automated sending only after durable sender custody is proven.
 No new vendor, monitoring platform, privileged proxy or Cloudflare resource is
 needed for that first slice.
+
+The current implemented endpoint contract is [documented below](#fixed-readiness-and-aggregate-wire-snapshot-this-code-slice).
+It adds data-free route/runtime readiness and a disabled-by-default aggregate GET;
+activation and continuous coverage remain unknown. Earlier sections retain the
+design/producer history. This slice uses `t3/observer-progress-snapshot` based on
+PR123 `4f3cffa096f091cda89872b04e5aa6946141c0cb`; source branches are untouched.
 
 ## Evidence boundary
 
@@ -170,12 +176,13 @@ and no action clears support/restore/provider ownership.
 
 ## Bounded contracts and proposed windows
 
-A future CODE slice adds a fixed authenticated aggregate snapshot
+The original design proposed a fixed authenticated aggregate snapshot
 `GET /internal/observer/v1/snapshot` (read-only, no support records) and a data-free
 readiness GET **before** support admission. Readiness may check binding availability
 without listing/creating support data; its success claims only its listed checks.
 Snapshot reads existing stage-local state; no new side-effecting probe or hidden
-GitHub/Discord test. Neither endpoint is implemented by this document.
+GitHub/Discord test. These endpoints are now implemented by the CODE slice below;
+readiness checks only route/runtime execution, and activation/coverage stay unknown.
 
 Record a bounded 60-minute ring of scheduled slots: scheduled UTC minute from the
 controller, attempt ordinal (at most four retained attempts/slot, overflow explicitly partial), actual start time, terminal time and finite
@@ -244,7 +251,8 @@ pins account/stage/candidate/activation/generation and exact workflow expectatio
 response fields cannot authenticate themselves. Public output is at most 2 KiB
 and excludes private identities, topology, raw content and error causes.
 
-Snapshot/readiness wire contracts remain **proposed and unwired**. The internal
+At the offline-only slice, snapshot/readiness wire contracts were **proposed and unwired**;
+the current CODE section below supersedes that status. The internal
 Cron producer CODE below now records local progress; it supplies no external read
 capability or activation/coverage proof.
 Workflow/deployment JSON is explicitly a normalized projection, not a fabricated
@@ -426,7 +434,7 @@ produce `unknown` and the runtime skips progress, while support still runs.
 The binding is release identity, **not** activation proof. Activation time and
 snapshot coverage remain **unknown/unimplemented**.
 
-### Next read-only capability and snapshot contract (unwired)
+### Producer slice follow-up contract (historical; implemented conservatively below)
 
 No endpoint, new secret, external reader, broker resource, workflow, scheduler,
 sender, journal or observer enablement is supplied here. A next slice must

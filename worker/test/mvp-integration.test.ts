@@ -7,7 +7,7 @@ import { planningApplyBroker } from "../deploy/planning-apply-broker.ts";
 import { ACCOUNT } from "../deploy/planning-state.ts";
 import { assertIntegratedCustodyReady, integrationCodeBlockers } from "../deploy/planning-entry.ts";
 
-vi.mock("../deploy/observer-read-secret.ts", async (original) => ({ ...await original<object>(), provisionObserverReadSecret: async () => {} }));
+vi.mock("../deploy/observer-read-secret.ts", async (original) => ({ ...await original<object>(), provisionObserverReadSecret: async () => { calls.push("observer"); } }));
 
 const calls = vi.hoisted(() => [] as string[]);
 vi.mock("../deploy/github-app.ts", async (original) => ({ ...await original<object>(),
@@ -29,7 +29,7 @@ describe("combined App and Discord custody", () => {
     const provider = await Effect.runPromise(GitHubAppSecret.Provider.pipe(Effect.provide(GitHubAppSecretProvider())));
     // Exercise the provider lifecycle, rather than only the standalone helper.
     await Effect.runPromise(provider.reconcile({ news: { stage: "prod", workerName: "synthetic-worker" } } as Parameters<typeof provider.reconcile>[0]));
-    expect(calls).toEqual(["key", "webhook", "discord", "check"]);
+    expect(calls).toEqual(["key", "webhook", "observer", "discord", "check"]);
   });
 
   it("requires explicit Discord custody in injected protected providers", async () => {
@@ -58,7 +58,7 @@ describe("combined App and Discord custody", () => {
     vi.mocked(provisionDiscordAlertSecret).mockRejectedValueOnce(new Error("Discord alert Worker secret update failed"));
     const provider = await Effect.runPromise(GitHubAppSecret.Provider.pipe(Effect.provide(GitHubAppSecretProvider())));
     await expect(Effect.runPromise(provider.reconcile({ news: { stage: "prod", workerName: "synthetic-worker" } } as Parameters<typeof provider.reconcile>[0]))).rejects.toThrow("GitHub App secret provisioning failed");
-    expect(calls).toEqual(["key", "webhook"]);
+    expect(calls).toEqual(["key", "webhook", "observer"]);
   });
 });
 
