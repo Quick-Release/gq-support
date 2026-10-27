@@ -81,6 +81,12 @@ the time it was fixed. These form the audit window.
 
 ## 4. Repair
 
+Append the intended `--stage`, Tipme `--account-id`, `--database-id` and independent
+`--ledger-database-id` to every Operator command below (see the Worker README).
+The CLI now admits ordinary commands through the independent ledger; they are
+blocked during [restore containment](restore-containment.md). Complete exclusive
+replay and explicit release before scheduling ordinary status repair.
+
 If the sweep kept running during the outage (no `Support status sweep is
 behind` alerts, and `status-health` shows each repository's `lastSweptAt`
 advancing), do nothing: the next sweeps repair every status. Wait one sweep

@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { URL } from "node:url";
 import { parseArgs } from "node:util";
-import { runOperator } from "../src/operator.ts";
+import { executeOperator } from "../src/maintenance-operator.ts";
 import { stageMappings } from "../src/repository-mappings.ts";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
+const usage = "Usage: pnpm operator <maintenance-<enter|status|mirror|replay|release>|enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>> [...] --stage <staging|prod> --account-id <id> --database-id <id> --ledger-database-id <id>";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
@@ -19,11 +19,11 @@ try {
   if (stage !== "staging" && stage !== "prod") throw new Error(usage);
   const accountId = values["account-id"], databaseId = values["database-id"], ledgerId = values["ledger-database-id"];
   if (!accountId || !/^[a-f0-9]{32}$/i.test(accountId) || !databaseId || !/^[a-f0-9-]{36}$/i.test(databaseId) ||
-    (ledgerId !== undefined && !/^[a-f0-9-]{36}$/i.test(ledgerId))) throw new Error(usage);
+    (!ledgerId || !/^[a-f0-9-]{36}$/i.test(ledgerId))) throw new Error(usage);
   const config = join(directory, "wrangler.json");
   writeFileSync(config, JSON.stringify({ account_id: accountId, d1_databases: [
     { binding: "SupportDB", database_name: "operator-target", database_id: databaseId },
-    ...(ledgerId ? [{ binding: "SupportLedger", database_name: "operator-ledger", database_id: ledgerId }] : []),
+    { binding: "SupportLedger", database_name: "operator-ledger", database_id: ledgerId },
   ] }), { mode: 0o600 });
   if (positionals[0] === "revoke") lockFd = openSync(lock, "wx", 0o600);
   const d1 = (binding: string) => async (sql: string, parameters: readonly (string | number | null)[]) => {
@@ -44,11 +44,11 @@ try {
     if (results.length !== 1 || results[0].success !== true || !Array.isArray(results[0].results)) throw new Error("Unexpected Cloudflare D1 response");
     return results[0].results;
   };
-  const output = await runOperator(positionals, {
+  const output = await executeOperator(positionals, {
     // Only the target stage's reviewed mappings; the database IDs must belong to the same stage.
     mappings: stageMappings[stage],
     query: d1("SupportDB"),
-    ...(ledgerId ? { ledger: d1("SupportLedger") } : {}),
+    ledger: d1("SupportLedger"),
     recordRevocation: async (keyId, revokedAt) => {
       const log = new URL("../revocations.json", import.meta.url);
       const records: { databaseId: string; keyId: string; revokedAt: number }[] = JSON.parse(readFileSync(log, "utf8"));

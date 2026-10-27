@@ -20,11 +20,14 @@ export interface OperatorOptions {
 
 /** A one-statement-at-a-time D1 view of an Operator query function, for shared store code. */
 export const asQueryDatabase = (query: OperatorOptions["query"]): QueryDatabase => {
-  const prepare = (sql: string) => ({ bind: (...parameters: (string | number)[]) => ({
-    all: async () => ({ results: await query(sql, parameters) }),
-    first: async (column?: string) => { const [row] = await query(sql, parameters); return row ? (column ? row[column] : row) : null; },
-    run: async () => { await query(sql, parameters); return { meta: {} }; },
-  }) });
+  const prepare = (sql: string) => {
+    const bound = (parameters: (string | number)[]) => ({
+      all: async () => ({ results: await query(sql, parameters) }),
+      first: async (column?: string) => { const [row] = await query(sql, parameters); return row ? (column ? row[column] : row) : null; },
+      run: async () => { await query(sql, parameters); return { meta: {} }; },
+    });
+    return { ...bound([]), bind: (...parameters: (string | number)[]) => bound(parameters) };
+  };
   return { prepare, batch: async (statements: { run: () => Promise<unknown> }[]) => {
     const results = [];
     for (const statement of statements) results.push(await statement.run());

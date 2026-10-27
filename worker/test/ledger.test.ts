@@ -7,6 +7,7 @@ import { digestKey, recordErasure, sweepCleanup } from "../src/cleanup.ts";
 import { sweepDelivery } from "../src/delivery.ts";
 import { GitHubGateway } from "../src/github-gateway.ts";
 import { restoreGate } from "../src/ledger.ts";
+import { executeOperator } from "../src/maintenance-operator.ts";
 import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { suspendRepository } from "../src/repository-suspension.ts";
@@ -57,7 +58,7 @@ const cleanup = (db: QueryDatabase = main()) => Effect.runPromise(sweepCleanup({
 const posts = () => github.requests.filter((request) => request.method === "POST" && request.path.endsWith("/issues"));
 const entry = async (kind: string, reference: string) => (await ledger().prepare("SELECT payload FROM ledger_entry WHERE kind = ? AND reference = ?")
   .bind(kind, reference).first<{ payload: string | null }>()) ?? undefined;
-const operator = (...args: string[]) => runOperator(args, {
+const operator = (...args: string[]) => executeOperator(args, {
   query: async (sql, parameters) => (await main().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
   ledger: async (sql, parameters) => (await ledger().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
   recordRevocation: async () => {}, mappings: [mapping], now,
@@ -98,10 +99,13 @@ it("a recorded restore replays erasures and suspensions and makes restored work 
   expect(github.issues[0]!.body).not.toContain("Private report text");
   await Effect.runPromise(suspendRepository(main(), 42, "public", now));
   await cleanup(); // mirrors the suspension
+  await operator("maintenance-enter", "operator-1");
   await restore(main(), image);
   const gate = restoreGate();
   expect(await gate(main(), ledger(), now)).toBe(true); // nothing recorded yet: the ledger cannot tell
   expect(await operator("restore-recorded", "operator-1", "time-travel-restore")).toMatch(/Restore recorded/);
+  expect(await restoreGate()(main(), ledger(), now)).toBe(false);
+  await operator("maintenance-replay", "operator-1");
   expect(await restoreGate()(main(), ledger(), now)).toBe(true);
   for (const id of [delivered, pending]) {
     expect(await main().prepare("SELECT 1 FROM delivery_suppression WHERE scope = 'request' AND reference = ?").bind(id).first()).not.toBeNull();
@@ -135,12 +139,13 @@ it("the mirror never drops an image; compaction records removals, which the ledg
   expect(await entry("cleanup", request)).toBeUndefined();
 });
 
-it("the restore gate fails closed without a recent verdict", async () => {
+it("the restore gate fails closed on ledger loss even immediately after success", async () => {
   const broken = { prepare: () => { throw new Error("ledger unreachable"); }, batch: async () => [] } as unknown as QueryDatabase;
   const gate = restoreGate();
   expect(await gate(main(), broken, now)).toBe(false);
   expect(await gate(main(), ledger(), now)).toBe(true);
-  expect(await gate(main(), broken, now + 61_000)).toBe(true);
+  expect(await gate(main(), broken, now + 1)).toBe(false);
+  expect(await gate(main(), broken, now + 61_000)).toBe(false);
   expect(await gate(main(), broken, now + 601_000)).toBe(false);
 });
 
@@ -179,9 +184,11 @@ it("runtime key revocations survive a restore", async () => {
   for (const revoked of [installation.keyId, replacement.keyId]) {
     expect(JSON.parse((await entry("revocation", revoked))!.payload!)).toMatchObject({ key_id: revoked, revoked_at: now });
   }
+  await operator("maintenance-enter", "operator-1");
   await restore(main(), image);
   expect((await installation.send("GET", "/v1/installation")).status).toBe(200); // the restore revived the old key
   await operator("restore-recorded", "operator-1", "time-travel-restore");
+  await operator("maintenance-replay", "operator-1");
   expect(await restoreGate()(main(), ledger(), now)).toBe(true);
   expect((await installation.send("GET", "/v1/installation")).status).toBe(403);
 });
@@ -219,4 +226,17 @@ it("a claimed cleanup record's lease reaches the ledger, even when its pass dies
   const claimed = await main().prepare("SELECT next_attempt_at FROM support_cleanup WHERE request_id = ?").bind(request).first<number>("next_attempt_at");
   expect(claimed).toBe(now + 60_000);
   expect(JSON.parse((await entry("cleanup", request))!.payload!)).toMatchObject({ state: "reconciling", next_attempt_at: claimed });
+});
+
+it("a warm restore verdict cannot conceal a newly recorded epoch", async () => {
+  const gate = restoreGate();
+  expect(await gate(main(), ledger(), now)).toBe(true);
+  await ledger().prepare("UPDATE ledger_epoch SET epoch = epoch + 1").run();
+  expect(await gate(main(), ledger(), now + 1)).toBe(false);
+  expect(await main().prepare("SELECT epoch FROM restore_state").first("epoch")).toBe(0);
+});
+
+it("a missing ledger epoch cannot silently count as the initial epoch", async () => {
+  await ledger().prepare("DELETE FROM ledger_epoch").run();
+  expect(await restoreGate()(main(), ledger(), now)).toBe(false);
 });
