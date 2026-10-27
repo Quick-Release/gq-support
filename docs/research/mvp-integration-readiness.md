@@ -210,9 +210,9 @@ privacy, incident keys, recovery and deduplication rules.
 Request finalization registers independent persistence through the existing
 execution context without awaiting I/O, including on failure/cancellation.
 Registration failure cannot change an accepted response. Background/Cron exit
-persistence has a separate two-second cooperative bound and stops dispatching
-further writes on cancellation. Already dispatched D1 writes may finish only
-against finite alert state. These local writes no longer acquire a support
+persistence has a separate two-second cooperative bound and stops starting
+further event observations on cancellation. An already-started observation
+(at most two D1 statements) may finish only against finite alert state. These local writes no longer acquire a support
 runtime admission or read SupportDB: an alert-store failure cannot strand a
 support recovery obstruction. Support work, uncertain provider ownership and
 Discord transport retain their original containment/admission checks. Phase
@@ -231,8 +231,55 @@ failures and route health; operator receipt remains separate from HTTP 200.
 No external monitor, live routing, acknowledgment or escalation ownership is
 implemented or claimed by this slice.
 
-Validation for this follow-up is recorded below after final checks. Inherited
-PR119 evidence above is not new proof for these runtime changes.
+### Runtime follow-up validation
+
+New execution evidence on Node **26.12.1** (not inherited PR119 results):
+
+- RED: temporarily restore only `worker/src/worker.ts` from pinned PR119, run
+  `pnpm --filter gq-support-worker test --maxWorkers=1 test/worker-runtime-alerts.test.ts`:
+  **3 failed**, each missing the expected outer tick/delivery/request alert row.
+  Restore the implementation before further checks. The tests use the actual
+  Worker registration/handlers with registration/setup doubles, real collectors,
+  local workerd D1 and fake transport; they do not provision or invoke live services.
+- Focused final command:
+  `pnpm --filter gq-support-worker test --maxWorkers=1 test/runtime-alerts.test.ts test/worker-runtime-alerts.test.ts test/scheduled-alerts.test.ts test/discord-alerts.test.ts test/maintenance.test.ts test/github-webhooks.test.ts test/lifecycle-webhooks.test.ts test/status-webhooks.test.ts`:
+  **173 tests / 8 files passed**. Includes cooperative timeout finalization,
+  original cause/response preservation, the unexpected application 503 boundary,
+  disabled mode, absence of private payload values, duplicate prevention,
+  maintenance denial, retained support ownership, hung persistence and absent raw
+  bindings. The real four scheduled deadlines are exercised with Effect TestClock;
+  support work/finalizer order is asserted, not inferred from timeout log strings.
+- `pnpm --filter gq-support-worker test --maxWorkers=1 test/retained-provider-continuation.test.ts -t 'applies enabled='`:
+  **4 passed / 40 excluded**, after staging the new tracked source.
+- Final complete run on committed, unchanged Worker source `2f08d19`:
+  `pnpm --filter gq-support-worker test --maxWorkers=1`:
+  **1,263 tests / 51 files passed**, **693.30 seconds**. This full run is justified
+  by the shared persistence, HTTP adapter and scheduled deadline changes.
+- `pnpm --filter gq-support-worker typecheck`,
+  `pnpm --filter gq-support-worker lint`, `pnpm lint:js` and `pnpm test:lint`
+  passed (the latter: **3** lint controls).
+- `pnpm test:ci`: **114 passed**;
+  `node scripts/ci/workflow-policy.mjs` and
+  `node scripts/ci/runtime-matrix.mjs policy` passed.
+- `scripts/ci/gitleaks.sh dir worker`, `scripts/ci/gitleaks.sh dir docs`,
+  `scripts/ci/gitleaks.sh git . --log-opts=HEAD`, and whole-slice
+  `git diff 674a5994cf8a43e2a80c19c43d659cab0cf02ad3..HEAD --check` passed.
+  Final documentation-only evidence is scanned again before publication.
+
+An initial full run was interrupted for the absent-binding correction. Before
+interruption it reported **18** native fixture failures: the newly imported
+helper was untracked and excluded from the fixture's tracked-source manifest.
+Staging/committing the final source resolved the four retained native happy paths;
+the complete final run above passes all native cases. The interrupted run is not
+passing evidence. No browser/PHP/DDEV, deployment, credential/profile access,
+notification, hosted CI polling/watch or merge was performed. Publication uses
+`GQ_SUPPORT_SKIP_PRE_PUSH=1` to skip the optional shared-DDEV hook.
+
+Rollback caveat: older code does not recognize the newly persisted
+`request_handler_failed` class and can latch the existing notification route
+closed on encountering it. Alert state needs review under existing controls;
+this is not permission to release support/provider ownership or reopen a route.
+Inherited PR119 evidence above is not new proof for these runtime changes.
 
 ## Remaining CODE and LIVE gates
 

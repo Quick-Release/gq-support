@@ -49,9 +49,9 @@ do not change an accepted report or create a delivery receipt. Persistence is
 best effort: an interrupted wake-up can lose a one-shot notification; recurring
 existing producers may recover it. No durable intake/notification atomicity is
 claimed. Persistence has a separate two-second cooperative bound, even in exit
-finalization; cancellation stops further collector writes. An already dispatched
-D1 write cannot be cancelled and may finish later, only in independent finite
-alert state. No support work is resumed and no support admission is released by
+finalization; cancellation stops starting further event observations. An already
+started observation (at most two D1 statements) may finish later, only in
+independent finite alert state. No support work is resumed and no support admission is released by
 this finalizer. The Cron retains delivery → cleanup → refresh → sweep → persistence
 → drain ordering. Nominal phase deadlines total 57 seconds, persistence may add
 two, and the drain retains one two-second HTTP timeout. These are cooperative
@@ -103,6 +103,15 @@ with #109 without removing any of its gates. No CI Discord sender or alternative
 provider is added. External observation of deployment failure, receiver 5xx,
 missing Cron and route failure remains an explicit readiness gap. Cron cannot
 prove its own absence. No per-page or self-monitoring call closes that gap.
+
+The CODE follow-up's final offline validation passed **1,263 Worker tests / 51
+files** on Node 26.12.1 with `--maxWorkers=1`. Commands, RED wrapper evidence,
+interrupted-run limitations and the still-external integration frontier are in
+[the integration readiness report](../research/mvp-integration-readiness.md#bounded-outer-runtime-observation-follow-up-code-only).
+This does not establish LIVE settings, delivery or Operator receipt. On rollback,
+older code rejects the new `request_handler_failed` class and may latch the
+notification route closed; review alert state under existing controls rather
+than clearing support/provider owners or inventing a reopening path.
 
 ## Proposed bounded incident policy
 
