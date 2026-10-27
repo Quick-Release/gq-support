@@ -75,7 +75,20 @@ async function nativePlan(options: { omit?: string; unretained?: string; props?:
   ));
 }
 
-afterEach(() => vi.restoreAllMocks());
+const migrationScratch: string[] = [];
+async function migrationPlan() {
+  const dir = mkdtempSync(join(tmpdir(), "native-plan-fixture-")); migrationScratch.push(dir);
+  const sql = "CREATE TABLE extra_fixture (id INTEGER PRIMARY KEY);";
+  writeFileSync(join(dir, "0001_extra.sql"), sql);
+  const initial = rows();
+  initial.SupportDB.props.migrations = dir;
+  Object.assign(initial.SupportDB.attr, { migrationsDir: dir, migrationsTable: "__alchemy_migrations" });
+  const native = await nativePlan({ initial, changed: "SupportDB", props: { migrations: dir } });
+  const policy = { ...evidence(), migrationHashes: { SupportDB: { "0001_extra.sql": createHash("sha256").update(sql).digest("hex") }, SupportLedger: {} },
+    migrationFiles: { SupportDB: { dir, files: { "0001_extra.sql": sql } } } };
+  return { native, policy };
+}
+afterEach(() => { vi.restoreAllMocks(); for (const dir of migrationScratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 describe("complete immutable acquisition", () => {
   it("has no invented production endpoint attestation", () => expect(productionEndpointContract).toBeUndefined());
   it("captures outputs and every listed row; rejects writes and cross-project references", async () => {
@@ -112,10 +125,10 @@ describe("installed native engine and live D1 provider diffs", () => {
     expect(plan.resources.SupportDB.action).toBe("noop");
     expect(() => validateNativePlan(plan, evidence())).not.toThrow();
   });
-  it("accepts a genuine additive provider update without changing identities", async () => {
+  it("rejects a genuine replication provider update without migrations", async () => {
     const plan = await nativePlan({ changed: "SupportDB", props: { readReplication: { mode: "auto" } } });
     expect(plan.resources.SupportDB.action).toBe("update");
-    expect(() => validateNativePlan(plan, evidence())).not.toThrow();
+    expect(() => validateNativePlan(plan, evidence())).toThrow("apply blocked");
   });
   for (const fqn of ["SupportDB", "SupportLedger"]) {
     it(`rejects removing desired retention from a native no-op ${fqn}`, async () => {
@@ -186,7 +199,7 @@ describe("native HTTP acquisition confinement", () => {
 describe("same native plan capability handoff (simulated apply only)", () => {
   const binding: CandidateBinding = { source: "source", lockfiles: "locks", migrations: "migrations", target: "target", state: "state", window: "window", candidate: "candidate" };
   async function candidate() {
-    const native = await nativePlan({ changed: "SupportDB", props: { readReplication: { mode: "auto" } } });
+    const { native, policy } = await migrationPlan();
     const writer = await source();
     const readonly = await Effect.runPromise(acquireSnapshot(writer, target));
     const stack: StackSpec = { name: STACK, stage: "prod", resources: {}, actions: {}, bindings: {}, output: {} };
@@ -202,7 +215,7 @@ describe("same native plan capability handoff (simulated apply only)", () => {
     // Only apply's provider is simulated. Planning above used installed live D1 diff.
     native.resources.SupportDB.provider = { ...native.resources.SupportDB.provider, reconcile };
     const snapshot = { native, stack: { name: STACK, stage: "prod" }, session: { context } };
-    return { snapshot, writer, reconcile, retained: retainCandidate(snapshot, evidence(), binding) };
+    return { snapshot, writer, reconcile, retained: retainCandidate(snapshot, policy, binding) };
   }
   it("uses the exact engine object with original context and explicit State replacement once", async () => {
     const { writer, reconcile, retained } = await candidate();
@@ -226,19 +239,9 @@ describe("same native plan capability handoff (simulated apply only)", () => {
 
 describe("forward-only migration fixtures using installed D1 diff", () => {
   it("accepts a real additive migration directory while preserving both identities", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "native-plan-fixture-"));
-    const sql = "CREATE TABLE extra_fixture (id INTEGER PRIMARY KEY);";
-    try {
-      writeFileSync(join(dir, "001_extra.sql"), sql);
-      const initial = rows();
-      initial.SupportDB.attr.migrationsDir = dir;
-      initial.SupportDB.attr.migrationsTable = "__alchemy_migrations";
-      const plan = await nativePlan({ initial, changed: "SupportDB", props: { migrations: dir } });
-      expect(plan.resources.SupportDB.action).toBe("update");
-      const policy = { ...evidence(), migrationHashes: { SupportDB: { "001_extra.sql": createHash("sha256").update(sql).digest("hex") }, SupportLedger: {} },
-        migrationFiles: { SupportDB: { dir, files: { "001_extra.sql": sql } } } };
-      expect(() => validateNativePlan(plan, policy)).not.toThrow();
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const { native, policy } = await migrationPlan();
+    expect(native.resources.SupportDB.action).toBe("update");
+    expect(() => validateNativePlan(native, policy)).not.toThrow();
   });
   it.each(["DROP TABLE reports;", "DELETE FROM reports;", "ALTER TABLE reports DROP COLUMN text;", "PRAGMA writable_schema=ON;", "CREATE TABLE x AS SELECT * FROM reports;"])("rejects destructive/unknown SQL %s", (sql) => {
     expect(() => validateAdditiveSql(sql)).toThrow();
@@ -276,11 +279,11 @@ describe("transport and candidate tamper boundaries", () => {
     expect(transport).not.toHaveBeenCalled();
   });
   it("rejects native plan mutation even when the replacement props would pass policy", async () => {
-    const native = await nativePlan({ changed: "SupportDB", props: { readReplication: { mode: "auto" } } });
+    const { native, policy } = await migrationPlan();
     const writer = await source();
     const stack: StackSpec = { name: STACK, stage: "prod", resources: {}, bindings: {}, actions: {}, output: {} };
     const context = Context.make(State, Effect.succeed(writer)).pipe(Context.add(Stack, stack), Context.add(Stage, "prod"));
-    const retained = retainCandidate({ native, stack: { name: STACK, stage: "prod" }, session: { context } }, evidence(), {
+    const retained = retainCandidate({ native, stack: { name: STACK, stage: "prod" }, session: { context } }, policy, {
       source: "s", lockfiles: "l", migrations: "m", target: "t", state: "s", window: "w", candidate: "c",
     });
     const node = native.resources.SupportDB;

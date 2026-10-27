@@ -106,6 +106,13 @@ describe.each(["prod", "staging"] as const)("%s retained offline native candidat
     await expect(continueProtectedPlan(config)).rejects.toThrow("apply blocked");
     expect(published).toBe(false); expect(calls).toEqual([]); expect(state).toEqual([]); expect(app.provisionKey).not.toHaveBeenCalled();
   }, 90_000);
+  it.each(["old", "adopting"])("rejects even undefined %s recovery metadata before wire encoding", async (key) => {
+    const { config, calls, state } = fixture(stage);
+    const rows = config.input.rows as Record<string, Record<string, Record<string, Record<string, unknown>>>>;
+    rows.GQSupportWorker[stage].SupportLedger[key] = undefined;
+    await expect(continueProtectedPlan(config)).rejects.toThrow("apply blocked");
+    expect(calls).toEqual([]); expect(state).toEqual([]);
+  });
   it("cancels retained scope without authorizing providers", async () => {
     const { config, controller, calls } = fixture(stage); config.publish = () => controller.abort();
     await expect(continueProtectedPlan(config)).rejects.toThrow("apply blocked"); expect(calls).toEqual([]);

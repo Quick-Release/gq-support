@@ -65,7 +65,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       const cancel = () => controller.abort();
       process.once("SIGTERM", cancel); process.once("SIGINT", cancel);
       try {
-        return await continueProtectedPlan({ repo, sourceManifest, input: { ...initial, target: config.endpoint.target, databases: config.endpoint.databases }, app, policy: approval,
+        return await window.runApply(() => continueProtectedPlan({ repo, sourceManifest, input: { ...initial, target: config.endpoint.target, databases: config.endpoint.databases }, app, policy: approval,
           githubToken, github: transport, evidence, signal: controller.signal, checkWindow: window.check,
           broker: { stage, worker: config.worker, stateOrigin: config.endpoint.origin, databases: config.endpoint.databases },
           custody: { cloudflareToken: deploymentToken, stateBearer, cloudflare: transport, state: transport },
@@ -82,7 +82,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
             requireEvidence(Buffer.byteLength(summary) <= 2048);
             process.stdout.write(summary + "\n");
           },
-        });
+        }));
       } finally { process.removeListener("SIGTERM", cancel); process.removeListener("SIGINT", cancel); }
     } finally { window.close(); }
   } catch { throw refusal(); }
