@@ -329,9 +329,153 @@ The library retains the existing verifier's explicit 2022-11-28 API version.
 Run the isolated suite and original eight negative controls above, plus
 `node worker/tools/observer/review-negative-controls.mjs`. Two additional broken
 copies must fail real assertions for missing verification and stale dispatch authority.
-Remaining CODE: private delivery/independent target attestation, durable replay and
-unresolved journal, continuous storage witness, other provider adapters, scheduler
-and sender. Remaining LIVE: genuine records, identities, custody/permissions, runner
+Remaining CODE after #127 alone: private delivery/replay custody (implemented by
+the bounded wrapper below under explicit assumptions), independent target
+attestation, notification uncertainty journal, continuous storage witness, other
+provider adapters, scheduler and sender. Remaining LIVE: genuine records, identities, custody/permissions, runner
 and external evidence, Test F/drills/receipt/human acknowledgment. Remaining POLICY:
 parent fallback decision. #20/#29 remain open; nothing enables production. Configured
 2026-10-17 runtime is still unproven under test date 2026-09-16.
+
+### Bounded private launcher delivery and read replay custody (stacked on #127)
+
+`private-launcher.ts` now composes `observePrivateFiles` → actual #127 authenticated
+review loader → actual #126 transport. It is an importable trusted launcher library
+only. No CLI, workflow, scheduler, notification, target discovery or source-store
+integration is installed. The preceding statement that replay is process-local
+continues to describe `createObserverReadSession` alone; this wrapper adds local
+filesystem claims under the assumptions below. The supplied Standards0/Spec0 review
+of #127 is context, not this change's independent review or LIVE evidence.
+
+The parent supplies two absolute, canonical directory paths explicitly in memory,
+never via env/gh/Cloudflare profiles/cache discovery. The launcher needs Linux,
+`/proc/self/fd`, effective process UID custody, ordinary no-follow/exclusive-open
+semantics and working directory fsync. Each path is traversed with real directory
+file descriptors and `O_DIRECTORY|O_NOFOLLOW`; every ancestor must be root-owned or
+launcher-UID-owned and have no group/other write permission. The real/effective UID must agree, and delivery/journal must be distinct directory inodes. Each final directory
+must be launcher-UID-owned with exactly 0700 (no special bits). Symlink components,
+relative/dot/repeated/trailing-slash paths and world-writable ancestors (including
+ordinary `/tmp` and `/dev/shm`) are refused. The trusted parent chooses a protected
+mount/path; this slice neither creates nor selects a production storage domain.
+
+The parent must keep delivery and journal outside this public checkout and public artifacts. The one-shot delivery directory contains two deliberately supplied files:
+
+| Name | Exact content | Maximum bytes |
+| --- | --- | --- |
+| `manifest.json` | Exact private #127 UTF-8 JSON manifest described above | 32768 |
+| `credentials.json` | UTF-8 JSON with exactly `schema: 1`, `githubToken: string` (1–4096 printable ASCII characters), `snapshotToken: null` or dedicated stage 64-lowercase-hex string | 8192 |
+
+Both must be nonempty regular files, UID-owned, mode exactly 0400, link count 1,
+with no symlink. The adapter opens with `O_NOFOLLOW|O_NONBLOCK`, reads at most the
+size bound plus one, checks descriptor metadata again (device/inode, size,
+ctime/mtime, owner/mode/link count), and copies bytes synchronously before any
+await. It closes the consumed descriptors before parsing or awaiting; deletion does not promise secure physical erasure. It attempts to unlink both fixed names even if opening/validating/reading
+one fails. An unsafe directory is never traversed to remove files. A directory at
+a file name cannot be unlinked: that invocation fails, and the operator must retain
+custody of the rejected delivery. No retries or recursive cleanup are offered.
+
+After consumption, the independently supplied valid session pins are claimed,
+the delivery directory is fsynced, and only then are credentials/manifest decoded
+and authenticated. Invalid UTF-8, BOM, JSON, extra keys, altered manifest digest,
+operation pins, credential/auth/read failure all leave a claim spent. Wrong trusted
+path/configuration or failure *before exclusive claim creation* may make recording
+impossible: there is no dispatch or claim guarantee in that case, and no automatic
+retry. Ambiguous storage outcomes require the parent to stop and preserve storage.
+
+The public approval remains **only** `approve-observer-read sha256:<MANIFEST digest>`.
+The manifest contains no credentials or credential hashes. Credentials have their
+own file and never enter the digest approval, journal, returned state, arguments,
+provider/RPC/child, logs, public errors or artifacts. The launcher alone holds them
+in memory and passes them only through the existing fixed GitHub GET authentication
+and #126 snapshot Authorization paths. Injected HTTP must be a trusted fetch without
+ambient auth, proxy, tracing or request logging. The only publishable value is
+`result.public`; #122 state remains private in-memory carry. JavaScript strings and
+buffers cannot promise zeroization. Swap/core dumps, debugger access, backup copies,
+privileged UID/root/kernel attacks and malicious trusted owner mutation are outside
+this boundary. Descriptor checks detect ordinary unsafe files, not hostile root.
+
+A tool-delivered secret file is **not assumed** to satisfy these rules or the
+existing deployment's `/dev/shm/gq-protected/...` 0400 layout. The parent alone calls
+`request_secret` when genuine delivery is needed. If its delivered mode/path is
+incompatible, a trusted owner-only transfer process must first pin and validate the
+explicit source descriptor, copy bounded bytes without printing them into exclusive
+0400 destination files in a protected 0700 delivery directory, and consume the
+source under its actual tool custody rules. No shell interpolation, chat echo,
+public repository copy, or mode relaxation in this loader is acceptable. That
+transfer and its tool-specific source/ancestor guarantees remain parent work;
+this change implements consumption of the final exact format, not a tool adapter.
+
+The separate journal is a caller-supplied **persistent local filesystem** directory.
+It is never the delivery tmpfs, an Actions cache, artifact or concurrency group.
+The filesystem type filter accepts Linux ext4, XFS, Btrfs and overlayfs only;
+this is a refusal filter, not proof of persistent backing or fsync correctness.
+Overlayfs in offline tests is CODE evidence only. The parent must independently
+prove the actual mount/backing filesystem, durable file **and directory** fsync,
+exclusive storage domain shared by every permitted launcher, custody over lifetime,
+restart/host-loss behavior and backup/rollback integrity. Code cannot establish
+runner-loss durability or all-runner exclusion. Hosted `ubuntu-latest` is ephemeral;
+no persistent runner is selected, registered or proven here. No caller boolean can
+supply that proof or enable this library.
+
+Each session maps to the first byte of SHA-256 of its private 64-hex `session` ID,
+as a two-hex-digit filename: **256 permanent slots maximum**. The claim uses
+`O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600, then bounded complete writes, descriptor
+validation, file fsync and directory fsync, all before **any GitHub or Worker**
+network dispatch. A concurrent process cannot create the same slot; collisions
+between different sessions also block safely. Before reserving, the adapter scans
+at most 256 entries with bounded reads and refuses any unexpected name, unsafe
+file, partial/invalid record, unsupported filesystem or full journal. Concurrent
+partial records may conservatively block unrelated sessions too. Blocking local
+filesystem calls cannot be cancelled or deadline-bounded by a JS timer.
+
+Each private entry is ≤2048 bytes, exact JSON keys `schema:1`,
+`purpose:"observer_reads"`, `stage`, `candidate`, `session`, `nonce`, `readyAt`,
+`expiresAt`, `sha256`, `status:"spent"`. These are the finite independently sealed
+#127 identity/digest/timing pins, not a raw manifest, URL, credential, token hash or
+HTTP response. Status deliberately never changes: success, auth failure, read
+failure, process crash and ambiguous storage completion all remain spent. A changed
+nonce/digest/stage/candidate cannot reopen an existing session slot. Expiry never
+permits reassignment. Journal metadata is private and never a public artifact.
+
+No delete, force-clear, stale-lock stealing, automatic retry or compaction exists.
+Maximum record payload is 256 × 2048 bytes plus bounded names/filesystem metadata;
+collisions can block well before capacity. A crash before file fsync may leave a
+partial/empty claim, which blocks the journal; after file/directory fsync the spent
+claim blocks restarted use. These statements assume the actual filesystem contract;
+local process tests do not prove power-loss recovery. A crash before exclusive
+creation cannot record a claim, but cannot dispatch either. Storage damage/rollback
+must never be interpreted as permission to recreate a missing claim.
+
+Safe retention/compaction needs a separately reviewed external frontier proving
+that all related sessions/approvals/deliveries/launchers are permanently retired,
+with reconciled ambiguous claims and rollback-safe exclusion. No such policy is
+selected here. At collision, corruption or exhaustion, stop; preserve unreconciled
+claims and obtain parent review. A fresh empty directory, renamed storage or backup
+restore is not an automatic escape from the blocked state.
+
+This is **read-session replay custody**, not an alert-send journal. No Discord
+notification is sent, and no support/provider/restore owner is released. Provider
+uncertainty, notification dispatch/receipt deduplication, continuous evidence carry,
+recovery and restore safety require separate reviewed semantics. Genuine approval,
+source-reviewed numeric vvaz OR gmarques identity, independent target/activation
+attestation and fresh exact-record revalidation remain mandatory; manifest approval
+cannot prove Cloudflare ownership, activation or continuous progress writes.
+#125 pre-validation review consumption, #126 deadline stream disposal and #122
+failure carry remain unchanged. Actual-wire continuity, health and incident recovery
+remain unknown. Configured 2026-10-17 runtime remains unproven under the existing
+2026-09-16 test runtime; #20/#29, receipt/human acknowledgment and parent fallback
+policy remain open/unverified. No production enablement.
+
+Minimal practical next step: parent reviews this exact schema and bounded retention
+choice, supplies independently reviewed identity/target evidence and demonstrates
+protected persistent storage custody offline before arranging genuine private file
+transfer and a fresh digest-only approval. No source store/vendor or runner is
+configured by this PR. Genuine delivery, target attestation and host-loss proof are
+still required LIVE work, not caller flags.
+
+Run `pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts`
+under Node 26.12.1 with maxWorkers 1, plus all ten negative controls above. The
+new suite exercises actual file reads/unlinks/exclusive claims/fsync and independent
+child processes contending/restarting in ephemeral home-directory test storage;
+real fs operation seams inject open/write/fsync and descriptor-metadata failures
+without requiring privileged chown or a host crash. Only fake HTTP is injected.
