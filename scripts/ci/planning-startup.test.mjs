@@ -55,3 +55,12 @@ test('CI runs diagnostic before mandatory Worker tests on the same runner, even 
   assert.match(worker, /runs-on: blacksmith-4vcpu-ubuntu-2404/);
   assert.match(worker, /name: Diagnose offline planner startup\n\s+continue-on-error: true\n\s+run: node scripts\/planning-startup-diagnostic.mjs\n\s+- run: pnpm test/);
 });
+
+test('Worker CI installs required namespace tooling before diagnostic and tests', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const worker = workflow.split('\n  worker:\n')[1].split('\n  size:\n')[0];
+  const install = worker.indexOf('sudo apt-get install --yes --no-install-recommends bubblewrap');
+  assert.ok(install >= 0, 'the hosted runner must provision the required /usr/bin/bwrap');
+  assert.ok(install < worker.indexOf('run: node scripts/planning-startup-diagnostic.mjs'));
+  assert.ok(install < worker.indexOf('run: pnpm test'));
+});
