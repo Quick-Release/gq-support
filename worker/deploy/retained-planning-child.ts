@@ -4,6 +4,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { encodeState } from "alchemy/State/StateEncoding";
 import type { StateService } from "alchemy/State/State";
+import { d1MigrationGrant, migrationSummary } from "./d1-migration-profile.ts";
 import { digest } from "./planner-evidence.ts";
 import { validateCopiedSource, type SourceManifest } from "./planning-source.ts";
 import { planOffline, type OfflinePlanInput } from "./confined-planning-child.ts";
@@ -43,10 +44,16 @@ async function main() {
       return await channel.request({ op: "app-check", worker, metadata }) as { appId: number; checkedAt: string };
     },
   }, retain: async (native, context, evidence, snapshot, resources, bundle, checkBundle) => {
-    const binding = { ...input.binding, candidate: digest({ seed: input.binding.candidate, bundle }) };
+    const migrations = migrationSummary(evidence.databases.flatMap((identity) => {
+      const node = native.resources[identity.fqn];
+      if (node.action !== "update") return [];
+      const grant = d1MigrationGrant(identity, node.state!, evidence.migrationFiles![identity.fqn].files);
+      requireEvidence(grant); return [grant];
+    }));
+    const binding = { ...input.binding, candidate: digest({ seed: input.binding.candidate, bundle, migrations }) };
     const retained = retainCandidate({ native, stack: { name: STACK, stage: input.target.stage }, session: { context } }, evidence, binding);
     // Only the approved bounded evidence/summary crosses this public event.
-    await channel.send({ event: "ready", binding, nonce: input.nonce, resources, bundle });
+    await channel.send({ event: "ready", binding, nonce: input.nonce, resources, bundle, migrations });
     const authorized = await channel.request({ op: "authorize" });
     requireEvidence(JSON.stringify(authorized) === JSON.stringify(binding));
     await checkBundle(); // before opening the phase gate or the first State checkpoint

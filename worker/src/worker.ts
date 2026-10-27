@@ -1,3 +1,4 @@
+import * as Output from "alchemy/Output";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Effect from "effect/Effect";
@@ -26,11 +27,15 @@ let titleDigestKey: Promise<CryptoKey | null> | undefined;
 // Per isolate: nothing serves or sweeps until a recorded restore has been replayed (src/ledger.ts).
 const restored = restoreGate();
 
-export default Cloudflare.Worker(
+export default Effect.gen(function* () {
+  // Stable IDs may resolve before migrations finish. Depend on whole D1
+  // results so application updates cannot race schema additions.
+  const databasesReady = Output.all(Output.of(yield* SupportDB), Output.of(yield* SupportLedger));
+  return yield* Cloudflare.Worker(
   "Worker",
   {
     main: import.meta.url,
-    workersDev: { enabled: true, previewsEnabled: false },
+    workersDev: Output.map(databasesReady, () => ({ enabled: true, previewsEnabled: false })),
     compatibility: { date: "2026-10-17" },
     observability: { enabled: true, traces: { enabled: true } },
   },
@@ -127,3 +132,4 @@ export default Cloudflare.Worker(
     };
   }).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive), Effect.provide(Cloudflare.D1.QueryDatabaseBinding)),
 );
+});

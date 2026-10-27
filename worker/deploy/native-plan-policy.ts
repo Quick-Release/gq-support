@@ -1,3 +1,6 @@
+import { d1MigrationGrant } from "./d1-migration-profile.ts";
+import { validateAdditiveSql } from "./additive-sql.ts";
+export { validateAdditiveSql } from "./additive-sql.ts";
 import { createHash } from "node:crypto";
 import type { Plan } from "alchemy/Plan";
 import type { ResourceState } from "alchemy/State/ResourceState";
@@ -59,6 +62,12 @@ function checkNativePlan(plan: Plan, evidence: PlanEvidence): void {
     requireEvidence(desired && desired.jurisdiction === "eu" &&
       (desired.name === undefined || desired.name === identity.databaseName) &&
       !desired.clone && !desired.importFiles);
+    // Only migration additions justify an update. No unrelated property changes,
+    // imports, replication or physical-location drift ride along with that action.
+    requireEvidence(Object.keys(desired).every((key) => ["jurisdiction", "name", "migrations", "primaryLocationHint", "readReplication"].includes(key)) &&
+      ["name", "primaryLocationHint", "readReplication", "migrations"].every((key) => JSON.stringify(desired[key]) === JSON.stringify(state.props?.[key])) &&
+      Object.keys(state.attr?.importHashes ?? {}).length === 0 &&
+      JSON.stringify(state.attr?.readReplication) === JSON.stringify(desired.readReplication));
     const committed = state.attr?.migrationsHashes;
     requireEvidence(committed && typeof committed === "object" && !Array.isArray(committed));
     const current = evidence.migrationHashes[fqn];
@@ -79,6 +88,11 @@ function checkNativePlan(plan: Plan, evidence: PlanEvidence): void {
       requireEvidence(Object.keys(current ?? {}).length === 0);
     }
     requireEvidence(current);
+    const ordered = Object.keys(current).sort((a, b) => Number(a.split("_")[0]) - Number(b.split("_")[0]) || a.localeCompare(b));
+    const pending = ordered.filter((name) => !(name in committed));
+    requireEvidence(node.action === "noop" ? pending.length === 0 : pending.length > 0 && pending.length <= 4);
+    requireEvidence(ordered.slice(0, Object.keys(committed).length).every((name) => name in committed));
+    if (node.action === "update") requireEvidence(files && d1MigrationGrant(identity, state, files.files));
     for (const [file, hash] of Object.entries(committed)) {
       requireEvidence(typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash) && current[file] === hash);
     }
@@ -86,22 +100,4 @@ function checkNativePlan(plan: Plan, evidence: PlanEvidence): void {
   // D1 rows at any other FQN (including retained previous names) are forbidden.
   requireEvidence(Object.entries(plan.resources).every(([fqn, node]) =>
     node.resource.Type !== "Cloudflare.D1Database" || fqn === "SupportDB" || fqn === "SupportLedger"));
-}
-
-// Deliberately narrow additive subset. This is not a general SQL parser; new
-// migration forms need review rather than broadening a denylist at runtime.
-export function validateAdditiveSql(sql: string) {
-  requireEvidence(typeof sql === "string");
-  const clean = sql.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
-  requireEvidence(!/['"`[\]]/.test(clean));
-  const statements = clean.split(";").map((s) => s.trim()).filter(Boolean);
-  requireEvidence(statements.length > 0);
-  for (const statement of statements) {
-    requireEvidence(!/\b(drop|delete|update|insert|replace|select|pragma|attach|detach|vacuum|trigger|rename|begin|commit|rollback)\b/i.test(statement));
-    requireEvidence(
-      /^CREATE TABLE (?:IF NOT EXISTS )?[A-Za-z_][A-Za-z0-9_]*\s*\([\s\S]+\)$/i.test(statement) ||
-      /^CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?[A-Za-z_][A-Za-z0-9_]* ON [A-Za-z_][A-Za-z0-9_]*\s*\([A-Za-z0-9_, ]+\)$/i.test(statement) ||
-      /^ALTER TABLE [A-Za-z_][A-Za-z0-9_]* ADD COLUMN [A-Za-z_][A-Za-z0-9_]* (?:TEXT|INTEGER|REAL|BLOB|NUMERIC)(?: NOT NULL)?(?: DEFAULT (?:NULL|[0-9]+))?$/i.test(statement),
-    );
-  }
 }

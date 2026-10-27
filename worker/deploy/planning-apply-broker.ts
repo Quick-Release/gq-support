@@ -1,5 +1,6 @@
 // Trusted, per-session first-party broker. No generic URL forwarding, state
 // bearer, response headers, error bodies or credential enters the graph.
+import { d1MigrationSession, type D1MigrationGrant } from "./d1-migration-profile.ts";
 import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -13,6 +14,7 @@ import { checkChannelFrame, type BrokerOperation } from "./retained-child-channe
 import type { AppSecretCustody } from "./github-app-secret.ts";
 
 export interface ApplyBrokerConfig {
+  readonly migrations?: readonly D1MigrationGrant[];
   readonly stage: ProtectedStage;
   readonly instances: Readonly<Record<"Worker" | "GitHubAppSecret", string>>;
   readonly bundle: string;
@@ -39,21 +41,27 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
     requireEvidence(value && typeof value === "object" && Object.keys(value).sort().join() === "appId,clientId,fingerprint,slug,stage");
     return (Object.keys(config.app) as (keyof typeof config.app)[]).every((key) => value[key as keyof typeof value] === config.app[key]);
   };
+  const migrations = (config.migrations ?? []).map((grant) => {
+    requireEvidence(config.databases.some((db) => JSON.stringify(db) === JSON.stringify(grant.identity)));
+    return { grant, session: d1MigrationSession(grant) };
+  });
+  requireEvidence(new Set(migrations.map(({ grant }) => grant.identity.fqn)).size === migrations.length);
   const script = `/client/v4/accounts/${ACCOUNT}/workers/scripts/${config.worker}`;
+  let busy = false;
   let closed = false, mutations = 0, requests = 0, completed = false;
   let key: Awaited<ReturnType<AppSecretCustody["provisionKey"]>> | undefined;
   let webhook = false, checked = false, uploaded = false;
   const once = new Set<string>();
-  async function request(url: string, method: string, body: BodyInit | undefined, contentType: string, state = false) {
+  async function request(url: string, method: string, body: BodyInit | undefined, contentType: string, state = false, d1 = false) {
     requireEvidence(!closed && ++requests <= 64);
     // Immediately before EVERY operation, including every State write. State
     // drift checks belong at initial handoff; own writes then change that state.
     await check(); requireEvidence(!closed); dispatch();
     if (method !== "GET") {
       const name = `${method}:${url}`;
-      // State rows legitimately have updating + updated commits; other writes
-      // never retry, even if a transport failed with an unknown outcome.
-      if (!state) { requireEvidence(!once.has(name)); once.add(name); }
+      // State rows have updating + updated commits. D1 has a separate consumed
+      // exact-query sequence; other writes get one ticket per method/URL.
+      if (!state && !d1) { requireEvidence(!once.has(name)); once.add(name); }
       mutations++;
     }
     const response = await (state ? custody.state : custody.cloudflare)(url, {
@@ -76,7 +84,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
     requireEvidence(statePermit); statePermit = false; // native retry cannot resend an uncertain commit
     const stage = `/state/stacks/${STACK}/stages/${config.stage}`;
     requireEvidence(url.origin === config.stateOrigin && !url.search && !url.hash && !url.username && !url.password && req.method === "PUT" &&
-      [stage + "/output", stage + "/resources/Worker", stage + "/resources/GitHubAppSecret"].includes(url.pathname) && req.body._tag === "Uint8Array" && req.body.body.byteLength <= 8 * 1024 * 1024);
+      [stage + "/output", stage + "/resources/Worker", stage + "/resources/GitHubAppSecret", ...migrations.map(({ grant }) => stage + "/resources/" + grant.identity.fqn)].includes(url.pathname) && req.body._tag === "Uint8Array" && req.body.body.byteLength <= 8 * 1024 * 1024);
     const bytes = await request(String(url), "PUT", Buffer.from(req.body.body), "application/json", true);
     return HttpClientResponse.fromWeb(req, new Response(bytes, { headers: { "content-type": "application/json" } }));
   }));
@@ -87,7 +95,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
     // reconciled from authoritative state, never retried with this candidate.
     handle: async (operation: Exclude<BrokerOperation, { op: "authorize" }>): Promise<unknown> => {
       try {
-        requireEvidence(!closed); checkChannelFrame(operation);
+        requireEvidence(!closed && !busy); busy = true; checkChannelFrame(operation);
         if (operation.op === "cloudflare") {
           requireEvidence(Object.keys(operation).sort().join() === "body,contentType,method,op,url");
           const url = new URL(operation.url);
@@ -95,6 +103,14 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
             typeof operation.body === "string" && operation.body.length <= 44 * 1024 * 1024);
           const body = Buffer.from(operation.body, "base64");
           requireEvidence(body.length <= 32 * 1024 * 1024 && body.toString("base64") === operation.body);
+          const d1 = migrations.find(({ session }) => url.pathname === session.base || url.pathname === session.base + "/query");
+          if (d1) {
+            const validate = d1.session.request(url.pathname, operation.method, body, operation.contentType);
+            const bytes = await request(String(url), operation.method, operation.method === "GET" ? undefined : body, operation.contentType, false, true);
+            const safe = validate(JSON.parse(Buffer.from(bytes).toString()));
+            return { status: 200, body: Buffer.from(JSON.stringify(safe)).toString("base64") };
+          }
+          if (operation.method !== "GET") requireEvidence(migrations.every(({ session }) => session.settled()));
           const allowedGet = [`${script}/settings`, `${script}/subdomain`, `${script}/schedules`, `/client/v4/accounts/${ACCOUNT}/workers/subdomain`];
           if (operation.method === "GET") requireEvidence(allowedGet.includes(url.pathname) && body.length === 0);
           else if (operation.method === "PUT" && url.pathname === script) {
@@ -133,8 +149,11 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
         if (operation.op === "state-set" || operation.op === "state-output") {
           requireEvidence(Object.keys(operation).sort().join() === (operation.op === "state-set" ? "fqn,op,value" : "op,value"));
           const fqn = operation.op === "state-set" ? operation.fqn : undefined;
-          requireEvidence(fqn === undefined || ["Worker", "GitHubAppSecret"].includes(fqn));
-          if (fqn) {
+          const d1 = migrations.find(({ grant }) => grant.identity.fqn === fqn);
+          requireEvidence(fqn === undefined || ["Worker", "GitHubAppSecret"].includes(fqn) || d1);
+          if (d1) d1.session.state(operation.value);
+          else if (fqn) {
+            requireEvidence(migrations.every(({ session }) => session.settled()));
             const row = operation.value as { fqn: string; instanceId: string; status: string; old?: { fqn: string; instanceId: string; status: string; old?: unknown }; resourceType: string; attr?: { databaseId?: string } };
             requireEvidence(row?.fqn === fqn && row.instanceId === config.instances[fqn as "Worker" | "GitHubAppSecret"] && ["updating", "updated", "created"].includes(row.status));
             // beta.83 writes an updating checkpoint containing the previous
@@ -150,7 +169,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
               } else if (saved.attr?.workerName !== undefined) requireEvidence(saved.attr.workerName === config.worker && saved.attr.accountId === ACCOUNT);
             }
           } else {
-            requireEvidence(checked); // output is a commit only after custody verification
+            requireEvidence(checked && migrations.every(({ session }) => session.settled())); // output is a commit only after custody verification
             const output = operation.value as Record<string, unknown>;
             const db = config.databases.find((db) => db.fqn === "SupportDB");
             const ledger = config.databases.find((db) => db.fqn === "SupportLedger");
@@ -188,6 +207,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
         requireEvidence(result.appId === key.appId && Number.isFinite(Date.parse(result.checkedAt)));
         return result;
       } catch { closed = true; throw refusal(); }
+      finally { busy = false; }
     },
     outcome: () => Object.freeze({ closed, mutations, completed }),
   });

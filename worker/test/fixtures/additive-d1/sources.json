@@ -1,0 +1,12 @@
+{
+  "0003_maintenance.sql": {
+    "commit": "e6bb85217c96827bb51ec1759d771730649152bf",
+    "path": "worker/ledger-migrations/0003_maintenance.sql",
+    "sha256": "9f5536e0097e5f128a5d2167bed62dc95a7ec30f0c1e9f64688afe3fcd2f04ed"
+  },
+  "0004_discord_alerts.sql": {
+    "commit": "4f2f43505376664da86b97593f2f971be0dbe0b1",
+    "path": "worker/ledger-migrations/0004_discord_alerts.sql",
+    "sha256": "c817bdef75c5efd7d34553f939de97248c3ac93b1b16da478dfdcdec06c34211"
+  }
+}

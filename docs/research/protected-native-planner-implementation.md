@@ -881,3 +881,236 @@ also initially used installed protocol 5; it now uses the same explicit syntheti
 protocol-7 adapter as the established confined fixtures. The production protocol
 check was preserved. None of these fixtures establishes live protocol/identity,
 reviewer policy, a remote RPC session or staging readiness.
+
+## Bounded additive D1 profile (2026-10-27, stacked on PR116/86aa8e6)
+
+This section supersedes the historical D1-noop-only CODE restriction. Both
+`prod` and `staging` admit an independently attested existing SupportDB and/or
+SupportLedger **update only for pending additive migration files**. The other D1
+may remain noop. The original instances, physical IDs, account, names, EU
+jurisdiction, migration directory/table and retain policies cannot change.
+Worker and GitHubAppSecret still require their existing bounded update profile.
+PR115/f587ff5's cancellation, synchronous dispatch guards, post-authentication
+freshness, desired/persisted retention and completion rules remain in force.
+No live manifest or credential/window has been established.
+
+### Installed provider audit and admitted requests
+
+The installed Alchemy **2.0.0-beta.83** sources audited for this profile are
+`src/Cloudflare/D1/Database.ts`, `ApplyMigrations.ts`,
+`src/SQL/{SqlFile.ts,Migrations/{Registry,Records,Detect,AlchemyFormat,Introspect,Utils}.ts}`,
+and `src/Apply.ts` plus native StateEncoding/HTTP State. The installed provider:
+
+1. Commits an updating checkpoint with the exact previous settled row in `old`.
+2. GETs the cached D1 UUID. Its missing-resource fallback lists/adopts/creates,
+   and its replication drift path PATCHes; **none receive a broker grant**.
+3. Uses `PRAGMA table_info("__alchemy_migrations");` and
+   `SELECT name, hash FROM "__alchemy_migrations";` for existing native history.
+4. Sends each pending flat file, followed by its exact native bookkeeping
+   INSERT, as one semicolon-separated SQL query. Four-digit filenames yield
+   native `created_at = NULL`; bookkeeping uses `datetime('now')`.
+5. Commits the settled row with the full expected checksum map.
+
+Cloudflare documents the required [SQLite/PRAGMA inspection surface](https://developers.cloudflare.com/d1/sql-api/sql-statements/).
+The current official [metadata API](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/get/)
+and [query API](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/)
+document the account/UUID paths and query result envelope. The query API accepts
+SQL, optional parameters and a batch form; this broker admits **only the installed
+single `sql` body**, with exact canonical JSON bytes and no params/batch extras.
+The documented multi-statement query surface supplies no cancellation/rollback
+promise for a request already dispatched. The provider's comment likewise
+explicitly treats D1 HTTP as nontransactional. This implementation does not infer
+atomic rollback from a successful local SQLite test. Cloudflare's
+[Wrangler migration documentation](https://developers.cloudflare.com/d1/reference/migrations/)
+uses `d1_migrations` by default; this profile requires existing native
+`__alchemy_migrations`, never assumes those histories are interchangeable.
+
+A separate trusted grant is reconstructed for each pending D1 from its original
+native row, independently reviewed identity and **tracked source manifest**.
+The child cannot submit SQL for approval or choose another database. File bytes,
+hashes, four-digit names, numeric order and the complete committed history must
+agree with native plan evidence. Existing history must be an exact prefix;
+changed/removed files, duplicate prefixes and out-of-order additions refuse.
+At most four new files per D1, 32 statements/32 KiB per file, are supported.
+Only the current flat directories and default-disabled replication representation
+are supported. Imports/clones, explicit replication/location properties, other
+property updates and unknown attribute shapes need a separate code review.
+
+Each grant consumes a fixed sequence: checkpoint, exact metadata GET, exact
+native column inspection, exact native history read, each exact pending batch,
+then settled checkpoint. The metadata UUID/name must match the reviewed target;
+replication drift refuses rather than PATCHing. The existing history table must
+have the five native columns in order with supported types. Missing/legacy/
+foreign history cannot trigger conversion or table creation. The returned
+history must match **every** committed filename/hash exactly, without aliases,
+missing hashes, duplicates or extra rows. Only checked migration column/history
+fields cross into the child; query metadata and application data are discarded.
+No arbitrary report-data read is granted. Planning remains fully offline/read-only
+with all provider read/list/precreate/reconcile/delete paths closed until apply.
+
+The broker grants only the selected D1's State path in the reviewed stack/stage.
+A native updating row preserves its full original settled `old` value, props,
+attrs, bindings and downstreams; it cannot replace an instance or change retain.
+Recovery/adoption keys are rejected **before** JSON wire encoding could omit
+undefined keys. The new native provider version is the installed provider's 0;
+its default-live `providerMode` is legitimately omitted. Settled attrs must be
+exactly the installed provider's expected identity and final checksum map.
+No existing invalid checkpoint is normalized into a settled starting state.
+State commits still use the installed HTTP State writer, one dispatch ticket
+per write, without exposing its bearer to the child.
+
+Native stable IDs alone do not wait for schema work: the actual native test
+exposed Worker starting before D1 reconciliation completed. The shared Worker
+declaration now projects its unchanged workers.dev settings from **whole results
+of both D1s**, establishing native dependencies on their terminal reconciliation.
+The broker independently refuses Worker mutation/output until pending D1 grants
+settle. It does not queue a blocked Worker request in the private channel, which
+would prevent the same channel from draining D1 requests. Native noops keep the
+same dependency/output values and remain supported.
+
+### Supported SQL and independent upstream fixtures
+
+`additive-sql.ts` implements a bounded lexer and explicit grammar, not a general
+SQL interpreter or text-substitution denylist. It recognizes whitespace, line/
+block comments, unquoted identifiers, integer/string/NULL literals, punctuation,
+CREATE TABLE with typed columns, PRIMARY KEY/NOT NULL/literal DEFAULT, and a
+column-local CHECK using equality or IN of literals. One bounded VALUES seed
+per table is allowed **only after that same file creates that table**. Quoted
+identifiers, expressions/functions, references, triggers, extensions, PRAGMA,
+ATTACH, CREATE-AS-SELECT, INSERT-SELECT, multiple-row seeds, conflict clauses,
+DROP/RENAME/DELETE/UPDATE, ALTER/backfill and all unknown grammar refuse. SQLite
+reserved table prefixes and native statement-breakpoint markers also refuse.
+Comments cannot splice keywords; quotes remain literal data, including escaped
+quotes, semicolons and comment-like characters. A quoted payload cannot escape
+into another statement. Structural validation is performed independently of
+source hashes; hashes alone are never a non-destructive proof.
+
+Exact fixture bytes and provenance are under
+`worker/test/fixtures/additive-d1/`, deliberately named `.sql.fixture` so neither
+Alchemy nor application migration discovery owns/applies them:
+
+- PR108 `0003_maintenance.sql`, source commit
+  `e6bb85217c96827bb51ec1759d771730649152bf`, SHA-256
+  `9f5536e0097e5f128a5d2167bed62dc95a7ec30f0c1e9f64688afe3fcd2f04ed`.
+  Three new tables and the initial `maintenance_control` seed are accepted.
+- PR110 `0004_discord_alerts.sql`, source commit
+  `4f2f43505376664da86b97593f2f971be0dbe0b1`, SHA-256
+  `c817bdef75c5efd7d34553f939de97248c3ac93b1b16da478dfdcdec06c34211`.
+  Two new tables and the singleton `discord_alert_control` seed are accepted.
+
+These branches remain independent/unmerged, and **neither fixture ran live**.
+Tests use committed fixture bytes without another checkout or git-show at runtime.
+If those application branches integrate later, their normal migration files
+remain the only application migration owners.
+
+Existing ledger `0002_revocations.sql` is intentionally **not** additive: its
+INSERT-SELECT/DROP/RENAME rebuild refuses when pending. If authoritative state
+and native D1 history already attest it applied, its exact original checksum
+is preserved without rerunning/revalidating it as pending SQL. If either side
+shows it pending or disagrees, this candidate cannot apply; a separate reviewed
+migration/reconciliation is required. This slice never repairs that history,
+restores the ledger or couples it to a SupportDB rollback. Worker rollback uses
+an expanded schema; no down-migration is provided.
+
+### Approval, revocation and honest uncertainty
+
+The public ready summary contains only D1 FQN, pending count and a digest over
+its reviewed identity, committed history and ordered pending names/checksums.
+Both trusted launcher and retained native child independently reconstruct the
+same summary. It is included with the cached bundle in the final candidate
+digest, which also binds source/lockfile/migrations/target/state/window evidence,
+stage, run/attempt and nonce. The existing exact `approve-plan` human command
+therefore binds the pending DB targets, counts and bytes without exposing
+schema/state/secrets or changing the command grammar. The exact native plan,
+context and cached build stay alive; there is no serialized plan or replan.
+
+Each metadata/query/State boundary repeats asynchronous authenticated approval
+and the mandatory synchronous cancellation/expiry/window guard at dispatch.
+Requests are serialized and consumed before awaiting transport. Unknown query,
+body, parameter, extra statement, wrong DB/account/stage, changed history,
+failed inner query result, retry or unexpected State progression poisons the
+entire broker. Installed provider/State retry helpers cannot duplicate a query
+or checkpoint. The one-shot retained candidate cannot run again on success or
+failure. Final output additionally requires every pending D1 grant settled and
+all existing App custody checks complete.
+
+A successful SQL request can precede approval expiry, cancellation or a lost
+response. It cannot be rolled back by closing the broker. Later SQL, checkpoints,
+Worker mutations and custody calls stop; the original updating evidence remains.
+A deliberately partial SQLite execution and a fully executed batch with a lost
+response both leave an incomplete continuation with no final output and no
+second SQL dispatch. Keep the owner exclusion window in force until incident
+reconciliation establishes remote outcomes/in-flight completion. A new candidate
+requires authoritative incident review, settled supported state and fresh
+approval; this code supplies no blind retry/recovery normalization.
+
+### Evidence and remaining gates
+
+The new offline native fixtures build the actual shared graph and cached Worker,
+retain the native Plan and full service context, replace State explicitly,
+run actual installed D1 **and Worker** reconcile, and persist through native
+StateEncoding and the installed HTTP State writer. Fake first-party HTTP is
+backed by Node 26 SQLite (`node:sqlite`), a faithful runtime for this supported
+SQLite grammar, inside the same Linux offline namespace. Both D1s have separate
+SQLite databases and pre-existing canary rows. Tests verify each D1 alone and
+both together, exact history/checksums including unchanged ledger 0002, unchanged
+physical IDs, all fixture tables/defaults/seeds and existing rows, native
+updating/settled checkpoints, and replay refusal. Fault cases cover partial and
+unknown query outcomes and cancellation/expiry/window termination. These are
+local synthetic proofs, not a live Cloudflare transaction or remote RPC claim.
+The original authenticated retained continuation, role/reviewer, stage, custody,
+state decoder, endpoint, sandbox, source and secret negative controls remain.
+
+Remaining **CODE gates** include all SQL outside the stated grammar, initial/
+foreign/legacy history conversion, pending non-additive migrations (including
+ledger 0002), other D1 property changes, bootstrap/adopt/replace/delete/orphan/
+rename, arbitrary raw SQL, imports/clones, replication changes and data rewrites.
+Workflow reruns still refuse because review history does not attest an attempt.
+Worker/App create/noop and other previously unsupported provider surfaces remain
+out of scope. There is no always-deny replacement for the supported additive path.
+
+Remaining **LIVE gates** are unchanged: reviewed real endpoint/graph/D1/App/
+Worker identity manifests, authoritative representable state and native history,
+current numeric vvaz/gmarques reviewers and protected GitHub policy, Linux runner
+proof, exclusion of all other writers/acquisition/deployment paths, private
+credential delivery, fresh candidate-specific approval and separately authorized
+live staging/Test F validation for both D1s. No credentials were read/requested,
+no profile inspected, no live plan/apply/drill/deploy or settings operation ran,
+and #20/#29 remain open. The approved broad state-bearer custody stays confined
+to this project's trusted broker; its disclosed service-side scope is unchanged.
+
+Validation on Node **26.12.1**, `--maxWorkers=1`:
+
+- Broad affected native/retained/approval/broker/custody/RPC/state/endpoint/
+  evidence/target/sandbox/secret suite: **475 tests / 15 files passed**
+  (420.83 seconds).
+- After final canonical-body and settled-checkpoint hardening: **152 tests /
+  3 files passed** (96.09 seconds): 108 additive-policy cases, 16 actual native
+  D1/Worker apply cases, and 28 broker cases.
+- After extending the pre-D1 Worker guard to all write routes: **4 selected
+  tests / 2 files passed**, 122 unrelated cases filtered (12.51 seconds). Both
+  stages rerun the native both-D1 happy path and independently refuse premature
+  subdomain/schedule mutations. The policy file now contains 110 cases.
+- App provisioning, deployed-key and webhook provisioning regressions:
+  **28 tests / 3 files passed** (1.24 seconds).
+- **114 CI-script tests passed**; workflow policy and runtime matrix policy
+  passed. Final Worker typecheck/lint, deploy/source/test/research secret scans,
+  and diff whitespace checks passed. No live credentials, remote RPC session,
+  live SQL or deployment was used for these results.
+
+The final focused command was:
+
+```sh
+pnpm --filter gq-support-worker exec vitest run \
+  test/additive-d1-native.test.ts test/additive-d1-policy.test.ts \
+  -t 'refuses Worker mutation|applies both' --maxWorkers=1
+```
+
+The full new native file runs without that filter to exercise all six happy
+paths and ten fault paths. Original authenticated no-op continuation happy paths
+also passed separately for both stages (2 passed, 30 unrelated cases filtered),
+and the final broad run includes the full 36-case continuation file.
+Initial fixture runs exposed the native checkpoint version/default-mode form,
+terminal dependency ordering and the existing `checksums.txt` sidecars; the
+corrected profile handles those explicitly. These failures were resolved before
+the passing runs above; no guard was disabled or live prerequisite substituted.
