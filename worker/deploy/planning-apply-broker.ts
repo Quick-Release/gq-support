@@ -1,5 +1,7 @@
 // Trusted, per-session first-party broker. No generic URL forwarding, state
 // bearer, response headers, error bodies or credential enters the graph.
+import { checkedObservability, validateDiscordBinding, type DiscordCustodyBinding } from "./discord-alert-secret.ts";
+import { isDeepStrictEqual } from "node:util";
 import { d1MigrationSession, type D1MigrationGrant } from "./d1-migration-profile.ts";
 import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
@@ -14,6 +16,7 @@ import { checkChannelFrame, type BrokerOperation } from "./retained-child-channe
 import type { AppSecretCustody } from "./github-app-secret.ts";
 
 export interface ApplyBrokerConfig {
+  readonly discord: DiscordCustodyBinding;
   readonly migrations?: readonly D1MigrationGrant[];
   readonly stage: ProtectedStage;
   readonly instances: Readonly<Record<"Worker" | "GitHubAppSecret", string>>;
@@ -33,6 +36,8 @@ export interface ApplyBrokerCustody {
 export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBrokerCustody, check: () => Promise<void>, dispatch: () => void) {
   config = structuredClone(config);
   checkStage(config.stage);
+  validateDiscordBinding(config.discord);
+  requireEvidence(isDeepStrictEqual(config.discord, custody.app.discord));
   requireEvidence(config.app.stage === config.stage && config.app.slug === protectedAppSlugs[config.stage]);
   requireEvidence(/^[a-z0-9][a-z0-9-]{0,62}$/.test(config.worker) && new URL(config.stateOrigin).origin === config.stateOrigin &&
     new URL(config.stateOrigin).protocol === "https:" && custody.cloudflareToken.length > 0 && custody.stateBearer.length > 0 &&
@@ -50,20 +55,20 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
   let busy = false;
   let closed = false, mutations = 0, requests = 0, completed = false;
   let key: Awaited<ReturnType<AppSecretCustody["provisionKey"]>> | undefined;
-  let webhook = false, checked = false, uploaded = false;
+  let webhook = false, discord = false, checked = false, uploaded = false;
   const once = new Set<string>();
   async function request(url: string, method: string, body: BodyInit | undefined, contentType: string, state = false, d1 = false) {
     requireEvidence(!closed && ++requests <= 64);
     // Immediately before EVERY operation, including every State write. State
     // drift checks belong at initial handoff; own writes then change that state.
-    await check(); requireEvidence(!closed); dispatch();
     if (method !== "GET") {
       const name = `${method}:${url}`;
       // State rows have updating + updated commits. D1 has a separate consumed
       // exact-query sequence; other writes get one ticket per method/URL.
       if (!state && !d1) { requireEvidence(!once.has(name)); once.add(name); }
-      mutations++;
     }
+    await check(); requireEvidence(!closed); dispatch();
+    if (method !== "GET") mutations++;
     const response = await (state ? custody.state : custody.cloudflare)(url, {
       method, body, redirect: "error", signal: AbortSignal.timeout(10_000), headers: {
         Authorization: `Bearer ${state ? custody.stateBearer : custody.cloudflareToken}`,
@@ -122,6 +127,11 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
             // grants no destructive DO lifecycle, assets, routes, or previews.
             requireEvidence(!metadata.migrations && !metadata.assets && !metadata.containers && !metadata.exports &&
               !metadata.tail_consumers && !metadata.streaming_tail_consumers && Array.isArray(metadata.bindings));
+            requireEvidence(checkedObservability(metadata.observability).traces.enabled === false);
+            requireEvidence(metadata.bindings.every((binding: { name?: string }) => ![
+              "DISCORD_ALERTS_ENABLED", "DISCORD_ALERT_WEBHOOK_URL", "DISCORD_ALERT_RELEASE",
+              "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET", "GITHUB_WEBHOOK_PREVIOUS_SECRET",
+            ].includes(binding.name ?? "")));
             const bindings = metadata.bindings.filter((binding: { type: string }) => binding.type === "d1");
             requireEvidence(bindings.length === 2 && new Set(bindings.map((binding: { id?: string; database_id?: string }) => binding.database_id ?? binding.id)).size === 2 &&
               bindings.every((binding: { id?: string; database_id?: string }) => config.databases.map((db) => db.databaseId).includes(binding.database_id ?? binding.id ?? "")));
@@ -144,7 +154,25 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
             requireEvidence(Array.isArray(schedules) && schedules.length === 1 && Object.keys(schedules[0]).join() === "cron" && schedules[0].cron === "* * * * *");
           } else throw refusal();
           const bytes = await request(String(url), operation.method, operation.method === "GET" ? undefined : body, operation.contentType);
-          return { status: 200, body: Buffer.from(bytes).toString("base64") };
+          const result = JSON.parse(Buffer.from(bytes).toString()).result;
+          let safe: unknown;
+          if (url.pathname.endsWith("/settings")) {
+            // Installed reconcile only needs Issues state here; no binding values or response text.
+            requireEvidence(result?.observability?.issues?.enabled === false);
+            safe = { bindings: [], observability: { issues: { enabled: false } } };
+          } else if (url.pathname.endsWith("/subdomain")) {
+            if (url.pathname.includes("/scripts/")) {
+              requireEvidence(typeof result?.enabled === "boolean" && typeof result.previews_enabled === "boolean");
+              safe = { enabled: result.enabled, previews_enabled: result.previews_enabled };
+            } else {
+              requireEvidence(typeof result?.subdomain === "string" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(result.subdomain));
+              safe = { subdomain: result.subdomain };
+            }
+          } else if (url.pathname.endsWith("/schedules")) {
+            requireEvidence(Array.isArray(result?.schedules) && result.schedules.length === 1 && result.schedules[0].cron === "* * * * *");
+            safe = { schedules: [{ cron: "* * * * *" }] };
+          } else { requireEvidence(result?.id === config.worker && /^[a-f0-9]{32}$/.test(result.tag)); safe = { id: config.worker, tag: result.tag }; }
+          return { status: 200, body: Buffer.from(JSON.stringify({ success: true, result: safe })).toString("base64") };
         }
         if (operation.op === "state-set" || operation.op === "state-output") {
           requireEvidence(Object.keys(operation).sort().join() === (operation.op === "state-set" ? "fqn,op,value" : "op,value"));
@@ -161,6 +189,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
             // partial failure rather than erasing native recovery evidence.
             if (row.old) requireEvidence(row.status === "updating" && row.old.fqn === fqn && row.old.instanceId === row.instanceId &&
               ["created", "updated"].includes(row.old.status) && !row.old.old);
+            if (fqn === "GitHubAppSecret" && row.status !== "updating") requireEvidence(checked && discord);
             for (const value of [operation.value, row.old].filter(Boolean)) {
               const saved = value as { props?: { stage?: string; workerName?: string }; attr?: { workerName?: string; accountId?: string; stage?: string; slug?: string } };
               if (fqn === "GitHubAppSecret") {
@@ -169,7 +198,7 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
               } else if (saved.attr?.workerName !== undefined) requireEvidence(saved.attr.workerName === config.worker && saved.attr.accountId === ACCOUNT);
             }
           } else {
-            requireEvidence(checked && migrations.every(({ session }) => session.settled())); // output is a commit only after custody verification
+            requireEvidence(checked && discord && migrations.every(({ session }) => session.settled())); // output is a commit only after custody verification
             const output = operation.value as Record<string, unknown>;
             const db = config.databases.find((db) => db.fqn === "SupportDB");
             const ledger = config.databases.find((db) => db.fqn === "SupportLedger");
@@ -187,11 +216,12 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
           return null;
         }
         requireEvidence(operation.worker === config.worker && uploaded);
-        await check(); requireEvidence(!closed); dispatch();
+        const authorize = async () => { await check(); requireEvidence(!closed); dispatch(); };
         if (operation.op === "app-key") {
           requireEvidence(Object.keys(operation).sort().join() === "op,worker" && !key);
           // Reserve before awaiting: an uncertain upload cannot replay.
           requireEvidence(!once.has("app-key")); once.add("app-key"); mutations++;
+          await authorize();
           key = await custody.app.provisionKey(config.stage, config.worker);
           requireEvidence(sameApp(key));
           return key;
@@ -199,13 +229,24 @@ export function planningApplyBroker(config: ApplyBrokerConfig, custody: ApplyBro
         if (operation.op === "app-webhook") {
           requireEvidence(Object.keys(operation).sort().join() === "appId,op,worker" && key && operation.appId === key.appId && !webhook);
           webhook = true; mutations++;
+          await authorize();
           await custody.app.provisionWebhook(config.worker, key.appId); return null;
         }
-        requireEvidence(operation.op === "app-check" && Object.keys(operation).sort().join() === "metadata,op,worker" && key && webhook && !checked && sameApp(operation.metadata));
-        checked = true;
+        if (operation.op === "app-discord") {
+          requireEvidence(Object.keys(operation).sort().join() === "op,worker" && key && webhook && !once.has("app-discord"));
+          once.add("app-discord"); mutations++;
+          await authorize();
+          await custody.app.provisionDiscord(config.worker);
+          await check(); requireEvidence(!closed); dispatch();
+          discord = true; return null;
+        }
+        requireEvidence(operation.op === "app-check" && Object.keys(operation).sort().join() === "metadata,op,worker" && key && webhook && discord && !checked && sameApp(operation.metadata));
+        requireEvidence(!once.has("app-check")); once.add("app-check");
+        await authorize();
         const result = await custody.app.check(key, config.worker);
         requireEvidence(result.appId === key.appId && Number.isFinite(Date.parse(result.checkedAt)));
-        return result;
+        await check(); requireEvidence(!closed); dispatch();
+        checked = true; return { appId: result.appId, checkedAt: result.checkedAt };
       } catch { closed = true; throw refusal(); }
       finally { busy = false; }
     },

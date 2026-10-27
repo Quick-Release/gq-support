@@ -19,6 +19,7 @@ export type BrokerOperation =
   | { op: "state-output"; value: unknown }
   | { op: "app-key"; worker: string }
   | { op: "app-webhook"; worker: string; appId: number }
+  | { op: "app-discord"; worker: string }
   | { op: "app-check"; worker: string; metadata: unknown };
 export function privateChannel() {
   const stream = process.stdin;

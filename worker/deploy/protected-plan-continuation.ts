@@ -1,5 +1,6 @@
 // Concrete trusted-launcher orchestration. Transport seams are for first-party
 // HTTPS and fake HTTP tests, never user-provided authentication assertions.
+import { validateDiscordBinding } from "./discord-alert-secret.ts";
 import { readFileSync, readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import type { ResourceState } from "alchemy/State/ResourceState";
@@ -33,7 +34,7 @@ export interface ProtectedContinuation {
   revalidate(): Promise<Omit<CandidateBinding, "candidate">>;
   checkWindow(): void;
   signal: AbortSignal;
-  publish(evidence: ApprovalCandidate & { binding: CandidateBinding; bundle: string; resources: Record<string, string>; migrations: ReturnType<typeof migrationSummary> }): void;
+  publish(evidence: ApprovalCandidate & { discord: import("./discord-alert-secret.ts").DiscordCustodyBinding; binding: CandidateBinding; bundle: string; resources: Record<string, string>; migrations: ReturnType<typeof migrationSummary> }): void;
 }
 
 /** Authentication is asynchronous: local authorization must still hold when
@@ -52,6 +53,9 @@ export async function continueProtectedPlan(config: ProtectedContinuation) {
     evidence: Object.freeze({ ...config.evidence }), broker: structuredClone(config.broker), sourceManifest: structuredClone(config.sourceManifest) };
   requireEvidence(Object.keys(config.evidence).sort().join() === "lockfiles,migrations,source,state,target,window" &&
     Object.values(config.evidence).every((value) => /^[a-f0-9]{64}$/.test(value)));
+  validateDiscordBinding(config.broker.discord);
+  Object.freeze(config.broker.discord);
+  requireEvidence(config.broker.discord.release === config.policy.head);
   checkInputTarget(config.input, config.input.target);
   const { stage } = config.input.target;
   requireEvidence(config.policy.stage === stage && config.broker.stage === stage && config.app.stage === stage &&
@@ -131,7 +135,7 @@ export async function continueProtectedPlan(config: ProtectedContinuation) {
         broker = planningApplyBroker({ ...config.broker, app: config.app, bundle: message.bundle, instances, migrations }, { ...config.custody, app: config.appCustody(check, dispatch) }, check, dispatch);
         ready = true;
         const readyAt = Date.now(); candidate = Object.freeze({ candidate: binding.candidate, nonce, readyAt, expiresAt: readyAt + 10 * 60_000 });
-        config.publish({ ...candidate, binding, bundle: message.bundle, resources: message.resources, migrations: summary }); return null;
+        config.publish({ ...candidate, discord: config.broker.discord, binding, bundle: message.bundle, resources: message.resources, migrations: summary }); return null;
       }
       if (message.op === "authorize") {
         requireEvidence(ready && candidate && !attempted && Object.keys(message).sort().join() === "id,op"); attempted = true;

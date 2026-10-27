@@ -1,3 +1,4 @@
+import { discordApi } from "./fixtures/discord-api.ts";
 import { discordLeakCheck } from "../deploy/key-custody-scan.ts";
 import { URL as NodeURL } from "node:url";
 import { readFileSync } from "node:fs";
@@ -242,25 +243,20 @@ it("bounds state cardinality and counts, expires after seven days, and never exp
 });
 
 it("provisions optional secret_text via apply-only custody, enabling last and revoking on disable", async () => {
-  const fake = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ success: true }));
-  fake.mockResolvedValueOnce(Response.json({ success: true, result: { observability: { traces: { enabled: false } } } }));
+  const api = discordApi("worker"), fake = api.request;
   await provisionDiscordAlertSecret("worker", { DISCORD_ALERTS_ENABLED: "true", DISCORD_ALERT_WEBHOOK_URL: URL,
     GITHUB_SHA: "b".repeat(40), CLOUDFLARE_API_TOKEN: "synthetic" }, fake);
-  expect(fake.mock.calls.slice(1).map((c) => JSON.parse(c[1]!.body as string))).toEqual([
+  expect(fake.mock.calls.filter((c) => c[1]?.method === "PUT").map((c) => JSON.parse(String(c[1]?.body)))).toEqual([
     { name: "DISCORD_ALERTS_ENABLED", type: "secret_text", text: "false" },
     { name: "DISCORD_ALERT_WEBHOOK_URL", type: "secret_text", text: URL },
     { name: "DISCORD_ALERT_RELEASE", type: "secret_text", text: "b".repeat(40) },
     { name: "DISCORD_ALERTS_ENABLED", type: "secret_text", text: "true" },
   ]);
   fake.mockClear();
-  fake.mockImplementation(async (_url, init) => init?.method === undefined
-    ? Response.json({ success: true, result: { bindings: [], observability: { enabled: true,
-      logs: { enabled: true, invocation_logs: true }, traces: { enabled: fake.mock.calls.some((c) => c[1]?.method === "PATCH") } } } })
-    : Response.json({ success: true }));
   await provisionDiscordAlertSecret("worker", { CLOUDFLARE_API_TOKEN: "synthetic" }, fake);
-  expect(fake.mock.calls.map((c) => c[1]!.method)).toEqual(["PUT", "DELETE", "DELETE", undefined, "PATCH", undefined]);
-  expect(JSON.parse(fake.mock.calls[4]![1]!.body as string)).toEqual({ observability: { enabled: true,
-    logs: { enabled: true, invocation_logs: true }, traces: { enabled: true } } });
+  expect(fake.mock.calls.map((c) => c[1]!.method)).toEqual(["PUT", undefined, "DELETE", "DELETE", undefined, "PATCH", undefined]);
+  expect(api.observability).toMatchObject({ logs: { enabled: true, invocation_logs: true }, traces: { enabled: true } });
+  expect(api.secrets.has("DISCORD_ALERT_WEBHOOK_URL")).toBe(false);
   expect(() => validateDiscordAlertConfig({ DISCORD_ALERTS_ENABLED: "true", DISCORD_ALERT_WEBHOOK_URL: URL })).toThrow("Discord alert configuration invalid");
   fake.mockRejectedValue(new Error(URL));
   await expect(provisionDiscordAlertSecret("worker", { CLOUDFLARE_API_TOKEN: "synthetic" }, fake)).rejects.toThrow(/^Discord alert Worker secret update failed$/);
@@ -276,7 +272,7 @@ it.each([undefined, [{ name: "DISCORD_ALERT_WEBHOOK_URL", type: "secret_text" }]
 
 it("fails the deployment when trace restoration is not confirmed", async () => {
   const fake = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => init?.method === undefined
-    ? Response.json({ success: true, result: { bindings: [], observability: { enabled: true, traces: { enabled: false } } } })
+    ? Response.json({ success: true, result: { bindings: [{ name: "DISCORD_ALERTS_ENABLED", type: "secret_text" }], observability: { enabled: true, logs: { enabled: true }, traces: { enabled: false } } } })
     : Response.json({ success: true }));
   await expect(provisionDiscordAlertSecret("worker", { CLOUDFLARE_API_TOKEN: "synthetic" }, fake)).rejects.toThrow(/^Discord alert Worker secret update failed$/);
   expect(fake.mock.calls.filter((c) => c[1]?.method === "PATCH")).toHaveLength(1);
@@ -290,9 +286,9 @@ it("rejects enablement before uploading credentials when automatic fetch traces 
     const fake = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, result: settings }));
     await expect(provisionDiscordAlertSecret("worker", { DISCORD_ALERTS_ENABLED: "true", DISCORD_ALERT_WEBHOOK_URL: URL,
       GITHUB_SHA: "b".repeat(40), CLOUDFLARE_API_TOKEN: "synthetic" }, fake)).rejects.toThrow("Discord alert Worker secret update failed");
-    expect(fake).toHaveBeenCalledTimes(1);
-    expect(fake.mock.calls[0]![0]).toMatch(/\/settings$/);
-    expect(fake.mock.calls[0]![1]!.body).toBeUndefined();
+    expect(fake).toHaveBeenCalledTimes(2);
+    expect(fake.mock.calls[1]![0]).toMatch(/\/settings$/);
+    expect(fake.mock.calls[1]![1]!.body).toBeUndefined();
   }
 });
 

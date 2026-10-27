@@ -1,3 +1,4 @@
+import { discord } from "./fixtures/discord-custody.ts";
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { trustedAppCustody } from "../deploy/trusted-app-custody.ts";
@@ -10,7 +11,7 @@ function fixture(stage: "prod" | "staging" = "prod") {
   const check = vi.fn(async () => {});
   const transport = vi.fn<typeof fetch>(async (url) => String(url) === "https://api.github.com/app" ? Response.json({ id: 123, slug: appEnv.GITHUB_APP_SLUG, client_id: env.GITHUB_APP_CLIENT_ID,
     owner: { login: "Quick-Release", type: "Organization" }, permissions: { issues: "write", metadata: "read" }, events: ["issues", "public", "repository"] }) : Response.json({ success: true }));
-  return { custody: trustedAppCustody(appEnv, "synthetic-worker", transport, check, () => {}, stage), transport, check };
+  return { custody: trustedAppCustody({ ...appEnv, GITHUB_SHA: discord.release }, "synthetic-worker", transport, check, () => {}, stage, discord), transport, check };
 }
 describe.each(["prod", "staging"] as const)("%s trusted App custody direct fetches", (stage) => {
   it("uses existing real provisioning helpers with exact first-party routes and checks each call", async () => {
@@ -31,7 +32,7 @@ describe.each(["prod", "staging"] as const)("%s trusted App custody direct fetch
       slug: key === "slug" ? (stage === "prod" ? "getquick-support-staging" : "getquick-support") : (stage === "prod" ? "getquick-support" : "getquick-support-staging"),
       client_id: key === "client_id" ? "other-client" : env.GITHUB_APP_CLIENT_ID,
       owner: { login: "Quick-Release", type: "Organization" }, permissions: { issues: "write", metadata: "read" }, events: ["issues", "public", "repository"] }));
-    await expect(custody.provisionKey(stage, "synthetic-worker")).rejects.toThrow("GitHub App verification failed");
+    await expect(custody.provisionKey(stage, "synthetic-worker")).rejects.toThrow("apply blocked");
     expect(transport).toHaveBeenCalledOnce(); expect(transport.mock.calls[0][0]).toBe("https://api.github.com/app");
   });
   it("refuses other-stage RPC metadata before launching remote custody", async () => {
@@ -47,7 +48,7 @@ describe.each(["prod", "staging"] as const)("%s trusted App custody direct fetch
   });
   it("refuses revoked authorization before any key or webhook request", async () => {
     const { custody, transport, check } = fixture(stage); check.mockRejectedValue(new Error("REVOKED_PRIVATE_CANARY"));
-    await expect(custody.provisionKey(stage, "synthetic-worker")).rejects.toThrow("GitHub App verification failed");
+    await expect(custody.provisionKey(stage, "synthetic-worker")).rejects.toThrow("apply blocked");
     await expect(custody.provisionWebhook("synthetic-worker", 123)).rejects.toThrow("apply blocked"); expect(transport).not.toHaveBeenCalled();
   });
 });

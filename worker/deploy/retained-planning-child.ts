@@ -39,6 +39,7 @@ async function main() {
       return await channel.request({ op: "app-key", worker }) as Awaited<ReturnType<typeof import("./github-app.ts").provisionAppKey>>;
     },
     provisionWebhook: async (worker, appId) => { capability.check(); await channel.request({ op: "app-webhook", worker, appId }); },
+    provisionDiscord: async (worker) => { capability.check(); await channel.request({ op: "app-discord", worker }); },
     check: async (metadata, worker) => {
       capability.check();
       return await channel.request({ op: "app-check", worker, metadata }) as { appId: number; checkedAt: string };

@@ -1,3 +1,4 @@
+import { discord as discordBinding } from "./fixtures/discord-custody.ts";
 import { URL } from "node:url";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
@@ -144,9 +145,9 @@ describe.each(["prod", "staging"] as const)("%s exact D1 request/history/checkpo
     for (const route of ["subdomain", "schedules"]) {
       const f = fixture(stage), send = vi.fn<typeof fetch>();
       const app = { stage, appId: 1, clientId: "public", slug: stage === "prod" ? "getquick-support" : "getquick-support-staging", fingerprint: "public" };
-      const broker = planningApplyBroker({ stage, worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: f.input.databases, migrations: [f.grant],
+      const broker = planningApplyBroker({ discord: discordBinding, stage, worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: f.input.databases, migrations: [f.grant],
         instances: { Worker: "w", GitHubAppSecret: "a" }, bundle: "b".repeat(64), app }, { cloudflareToken: "FAKE_ONLY", stateBearer: "FAKE_ONLY", cloudflare: send, state: send,
-        app: { provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 1, checkedAt: new Date().toISOString() }) } }, async () => {}, () => {});
+        app: { discord: discordBinding, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 1, checkedAt: new Date().toISOString() }) } }, async () => {}, () => {});
       const body = route === "subdomain" ? { enabled: true, previews_enabled: false } : [{ cron: "* * * * *" }];
       await expect(broker.handle({ op: "cloudflare", method: route === "subdomain" ? "POST" : "PUT", url: `https://api.cloudflare.com/client/v4/accounts/${f.row.attr.accountId}/workers/scripts/synthetic-worker/${route}`, contentType: "application/json", body: Buffer.from(JSON.stringify(body)).toString("base64") })).rejects.toThrow("apply blocked");
       expect(send).not.toHaveBeenCalled();
@@ -156,9 +157,9 @@ describe.each(["prod", "staging"] as const)("%s exact D1 request/history/checkpo
     const f = fixture(stage), send = vi.fn<typeof fetch>(async () => { throw new Error("uncertain query"); });
     const app = { stage, appId: 1, clientId: "public", slug: stage === "prod" ? "getquick-support" : "getquick-support-staging", fingerprint: "public" };
     const guard = vi.fn(async () => { if (change !== "uncertain") throw new Error(change); });
-    const broker = planningApplyBroker({ stage, worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: f.input.databases, migrations: [f.grant],
+    const broker = planningApplyBroker({ discord: discordBinding, stage, worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: f.input.databases, migrations: [f.grant],
       instances: { Worker: "w", GitHubAppSecret: "a" }, bundle: "b".repeat(64), app }, { cloudflareToken: "FAKE_ONLY", stateBearer: "FAKE_ONLY", cloudflare: send, state: send,
-      app: { provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 1, checkedAt: new Date().toISOString() }) } }, guard, () => {});
+      app: { discord: discordBinding, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 1, checkedAt: new Date().toISOString() }) } }, guard, () => {});
     const op = { op: "state-set" as const, fqn: "SupportLedger", value: f.updating };
     await expect(broker.handle(op)).rejects.toThrow("apply blocked");
     await expect(broker.handle(op)).rejects.toThrow("apply blocked");

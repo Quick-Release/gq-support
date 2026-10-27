@@ -1,5 +1,8 @@
 // Apply-only trusted broker operation. No graph/plan is imported in the RPC
 // checker, and no state bearer is inherited by Wrangler or its subprocesses.
+import { isDeepStrictEqual } from "node:util";
+import { trustedDiscordCustody } from "./trusted-discord-custody.ts";
+import type { DiscordCustodyBinding } from "./discord-alert-secret.ts";
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -12,38 +15,60 @@ import type { AppSecretCustody } from "./github-app-secret.ts";
 import { requireEvidence, refusal, checkStage, protectedAppSlugs, type ProtectedStage } from "./planning-state.ts";
 import { boundedBody } from "./planning-read.ts";
 
-export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>, dispatch: () => void, targetStage: ProtectedStage): AppSecretCustody {
+export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>, dispatch: () => void, targetStage: ProtectedStage, discord: DiscordCustodyBinding): AppSecretCustody {
   env = { ...env };
   checkStage(targetStage);
   requireEvidence(env.GITHUB_APP_SLUG === protectedAppSlugs[targetStage]);
+  const alerts = trustedDiscordCustody(env, workerName, discord, transport, check, dispatch);
+  let running = false, closed = false, phase = 0, ticket = 0;
+  const expected: [string, string, unknown?][] = [
+    ["GET", "https://api.github.com/app"],
+    ["PUT", "", { name: "GITHUB_APP_PRIVATE_KEY", type: "secret_text", text: env.GITHUB_APP_PRIVATE_KEY }],
+    ["PUT", "", { name: "GITHUB_WEBHOOK_SECRET", type: "secret_text", text: env.GITHUB_WEBHOOK_SECRET }],
+    env.GITHUB_WEBHOOK_PREVIOUS_SECRET ? ["PUT", "", { name: "GITHUB_WEBHOOK_PREVIOUS_SECRET", type: "secret_text", text: env.GITHUB_WEBHOOK_PREVIOUS_SECRET }] : ["DELETE", "/GITHUB_WEBHOOK_PREVIOUS_SECRET"],
+  ];
+  const guard = async <T>(next: number, run: () => Promise<T>): Promise<T> => {
+    try { requireEvidence(!closed && !running && phase === next); running = true; phase++; return await run(); }
+    catch { closed = true; throw refusal(); }
+    finally { running = false; }
+  };
   let provisioned: Awaited<ReturnType<typeof provisionAppKey>> | undefined;
   requireEvidence(/^[a-z0-9][a-z0-9-]{0,62}$/.test(workerName));
   const request: typeof fetch = async (url, init) => {
-    await check();
-    const value = new URL(String(url));
-    const secret = `/client/v4/accounts/${SUPPORT_ACCOUNT_ID}/workers/scripts/${workerName}/secrets`;
-    requireEvidence(init?.redirect === "error" && !value.search && !value.hash && !value.username && !value.password &&
-      ((String(url) === "https://api.github.com/app" && (init.method ?? "GET") === "GET") ||
-        (value.origin === "https://api.cloudflare.com" && [secret, `${secret}/GITHUB_WEBHOOK_PREVIOUS_SECRET`].includes(value.pathname) &&
-          ["PUT", "DELETE"].includes(init.method ?? ""))));
-    // Authenticate the public App response against reviewed custody metadata
-    // before the key helper can reach its subsequent secret PUT.
-    dispatch();
-    const response = await transport(url, init);
-    requireEvidence(!response.redirected && (!response.url || response.url === String(url)));
-    // The old helper intentionally accepts 404 for previous-secret removal.
-    if (response.status === 404 && init.method === "DELETE") return new Response(null, { status: 404 });
-    const bytes = await boundedBody(response, 64 * 1024);
-    if (String(url) === "https://api.github.com/app") {
-      const app = JSON.parse(Buffer.from(bytes).toString()) as { id?: number; client_id?: string; slug?: string };
-      requireEvidence(String(app.id) === env.GITHUB_APP_ID && app.client_id === env.GITHUB_APP_CLIENT_ID && app.slug === protectedAppSlugs[targetStage]);
-    }
-    return new Response(bytes, { headers: { "content-type": "application/json" } });
+    try {
+      requireEvidence(!closed);
+      const step = expected[ticket++];
+      const value = new URL(String(url));
+      const secret = `/client/v4/accounts/${SUPPORT_ACCOUNT_ID}/workers/scripts/${workerName}/secrets`;
+      requireEvidence(init?.redirect === "error" && !value.search && !value.hash && !value.username && !value.password &&
+        ((String(url) === "https://api.github.com/app" && (init.method ?? "GET") === "GET") ||
+          (value.origin === "https://api.cloudflare.com" && [secret, `${secret}/GITHUB_WEBHOOK_PREVIOUS_SECRET`].includes(value.pathname) &&
+            ["PUT", "DELETE"].includes(init.method ?? ""))));
+      requireEvidence(step && (init?.method ?? "GET") === step[0] && String(url) === (step[1] === "https://api.github.com/app" ? step[1] : `https://api.cloudflare.com${secret}${step[1]}`) &&
+        (step[2] === undefined ? init?.body === undefined : typeof init?.body === "string" && isDeepStrictEqual(JSON.parse(init.body), step[2])));
+      await check(); requireEvidence(!closed);
+      // Authenticate the public App response against reviewed custody metadata
+      // before the key helper can reach its subsequent secret PUT.
+      dispatch();
+      const response = await transport(url, init);
+      requireEvidence(!response.redirected && (!response.url || response.url === String(url)));
+      // The old helper intentionally accepts 404 for previous-secret removal.
+      if (response.status === 404 && init.method === "DELETE") return new Response(null, { status: 404 });
+      const bytes = await boundedBody(response, 64 * 1024);
+      if (String(url) === "https://api.github.com/app") {
+        const app = JSON.parse(Buffer.from(bytes).toString()) as { id?: number; client_id?: string; slug?: string };
+        requireEvidence(String(app.id) === env.GITHUB_APP_ID && app.client_id === env.GITHUB_APP_CLIENT_ID && app.slug === protectedAppSlugs[targetStage]);
+      }
+      requireEvidence(response.ok);
+      return new Response(bytes, { headers: { "content-type": "application/json" } });
+    } catch { closed = true; throw refusal(); }
   };
   return {
-    provisionKey: async (stage, worker) => { requireEvidence(stage === targetStage && worker === workerName); provisioned = await provisionAppKey(stage, worker, env, request); return provisioned; },
-    provisionWebhook: async (worker, appId) => { requireEvidence(worker === workerName && provisioned && appId === provisioned.appId); return provisionWebhookSecrets(worker, appId, env, request); },
-    check: async (metadata, worker) => {
+    discord: alerts.binding,
+    provisionDiscord: (worker) => guard(2, async () => { requireEvidence(worker === workerName); await alerts.run(); }),
+    provisionKey: (stage, worker) => guard(0, async () => { requireEvidence(stage === targetStage && worker === workerName); provisioned = await provisionAppKey(stage, worker, env, request); return provisioned; }),
+    provisionWebhook: (worker, appId) => guard(1, async () => { requireEvidence(worker === workerName && provisioned && appId === provisioned.appId); return provisionWebhookSecrets(worker, appId, env, request); }),
+    check: (metadata, worker) => guard(3, async () => {
       requireEvidence(worker === workerName && provisioned &&
         metadata.clientId === provisioned.clientId && metadata.slug === provisioned.slug && metadata.fingerprint === provisioned.fingerprint &&
         "appId" in metadata && metadata.appId === provisioned.appId && metadata.stage === targetStage && metadata.slug === protectedAppSlugs[targetStage]);
@@ -88,6 +113,6 @@ export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, tr
         requireEvidence(Object.keys(result).sort().join() === "appId,checkedAt" && result.appId === provisioned.appId && Number.isFinite(Date.parse(result.checkedAt)));
         return result;
       } finally { rmSync(scratch, { recursive: true, force: true }); }
-    },
+    }),
   };
 }

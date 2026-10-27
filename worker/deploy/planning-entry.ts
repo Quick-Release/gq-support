@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { constants, openSync, fstatSync, lstatSync, readFileSync, closeSync, unlinkSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import * as Effect from "effect/Effect";
@@ -10,16 +11,10 @@ import { continueProtectedPlan } from "./protected-plan-continuation.ts";
 import { trustedAppCustody } from "./trusted-app-custody.ts";
 import { approvalCommand, githubCandidateApproval } from "./github-candidate-approval.ts";
 
-// The PR110 ordinary provider performs Discord secret removal and trace
-// restoration outside the PR117 App custody protocol. That protocol cannot
-// express these operations. Do not let an otherwise valid native plan apply
-// while silently skipping them. Removing this gate requires a separately
-// reviewed custody/profile design and integrated continuation evidence.
-export const integrationCodeBlockers = Object.freeze([
-  "Discord secret/settings custody and verified trace restoration are unsupported by the protected apply protocol",
-]);
-export function assertIntegratedCustodyReady(): void {
-  requireEvidence(integrationCodeBlockers.length === 0);
+// Fixed App custody now owns the Discord transition; live metadata remains mandatory.
+export const integrationCodeBlockers = Object.freeze([] as string[]);
+export function assertIntegratedCustodyReady(config?: ReviewedPlannerConfig): void {
+  requireEvidence(config?.discord && Object.keys(config.discord).join() === "enabled" && typeof config.discord.enabled === "boolean");
 }
 
 // Explicit private delivery only; no profile, config cache, minting or discovery.
@@ -45,6 +40,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
     requireEvidence(reviewed && env.GITHUB_REPOSITORY === "Quick-Release/gq-support" && env.GITHUB_REF === "refs/heads/main" &&
       /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? "") && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? "") &&
       /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT ?? "") && env.DEPLOY_STAGE === reviewed.endpoint.target.stage);
+    env = { ...env };
     const config = structuredClone(reviewed);
     checkTarget(config.endpoint.target);
     const { stage } = config.endpoint.target;
@@ -53,7 +49,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
     const approval = { ...config.approval, head: env.GITHUB_SHA!, run: Number(env.GITHUB_RUN_ID), attempt: Number(env.GITHUB_RUN_ATTEMPT) };
     const repo = new URL("../../", import.meta.url).pathname;
     const { manifest: sourceManifest, ...originalSource } = sourceEvidence(repo, approval.head);
-    assertIntegratedCustodyReady(); // before owner-window acquisition or private delivery
+    assertIntegratedCustodyReady(config); // before owner-window acquisition or private delivery
     const window = exclusiveLocalWindow(`/dev/shm/gq-support-${stage}-writer.lock`, config.window);
     try {
       const githubToken = readPrivate(env.GITHUB_APPROVAL_READ_TOKEN_FILE);
@@ -62,7 +58,11 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       const stateBearer = readPrivate(credentialFile);
       const readToken = readPrivate(env.CLOUDFLARE_PLANNING_READ_TOKEN_FILE);
       const deploymentToken = readPrivate(env.CLOUDFLARE_APPLY_TOKEN_FILE);
-      const appEnv = { CLOUDFLARE_ACCOUNT_ID: config.endpoint.account, CLOUDFLARE_API_TOKEN: deploymentToken,
+      const discord = Object.freeze({ enabled: config.discord.enabled, release: approval.head, commitment: randomBytes(32).toString("hex") });
+      requireEvidence(!env.DISCORD_ALERT_WEBHOOK_URL && !env.DISCORD_ALERTS_ENABLED && !env.DISCORD_ALERT_RELEASE &&
+        (discord.enabled ? env.DISCORD_ALERT_WEBHOOK_URL_FILE === "/dev/shm/gq-protected/discord-alert-webhook-url" : !env.DISCORD_ALERT_WEBHOOK_URL_FILE));
+      const appEnv = { DISCORD_ALERTS_ENABLED: String(discord.enabled), GITHUB_SHA: discord.release,
+        ...(discord.enabled ? { DISCORD_ALERT_WEBHOOK_URL: readPrivate(env.DISCORD_ALERT_WEBHOOK_URL_FILE) } : {}), CLOUDFLARE_ACCOUNT_ID: config.endpoint.account, CLOUDFLARE_API_TOKEN: deploymentToken,
         GITHUB_APP_ID: String(config.app.id), GITHUB_APP_CLIENT_ID: config.app.clientId, GITHUB_APP_SLUG: config.app.slug,
         GITHUB_APP_PRIVATE_KEY: readPrivate(env.GITHUB_APP_PRIVATE_KEY_FILE), GITHUB_WEBHOOK_SECRET: readPrivate(env.GITHUB_WEBHOOK_SECRET_FILE),
         ...(env.GITHUB_WEBHOOK_PREVIOUS_SECRET_FILE ? { GITHUB_WEBHOOK_PREVIOUS_SECRET: readPrivate(env.GITHUB_WEBHOOK_PREVIOUS_SECRET_FILE) } : {}),
@@ -72,7 +72,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       const initial = await snapshotInput(await acquire(), config.endpoint.target);
       const app = await planningPreflight(appEnv, transport, stage);
       requireEvidence(app.appId === config.app.id && app.clientId === config.app.clientId && app.slug === config.app.slug);
-      const evidence = { ...originalSource, target: digest({ account: config.endpoint.account, stack: STACK, stage, worker: config.worker, endpoint: config.endpoint, app: config.app, approval: config.approval }),
+      const evidence = { ...originalSource, target: digest({ account: config.endpoint.account, stack: STACK, stage, worker: config.worker, endpoint: config.endpoint, app: config.app, discord, approval: config.approval }),
         state: digest(initial), window: window.binding };
       const controller = new AbortController();
       const cancel = () => controller.abort();
@@ -80,9 +80,9 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       try {
         return await window.runApply(() => continueProtectedPlan({ repo, sourceManifest, input: { ...initial, target: config.endpoint.target, databases: config.endpoint.databases }, app, policy: approval,
           githubToken, github: transport, evidence, signal: controller.signal, checkWindow: window.check,
-          broker: { stage, worker: config.worker, stateOrigin: config.endpoint.origin, databases: config.endpoint.databases },
+          broker: { discord, stage, worker: config.worker, stateOrigin: config.endpoint.origin, databases: config.endpoint.databases },
           custody: { cloudflareToken: deploymentToken, stateBearer, cloudflare: transport, state: transport },
-          appCustody: (check, dispatch) => trustedAppCustody(appEnv, config.worker, transport, check, dispatch, stage),
+          appCustody: (check, dispatch) => trustedAppCustody(appEnv, config.worker, transport, check, dispatch, stage, discord),
           revalidate: async () => {
             window.check();
             const fresh = await snapshotInput(await acquire(), config.endpoint.target);
@@ -102,7 +102,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
 });
 export const planningPrerequisites = Object.freeze({ endpointContract: productionEndpointContract, stagingEndpointContract, reviewedPlannerConfig,
   integrationCodeBlockers,
-  status: "CODE blocked on integrated Discord custody; LIVE metadata, private delivery, protected runner, writer exclusion and candidate approval also required",
+  status: "LIVE metadata, bounded Discord custody, private delivery, protected runner, writer exclusion and candidate approval required",
 });
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   Effect.runPromise(protectedPlanningEntry(process.env.ALCHEMY_STATE_BEARER_FILE ?? "")).catch(() => {

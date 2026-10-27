@@ -27,9 +27,9 @@ live notification, restore drill, or hosted CI polling/watch was performed.
 - Stack conflict: keep the shared declaration and protected deployment guard;
   restore Discord config validation in the ordinary deployment preflight.
 - Provider conflict: the ordinary App provider still executes key → webhook →
-  Discord custody → deployed-key check. Dropping the Discord call failed the new
-  provider-lifecycle regression. Injected protected custody remains isolated from
-  ambient Discord operations. Failed Discord custody cannot report success.
+  Discord custody → deployed-key check. The follow-up makes Discord a required
+  explicit operation in injected protected custody as well. Failed Discord
+  custody cannot report success.
 - Restore admission/runtime containment, fresh independent ledger/provider checks,
   epoch matching, and uncertain notification isolation are retained unchanged.
 - Latest #117's `exclusiveLocalWindow.runApply` still encloses the complete
@@ -38,45 +38,65 @@ live notification, restore drill, or hosted CI polling/watch was performed.
   force-clear releases unresolved ownership. External exclusion must survive
   runner loss through incident reconciliation.
 
-### Confirmed CODE blocker: protected Discord custody
+### Protected Discord custody follow-up
 
-**Integrated deployment is blocked in code, even when alerts default disabled.**
-`planning-entry.ts` checks `assertIntegratedCustodyReady` after source validation,
-before acquiring the window or reading private delivery. Reviewed LIVE metadata
-alone cannot remove this gate.
+The focused follow-up stacked on PR118 `a15e32c3e86752716bbaa656d21ec1b7b7263ddc`
+implements Discord custody inside the existing GitHubAppSecret apply owner. The
+four resources remain SupportDB, SupportLedger, Worker and GitHubAppSecret.
+`AppSecretCustody.provisionDiscord` is required after webhook provisioning and
+before the deployed App check. Ordinary and protected providers both call it;
+a missing operation fails custody rather than silently completing.
 
-The actual pinned graph has four resources: SupportDB, SupportLedger, Worker and
-GitHubAppSecret. Neither source defines a `DiscordAlertSecret` graph resource.
-Discord operations were folded into the ordinary App provider. The planning
-provider injects a three-operation App custody interface and consequently cannot
-perform that ambient work. There is no reviewed Discord resource/profile/protocol.
-Adding an independently tracked `DiscordAlertSecret` would currently fail the
-exact four-resource snapshot/plan allowlist, lacks a planning provider, and has no
-broker state-write/instance/output contract. This task introduces none of those
-grants or resource designs.
+The child can request only `app-discord` with the reviewed Worker name. It cannot
+supply a URL, secret name/value, mode, revision, settings patch or generic secret
+HTTP request. Trusted custody snapshots the private configuration and consumes a
+fixed sequence before each authentication await. Every nested HTTP dispatch has
+an asynchronous authorization check followed by the final synchronous abort,
+expiry and owner-window guard. Any failure poisons the App/broker continuation;
+there is no replay, force-clear or compensation path.
 
-Concrete unsupported paths under the pinned Worker script:
+Reviewed source chooses the boolean mode. The release is the authenticated
+candidate head. A fresh random session commitment identifies the private
+configuration held in the trusted closure; it is not an unsalted URL/token hash.
+All three public values enter the final candidate digest and published evidence.
+Enabled delivery reserves `/dev/shm/gq-protected/discord-alert-webhook-url`, using
+`DISCORD_ALERT_WEBHOOK_URL_FILE` and the existing one-shot private-file checks.
+The parent supplies that file only during separately authorized live work.
+Disabled mode refuses a URL delivery file. Ambient Discord values are refused.
+No credential or profile was requested or read for this implementation.
 
-- `PUT /secrets` to disable/enable Discord and install the URL/release binding;
-- `DELETE /secrets/DISCORD_ALERT_WEBHOOK_URL` and `/DISCORD_ALERT_RELEASE`;
-- verified absence from `GET /settings`, then `PATCH /script-settings` to restore
-  traces, then settings read-back. GET alone has no mutation authority.
+Every Worker upload is checked for explicit Logs-on/traces-off metadata, before
+an old retained credential can be fetched. Custody disables alerts first, verifies
+Logs-on/traces-off, installs the strict production Discord URL and candidate head,
+enables last, and verifies secret binding names/types and observability. Disabled
+custody disables alerts, removes URL/release, verifies absence, preserves Logs
+and other supported observability settings while restoring traces, then verifies
+again. No successful candidate can retain the temporary disabled-trace exception.
+The API cannot reveal secret_text values: proof combines exact acknowledged
+writes with binding-name/type and settings readback, not a Discord request.
 
-The real Discord helper, bridged to the protected broker with fake HTTP, refuses
-both enabled and disabled transitions before a secret mutation. Direct unsupported
-PUT/DELETE/PATCH requests poison the session with zero privileged dispatches.
-Silently omitting custody would upload traces off and commit an incomplete apply.
-The explicit gate prevents that outcome; green component tests are not a working
-integrated protected deployment.
+The unconditional integration gate is replaced by checked reviewed-mode,
+head/private-session binding, upload, operation-order and final-custody
+prerequisites. Native retained happy paths run all four stage/mode combinations
+through the real shared graph, installed Worker/provider, trusted App/Discord
+custody, broker and verified State/output completion, using synthetic private
+configuration and fake first-party HTTP. Only the remote App RPC process is
+synthetic; these fixtures do **not** establish live Cloudflare settings, remote
+RPC or permission behavior. The default production entry remains blocked by the
+unset reviewed live endpoint/configuration manifests. No bypass was added.
 
-Smallest follow-up: separately review a bounded Discord custody operation/profile
-and its graph ownership (whether the existing App resource or a separate one),
-private config/revision binding and exact state/settings transition. Bind it to
-the retained candidate and existing authorization/deadline/abort/synchronous
-pre-dispatch checks, deny replay after uncertainty, then demonstrate actual shared
-graph → provider → broker → verified output completion in both stages. Do not
-remove the gate until enabled logs-on/traces-off and disabled verified-removal-
-before-traces-on transitions pass, without exposing the broad state bearer.
+Follow-up validation: **1,233 Worker tests / 48 files passed** on Node 26.12.1
+with `--maxWorkers=1` (686.57 seconds); Worker typecheck/lint, root/app JS lint,
+three lint controls, 114 CI-script tests, workflow/runtime policies and
+Worker/docs and candidate-history (200 commits) secret scans passed. Detailed RED/final evidence is recorded in the
+appended bounded-custody section of
+`protected-native-planner-implementation.md`. The earlier evidence below belongs
+to PR118 and is not new evidence for this follow-up. Hosted checks/reviews remain
+uninspected; no CI polling/watch was used. The first push unexpectedly triggered
+the optional shared-DDEV browser hook (7 passed, eighth interrupted, 112 not run).
+Its cleanup restored the plugin link/reloaded PHP; browser fixture state may have
+changed. This is not browser readiness evidence. The publication-hook incident
+is recorded in the implementation report; the retry skips that optional hook.
 
 ### Graph, runtime and migration audit
 
@@ -86,8 +106,9 @@ keys accepted by the broker. D1 bindings and whole-resource migration dependenci
 remain intact. Worker upload keeps traces off during credential transitions;
 the ordinary disabled custody helper preserves Logs settings, removes URL/release,
 verifies absence **before** restoring traces, and verifies the result. Enabled
-custody refuses active/unknown traces. Protected entry cannot complete either
-transition yet; this is a CODE gate, not permission to leave disabled traces off.
+custody refuses active/unknown traces. Protected entry now requires verified
+custody completion in both modes; the temporary upload exception cannot become a
+successful disabled candidate.
 
 Actual ledger migrations 0003/0004 match the #117 pinned fixtures byte-for-byte.
 The previous fixture inferred all checkout migrations were committed; after
@@ -104,7 +125,7 @@ claimed. Unsupported destructive SQL, history conversion, imports/clones,
 replacement/adoption, identity/replication changes and arbitrary actions remain
 intentionally unsupported non-MVP paths, not features to unblock here.
 
-## Newly executed evidence
+## PR118 validation (inherited by the custody follow-up)
 
 All Node checks used Node 26.12.1. Every Worker/native run used `--maxWorkers=1`.
 
@@ -152,7 +173,7 @@ belong to their pinned source heads, not this integrated candidate.
 
 ## Remaining CODE and LIVE gates
 
-Besides the protected Discord protocol blocker, #20 lacks external platform 5xx,
+#20 still lacks external platform 5xx,
 missing-Cron and deployment-failure observations, outer tick/prompt wrapper failure
 observations and failed-route observations. Existing Discord producer tests do
 not make #20 accepted. Managed Composer/tested-ZIP MVP upgrades, vvaz **or**
