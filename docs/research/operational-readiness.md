@@ -504,3 +504,22 @@ runner/exclusions, credentials, Test F/drills, receipts and human acknowledgment
 Parent fallback POLICY remains pending and independent. #20/#29 remain open; no
 production enablement, deploy, notification, restore or expanded credential grant.
 Configured 2026-10-17 runtime remains unproven under test date 2026-09-16.
+
+### Private delivery/read replay custody CODE slice (stacked on #127)
+
+`observePrivateFiles` now consumes explicit owner-only bounded files and reserves a
+permanent exclusive local journal slot with file and directory fsync before any
+GitHub/Worker dispatch. The [exact contract](../../worker/tools/observer/README.md#bounded-private-launcher-delivery-and-read-replay-custody-stacked-on-127)
+separates manifest approval from credentials, limits the journal to 256 slots, and
+blocks on collisions/corruption/exhaustion without expiry reassignment or deletion.
+Offline descriptor, fsync, child-process crash/contention and fake-HTTP tests are
+CODE evidence only. The parent must still prove the persistent storage domain,
+runner/host-loss and backup behavior, all-launcher exclusion, safe secret-file
+transfer, source-reviewed identities, genuine approval and independent target
+attestation. Hosted ubuntu-latest is ephemeral; no runner/store/vendor is configured.
+No caller boolean discharges these prerequisites. This read claim cannot release
+support/provider/restore owners or substitute for a notification-send journal,
+continuous evidence carry or recovery semantics. #20/#29 remain open; receipt/human
+acknowledgment and parent fallback policy remain unverified. Actual-wire continuity
+and health remain unknown. Configured 2026-10-17 runtime is still unproven under
+2026-09-16 tests. Production remains disabled; no live proof was attempted.

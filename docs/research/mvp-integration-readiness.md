@@ -453,3 +453,15 @@ records/credentials/scope/evidence, runner/exclusions, Test F/drills, receipts a
 human acknowledgment. #20/#29 remain open; configured 2026-10-17 remains unproven
 under test date 2026-09-16. See the [design](external-incident-observer.md#authenticated-digest-only-review-loader-code-slice)
 for exact limits and the next safe parent-owned slice.
+
+### Bounded launcher read custody (stacked on #127)
+
+The [private launcher contract](../../worker/tools/observer/README.md#bounded-private-launcher-delivery-and-read-replay-custody-stacked-on-127)
+now has offline CODE for exact owner-only one-shot file delivery and a permanent,
+finite read-session claim before GitHub/Worker dispatch, composed with actual #127/
+#126. Parent-owned transfer, persistent runner/storage-domain/host-loss proof,
+genuine identity/approval and independent target attestation remain absent. No
+notification/provider/restore authority, continuous evidence or incident recovery
+follows from read replay refusal. #20/#29 stay open; receipt/human acknowledgment
+and fallback policy remain unverified. No production enablement or live action;
+configured 2026-10-17 runtime remains unproven under the 2026-09-16 test runtime.

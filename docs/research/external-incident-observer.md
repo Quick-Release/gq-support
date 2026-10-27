@@ -1096,3 +1096,36 @@ account/State/settings operation, deployment/drill/send/merge, DDEV/browser, CI 
 or watch is part of validation. Publication uses `GQ_SUPPORT_SKIP_PRE_PUSH=1`;
 hosted checks/reviews are uninspected. No scheduler, sender, journal or entry point
 was enabled.
+
+## Bounded private delivery and read-session custody, stacked on #127
+
+The concrete launcher-only adapter is now `worker/tools/observer/private-launcher.ts`.
+Its exact delivery schema, descriptor custody, permanent 256-slot replay journal,
+filesystem assumptions, blocked retention frontier and remaining parent/LIVE work
+are specified in the [observer README](../../worker/tools/observer/README.md#bounded-private-launcher-delivery-and-read-replay-custody-stacked-on-127).
+It consumes explicit owner-only `manifest.json` and `credentials.json` files before
+parsing, separates MANIFEST-only public approval from credential bytes, and composes
+the actual #127 loader with #126 through injected HTTP. Exclusive file creation,
+file fsync and directory fsync precede every first GitHub dispatch. No session
+expiry, crash, failed auth/read or concurrent launcher can reassign an existing
+slot under the stated filesystem contract. Partial/corrupt entries and collisions
+block; there is no cleanup or automatic storage replacement policy.
+
+Implemented CODE evidence uses ephemeral fake files, real file descriptors/fsync,
+multiple child processes and fake HTTP. It establishes neither persistent runner
+nor host-loss durability, backup integrity, all-runner exclusion or genuine target
+attestation. Existing deployment delivery requires 0400 files at a specific tmpfs
+path; a tool secret delivery is not assumed to meet that path/mode or this adapter's
+ancestor rules. Parent-owned safe transfer and persistent storage proof remain
+prerequisites, with no store/vendor/runner selected and no discovery/secret request.
+
+This claim is restricted to `observer_reads`; it is not a durable alert-send journal,
+notification receipt, continuous storage witness or restore-safety proof. #122 failure
+carry, #125 pre-validation capability consumption, #126 stream disposal and exact
+vvaz OR gmarques fresh record revalidation remain intact. Supplied #127 Standards0/
+Spec0 is context only. Actual-wire continuity/health/recovery stay unknown; #20/#29,
+receipt/human acknowledgment and fallback policy stay unresolved. No workflow,
+scheduler, live account/State/settings access, notification, drill or deployment was
+added. Minimal next step is parent review of delivery/storage custody and retention,
+then independently attested identity/target evidence before genuine delivery/approval.
+Configured 2026-10-17 runtime remains unproven under 2026-09-16 test runtime.
