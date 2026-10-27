@@ -1,0 +1,67 @@
+import { describe, expect, it, vi } from "vitest";
+import { planningApplyBroker } from "../deploy/planning-apply-broker.ts";
+import { ACCOUNT } from "../deploy/planning-state.ts";
+const app = { stage: "prod", clientId: "synthetic", slug: "getquick-support", appId: 123, fingerprint: "synthetic-public" };
+const origin = "https://api.cloudflare.com";
+const script = `${origin}/client/v4/accounts/${ACCOUNT}/workers/scripts/synthetic-worker`;
+function fixture(check = vi.fn(async () => {})) {
+  const transport = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: {} }));
+  const custody = { cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: transport, state: transport,
+    app: { provisionKey: vi.fn(async () => app), provisionWebhook: vi.fn(async () => {}), check: vi.fn(async () => ({ appId: 123, checkedAt: new Date().toISOString() })) } };
+  const broker = planningApplyBroker({ instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databaseIds: ["db1", "db2"], app }, custody, check);
+  return { broker, transport, custody, check };
+}
+describe("narrow real-provider broker", () => {
+  it.each([
+    ["GET", `${origin}/client/v4/accounts/other/workers/scripts/synthetic-worker/settings`],
+    ["GET", `${script}/settings?token=bad`], ["GET", `${script}/../another/settings`],
+    ["PUT", `${script}/secrets`], ["POST", `${origin}/client/v4/accounts/${ACCOUNT}/d1/database/db1/query`],
+    ["DELETE", script], ["GET", "http://api.cloudflare.com/client/v4/accounts/x"],
+  ])("denies %s %s and poisons the session before custody", async (method, url) => {
+    const { broker, transport } = fixture();
+    await expect(broker.handle({ op: "cloudflare", method, url, body: "", contentType: "" })).rejects.toThrow("apply blocked");
+    await expect(broker.handle({ op: "cloudflare", method: "GET", url: script + "/settings", body: "", contentType: "" })).rejects.toThrow("apply blocked");
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("authenticates at each call and never forwards child headers", async () => {
+    const { broker, transport, check } = fixture();
+    await broker.handle({ op: "cloudflare", method: "GET", url: script + "/settings", body: "", contentType: "" });
+    expect(check).toHaveBeenCalledOnce(); expect(transport).toHaveBeenCalledOnce();
+    expect(new Headers(transport.mock.calls[0][1]?.headers).get("authorization")).toBe("Bearer CF_CANARY");
+  });
+  it("revokes immediately before State writes", async () => {
+    const { broker, transport } = fixture(vi.fn(async () => { throw new Error("REVOKED_CANARY"); }));
+    await expect(broker.handle({ op: "state-set", fqn: "Worker", value: { fqn: "Worker", instanceId: "i", status: "updated" } })).rejects.toThrow("apply blocked");
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("preserves the native updating checkpoint and never retries uncertain commits", async () => {
+    const { broker, transport } = fixture(); transport.mockRejectedValue(new Error("PRIVATE_TRANSPORT_CANARY"));
+    const operation = { op: "state-set" as const, fqn: "Worker", value: { fqn: "Worker", instanceId: "i", status: "updating", old: { fqn: "Worker", instanceId: "i", status: "updated" } } };
+    await expect(broker.handle(operation)).rejects.toThrow("apply blocked");
+    await expect(broker.handle(operation)).rejects.toThrow("apply blocked"); expect(transport).toHaveBeenCalledOnce();
+    expect(broker.outcome()).toEqual({ closed: true, mutations: 1, completed: false });
+  });
+  it("rejects replacement cleanup and premature secret/output operations", async () => {
+    const { broker, transport } = fixture();
+    await expect(broker.handle({ op: "state-set", fqn: "Worker", value: { fqn: "Worker", status: "replaced", old: {} } })).rejects.toThrow("apply blocked");
+    expect(transport).not.toHaveBeenCalled();
+    const next = fixture(); await expect(next.broker.handle({ op: "app-key", worker: "synthetic-worker" })).rejects.toThrow("apply blocked");
+    expect(next.custody.app.provisionKey).not.toHaveBeenCalled();
+    await expect(fixture().broker.handle({ op: "state-output", value: {} })).rejects.toThrow("apply blocked");
+  });
+});
+
+it("rejects changed approved bundle bytes before the script PUT", async () => {
+  const app = { stage: "prod", clientId: "synthetic", slug: "getquick-support", appId: 123, fingerprint: "public" };
+  const send = vi.fn<typeof fetch>();
+  const broker = planningApplyBroker({ worker: "synthetic-worker", stateOrigin: "https://state.invalid", instances: { Worker: "i", GitHubAppSecret: "j" }, databaseIds: ["db1", "db2"], app, bundle: "b".repeat(64) }, {
+    cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: send, state: send,
+    app: { provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 123, checkedAt: new Date().toISOString() }) },
+  }, async () => {});
+  const form = new FormData();
+  form.append("metadata", JSON.stringify({ main_module: "main.js", bindings: [{ type: "d1", name: "DB", id: "db1" }, { type: "d1", name: "LEDGER", id: "db2" }] }));
+  form.append("main.js", new File(["changed code"], "main.js", { type: "application/javascript" }));
+  const encoded = new Response(form);
+  await expect(broker.handle({ op: "cloudflare", method: "PUT", url: script, contentType: encoded.headers.get("content-type")!, body: Buffer.from(await encoded.arrayBuffer()).toString("base64") })).rejects.toThrow("apply blocked");
+  expect(send).not.toHaveBeenCalled();
+});

@@ -42,9 +42,13 @@ export function checkWorkflow(path, text, { pullRequestCode = false } = {}) {
   }
 
   if (path === '.github/workflows/deploy-worker.yml') {
-    const gate = executable.indexOf('release-evidence.mjs plan "$DEPLOY_STAGE"');
-    const apply = executable.indexOf('pnpm exec alchemy deploy');
-    if (gate < 0 || apply < gate) report(0, 'deploy requires the fail-closed safe-plan gate before apply');
+    const gate = 'node --import ./deploy/planning-loader.mjs deploy/planning-entry.ts';
+    for (const required of [gate, "if: github.ref == 'refs/heads/main'", 'environment: ${{ inputs.stage }}', 'group: deploy-worker-${{ inputs.stage }}', 'cancel-in-progress: false']) {
+      if (!executable.includes(required)) report(0, `deploy safe-plan continuation must retain ${required}`);
+    }
+    if (/\balchemy (?:deploy|plan)\b|release-evidence\.mjs plan|upload-artifact|workflow_run:/.test(executable)) {
+      report(0, 'deploy safe-plan continuation forbids replan, artifact handoff and legacy CLI apply');
+    }
   }
   if (path === '.github/workflows/release-plugin.yml') {
     const publish = text.match(/^ {2}publish:\n([\s\S]*?)(?=^ {2}[\w-]+:|$(?![\s\S]))/m)?.[1] ?? '';

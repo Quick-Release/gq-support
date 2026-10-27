@@ -30,6 +30,7 @@ export default Cloudflare.Worker(
   "Worker",
   {
     main: import.meta.url,
+    workersDev: { enabled: true, previewsEnabled: false },
     compatibility: { date: "2026-10-17" },
     observability: { enabled: true, traces: { enabled: true } },
   },

@@ -42,32 +42,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
-      # Intentionally blocks apply until a reviewed, non-mutating native-plan
-      # adapter can verify BOTH databases. No bypass input or credentialed plan.
-      - name: Require safe pre-apply plan
+      # This one process retains the exact native candidate through post-plan
+      # GitHub approval. Missing reviewed config/delivery/runner/window refuses.
+      # There is deliberately no subsequent CLI deploy (which would replan).
+      - name: Require safe pre-apply plan and authenticated continuation
         env:
           DEPLOY_STAGE: ${{ inputs.stage }}
           CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
-        run: node ../scripts/ci/release-evidence.mjs plan "$DEPLOY_STAGE"
-      - name: Verify environment approval enforcement
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DEPLOY_STAGE: ${{ inputs.stage }}
-        run: node ../scripts/ci/release-evidence.mjs approval "$DEPLOY_STAGE"
-      - name: Verify the stage App and deploy with Alchemy
-        env:
-          DEPLOY_STAGE: ${{ inputs.stage }}
-          CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          GITHUB_APP_CLIENT_ID: ${{ vars.SUPPORT_GITHUB_APP_CLIENT_ID }}
-          GITHUB_APP_ID: ${{ vars.SUPPORT_GITHUB_APP_ID }}
-          GITHUB_APP_SLUG: ${{ vars.SUPPORT_GITHUB_APP_SLUG }}
-          GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
-          GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
-          GITHUB_WEBHOOK_PREVIOUS_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET }}
-          GITHUB_WEBHOOK_DIAGNOSTICS: ${{ inputs.stage == 'staging' && vars.SUPPORT_GITHUB_WEBHOOK_DIAGNOSTICS == 'true' && 'true' || 'false' }}
-        run: |
-          set -euo pipefail
-          node scripts/verify-github-app.ts "$DEPLOY_STAGE"
-          pnpm exec alchemy deploy --stage "$DEPLOY_STAGE" --yes
-          node scripts/audit-github-app-custody.ts "$DEPLOY_STAGE"
+        run: node --import ./deploy/planning-loader.mjs deploy/planning-entry.ts

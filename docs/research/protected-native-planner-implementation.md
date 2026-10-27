@@ -492,3 +492,259 @@ assertion (exit 1). Restoring the wrapper returned it to green. Transport probes
 require actual kernel error codes (including ENETUNREACH and EROFS); a timeout is
 not accepted as proof of denial. This is local fixture/runtime evidence, not a
 live Test F or protected-runner result.
+
+## Authenticated retained-process continuation (follow-up to PR114)
+
+This section supersedes the earlier missing-continuation/always-die descriptions.
+The production entry is now executable when **reviewed source configuration** and
+all independent prerequisites exist. `reviewedPlannerConfig` is deliberately
+absent. No live credential, endpoint, approval, setting, workflow dispatch,
+deployment, migration, provisioning or Test F was used during implementation.
+Names vvaz/gmarques are authority policy, never release approval.
+
+### Implemented protocol and authority
+
+The trusted launcher takes the local exclusive lease **before acquisition**,
+checks the committed clean source and protected workflow, authenticates the exact
+GitHub repository/run/attempt/main/head and environment policy, acquires the
+attested endpoint snapshot, and runs the existing exact `/app` preflight. It
+copies and hashes the tracked source/lockfiles/SQL. The namespace child independently
+hashes that copied source and checks its exact file inventory before declarations. Neither an environment flag nor a
+caller-constructed verifier supplies human authorization.
+
+The child executes installed beta.83 `Plan.make` once. It holds the actual native
+object, provider functions, Effect scope/services, read-only snapshot and
+resource-scoped ArtifactStore while awaiting approval. The explicit installed
+build uses the native `Artifacts.cached("build")` bag, also used by installed
+Worker diff/reconcile. Approved module names, entrypoint and byte hashes are bound
+into the candidate identity; the broker independently hashes the multipart upload
+and refuses differing bytes before sending it. Before the phase gate or first
+State checkpoint, the child also checks the retained build object in the original
+native artifact bag and rehashes its bytes. Native object/provider/function
+integrity is checked by `retainCandidate` immediately before the one-shot Apply.
+No native plan is encoded, written, restored, reconstructed or replanned.
+
+Public output is at most 2 KiB: exact four-resource actions, source/lockfile/SQL/
+target/state/window digests, bundle digest, random candidate/nonce, trusted
+plan-ready/expiry times, and the approval command. Private state, outputs, source,
+module contents, App fingerprint, native errors and progress stay off logs and
+artifacts. Only private anonymous pipes carry snapshot data, bounded SDK request
+bytes, State commits and public custody results. The FD protocol has sequential
+IDs checked **before dispatch**, fixed operation names and exact message shapes;
+there is no CLI, arbitrary method, callback or remotely supplied entrypoint.
+
+The owner manually creates one exact command on issue #20 **after** plan-ready:
+
+```text
+approve-plan Quick-Release/gq-support RUN/ATTEMPT HEAD CANDIDATE NONCE
+```
+
+The candidate digest binds the reviewed exclusive-window duty as well as source,
+state and target. Approval means the approver has reviewed that evidence and
+confirms the owner-controlled exclusion is still true. The launcher performs no
+comment, review, deployment or dispatch writes. Approval is transported through
+[GitHub's documented issue-comment GETs](https://docs.github.com/en/rest/issues/comments):
+list the issue's comments since plan-ready (one bounded page; pagination or 100
+rows refuses), then re-read the exact comment. The supported numeric vvaz/gmarques
+IDs must be supplied in reviewed metadata. They are independently checked against
+current `/users/{login}` and repository permission GETs; current write/maintain/
+admin access is required for both. Username assertions, `author_association`,
+self-reported times and fake verifier objects confer no authority.
+
+[Workflow-run metadata and environment approval history](https://docs.github.com/en/rest/actions/workflow-runs)
+bind the exact numeric repository, run ID, attempt, workflow path, dispatch event,
+main head and `in_progress`/null conclusion. Main must still point at that head,
+be protected with reviews/admin enforcement and disallow force push/deletion.
+The [environment GET](https://docs.github.com/en/rest/deployments/environments)
+must show prod, protected-branch deployment policy and exactly the two reviewed
+numeric User reviewers with prevent-self-review. An actual approved environment
+review by an authorized numeric identity must exist for this run; ambiguous
+history refuses. That earlier review **does not** approve the later candidate.
+The documented environment response has no `can_admins_bypass` property: this
+implementation does not invent one. Missing policy/API permissions refuse.
+
+The post-plan comment must have an authenticated GitHub creation time strictly
+after ready, before expiry, at most five minutes old, no edits, and exactly the
+bound command. There is one accepted comment ID. Editing/deleting it revokes the
+candidate; editing it back still changes its update timestamp. An observed exact
+`revoke-plan` command from an authorized identity also invalidates it. Use
+**edit/delete of the original approval** as the durable revocation procedure;
+a transient separate comment that is deleted before observation is not an
+observable revocation history. Duplicate/conflicting approvals, wrong identity,
+replaced candidate/nonce, cancellation, changed main/permissions/environment,
+transport uncertainty, deleted approval or timeout close the continuation.
+Approval polls every five seconds for at most ten minutes; the retained process
+has a fifteen-minute bound, and each GitHub GET has a ten-second abort bound.
+Approval is rechecked before every broker operation. There is no instantaneous or
+atomic revocation guarantee between a successful check and a request already sent.
+
+Immediately before initial capability handoff the trusted launcher rechecks
+GitHub, independently reacquires endpoint/version/bundle/bindings/DB metadata and
+all state, rehashes clean source/lockfiles/SQL, and checks the same exclusive lease
+and window. Any divergence invalidates the candidate. The final native integrity/
+policy check and protected phase gate run inside the original child context.
+There is no replacement of frozen-plan provider functions: the wrappers' original
+reconcile closures consult a private one-shot capability that was closed throughout
+planning. Failure/uncertainty closes it permanently. All read/list/precreate/
+delete/local-mode/telemetry capabilities remain denied, including during apply.
+
+### Real-provider apply profile and credential custody
+
+The first supported narrow profile is **both D1s noop**, existing Worker update,
+existing GitHubAppSecret update, prod only. Both physical DB IDs, names and native
+instances remain checked against independent reviewed identity evidence. The
+broker has no D1 query/create/delete/patch route, and no D1 State-write permission.
+It deliberately refuses pending D1 updates even when the native additive policy
+would allow their plan. This is a remaining **CODE scope restriction**, not a live
+credential prerequisite or a claim of technical impossibility in beta.83.
+Staging, Worker create/noop, new resource types, assets, managed domains/routes,
+DO lifecycle/exports, version deployments, preview sessions from the graph and
+other SDK surfaces also refuse. Broadening this reviewed profile needs code and
+corresponding native/API tests, never a runtime bypass flag.
+
+The installed Worker provider's actual reconcile/build runs **inside the same
+network namespace**. SDK credentials resolve only to an unusable placeholder;
+Effect HttpClient routes its bytes through the private broker. The broker ignores
+child headers, supplies the actual deployment token in its own closure, and
+allows only this Tipme Worker's settings/subdomain/schedule reads, exact multipart
+script PUT, enabled/non-preview subdomain POST and the one scheduled cron PUT.
+It accepts native Config's Redacted wire representation only for the three
+verified **public** App ID/client-ID/slug values. It grants no App private key,
+webhook secret, state bearer or arbitrary secret binding in the graph/upload.
+The shared declaration explicitly disables application preview URLs because
+beta.83 otherwise enables them by default. Logs/traces settings are unchanged;
+Discord delivery remains absent and gated separately.
+
+State commits use installed beta.83 `makeHttpStateStore` behind an exact prod
+project/Worker/AppSecret PUT-only HttpClient, using the existing approved bearer
+in the trusted broker. Each installed writer operation receives one transport
+ticket consumed before sending: its native retry helper cannot resend an
+uncertain commit. Native `updating` checkpoints contain the
+previous settled row in `old`; those checkpoints are preserved on failure.
+Replacement history/deletion remains forbidden. The broker verifies the original
+native instance IDs, denies State deletes and cross-stack paths, and commits the
+stack output only after all custody checks succeed. The broad bearer's service-side
+cross-stack authority remains disclosed and unchanged; its value never enters
+the graph or child credential environment. Each request has a ten-second bound,
+fixed count/size limits, no redirect and no broker retry. An uncertain write
+poisons the session. Installed provider retries cannot replay a refused/uncertain
+mutation through this broker.
+
+`GitHubAppSecretProvider` keeps its installed application reconcile identity and
+runs existing App-key/webhook provisioning through trusted custody dependencies.
+The trusted process alone holds the key and webhook; its direct fetches are
+restricted to GitHub `/app` and Cloudflare secret operations for the already-bound
+Worker. Before every direct call it repeats authenticated approval/window checks.
+It uploads the key/current webhook and updates/removes the previous webhook as
+before. No key, webhook URL/value or state bearer is persisted in plan props.
+
+The final deployed-key check still uses existing `checkDeployedGitHubApp` and
+Wrangler 4.133.0 `getPlatformProxy`, with one fixed remote service binding and one
+`checkGitHubAppKey(clientId, slug)` RPC. Installed `GetPlatformProxyOptions` offers
+no explicit credential argument. Therefore that **trusted apply-only custody
+operation** runs in a dedicated 30-second process with an empty temporary HOME,
+explicit deployment token/account, metrics off, no env files/profile/state store,
+and discarded stdout/stderr. The dedicated process group is killed on timeout
+and cleaned up after exit, including inherited custody subprocesses. Only public check evidence returns on fd 3.
+Wrangler's temporary remote-binding preview session/network and subprocesses are
+an explicit privileged part of that operation, consistent with
+[Cloudflare's supported remote service bindings](https://developers.cloudflare.com/workers/local-development/bindings-per-env/).
+They never run in planning or receive the broad state bearer/App key/webhook.
+This is not a claim that the graph can open preview sessions or arbitrary sockets.
+The final check is authorized as a bounded custody operation, with checks before
+and after; it cannot offer per-packet revocation inside Wrangler.
+
+The kernel/runtime/read-only dependencies/source remain the explicit trusted
+boundary. Native code and descendant graph subprocesses remain offline, including
+after approval; only brokered operations gain privileges. State/metadata bodies
+retain the 8 MiB bound. The installed unminified multipart Worker needs a separate
+32 MiB binary/48 MiB protocol-frame limit; only that upload can exceed the ordinary
+state limit. Broker messages/requests are bounded in number. Socket/credential/
+source-write canaries remain part of validation. No raw child diagnostics are
+retained or replayed.
+
+### Exclusion, partial failure and remaining prerequisites
+
+`exclusiveLocalWindow` uses an exclusive owner-only lock with inode/device/mode
+and deadline checks at every boundary. A replaced/missing/expired/stale lock
+refuses; it is never stolen or automatically repaired. Protected workflow policy
+requires the main-only environment-bound dispatch job and non-cancelling
+`deploy-worker-${stage}` concurrency, and forbids CLI replanning/artifact handoff.
+The ordinary CLI and destroy durable-stage guards remain in force. These checks
+exclude participating local/protected entries. **They cannot exclude an external
+credential holder or nonparticipating state writer.**
+
+The owner must stop/exclude **every** other state writer and state-endpoint
+acquisition/deployment path, including local operators, other workflows/repositories,
+background jobs and credential holders, before acquisition through the last
+confirmed apply operation. Approval expressly confirms that continuing duty.
+On an uncertain request/partial failure, keep exclusion until incident review
+establishes all in-flight operations have settled; a local process exit is not
+proof of remote cancellation. Repeated hashes observe drift but do not prevent
+ABA, establish an atomic backend revision, or invent CAS in beta.83.
+
+A script upload, secret change or checkpoint may already have succeeded when a
+later check fails or approval is revoked. No rollback is promised. Failed
+continuations cannot be replayed; authoritative incident reconciliation is needed
+before a new separately approved candidate. The updating row/history is retained,
+not normalized into a fake successful state. Broker completion requires the
+final State output commit, not merely a child `applied` message.
+
+Remaining **CODE restrictions** are the explicitly narrow apply profile above;
+there is no claim that unimplemented D1-update/migration, other graph or staging
+paths are enabled. Remote custody's real remote-binding service interaction is
+not exercised by synthetic HTTP tests; it remains required live validation, not
+proof that an unsupported beta.83 adapter is impossible.
+
+Expected **LIVE prerequisites** remain reviewed endpoint/version/ETag/bundle/
+binding/physical-DB metadata and supported authoritative native state; reviewed
+numeric repository and vvaz/gmarques IDs and App/Worker metadata; protected main/
+environment/read-token permissions; protected-runner namespace/toolchain proof
+and disabled core dumps; the external all-writer exclusion window; private
+existing credentials; fresh candidate-specific production approval; and separately
+authorized live Test F for both DBs. Synthetic permission/approval fixtures confer
+none of these. #20/#29 remain open; no release/merge/deployment is approved here.
+
+Private delivery contract names only: `ALCHEMY_STATE_BEARER_FILE`,
+`CLOUDFLARE_PLANNING_READ_TOKEN_FILE`, `GITHUB_APPROVAL_READ_TOKEN_FILE`,
+`CLOUDFLARE_APPLY_TOKEN_FILE`, `GITHUB_APP_PRIVATE_KEY_FILE`,
+`GITHUB_WEBHOOK_SECRET_FILE`, optional `GITHUB_WEBHOOK_PREVIOUS_SECRET_FILE`.
+The entry requires owner-only 0400 single-link regular one-shot files under
+`/dev/shm/gq-protected/` (an owner-only 0700 real directory), basename-only
+paths, no symlink final component, bounded sizes; consumed files
+are unlinked immediately. The owner supplies/removes any unconsumed delivery
+files on failed prerequisite checks and owns rotation/revocation. No value is
+accepted on argv or discovered from a profile. Run/head environment fields are
+locators cross-checked against authenticated GitHub responses, not approval.
+
+
+Continuation validation (local synthetic fixtures only):
+
+- Broader affected run: **368 tests / 19 files** passed (178.59 seconds), covering
+  native/state/endpoint/isolation and App/webhook/application regressions.
+- Final changed-boundary run after installed State writer, exact copied-file
+  inventory and original-context capture: **113 tests / 5 files** passed
+  (155.74 seconds). It includes same-native real Worker reconcile, installed
+  State writes, independently changed source/locks/SQL/target/state/window,
+  cancellation, uncertain upload, post-upload revocation, and partial secret
+  failure without final output or custody replay.
+- Subsequent cached-build identity/byte pre-handoff check: **25 targeted tests /
+  3 files passed**, 19 unrelated tests filtered out (48.08 seconds); real
+  namespace canaries, the complete retained happy path, and DB-prop/checksum
+  guards are included. Trusted direct-fetch custody has **3 further tests**
+  using ephemeral generated keys and fake first-party HTTP; no remote RPC
+  session is created by tests.
+- Worker typecheck/lint, **114 CI-script tests**, workflow policy, runtime matrix
+  policy, affected deployment/test/research/workflow/CI secret scans and diff
+  whitespace checks passed. A mistaken local runtime-policy filename was
+  corrected to `node scripts/ci/runtime-matrix.mjs policy`, which passes.
+
+Fixture development exposed the native updating `old` checkpoint, unminified
+multipart size, Config's Redacted representation and beta.83 preview defaults;
+these are handled explicitly rather than suppressed. API metadata comparisons
+use exact public fields instead of depending on JSON property order. The initial
+synchronous pipe reader was replaced with Node's poll-aware stdin/socket streams
+so waiting for post-plan approval does not treat nonblocking EAGAIN as EOF. All
+child stdout/stderr remain discarded in the final implementation; temporary
+static-label debugging was removed. No real-provider network mutation, live
+approval, private credential read or Test F is claimed by these results.
