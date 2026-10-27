@@ -215,10 +215,19 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
+      - name: Install offline planner namespace tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
       - run: pnpm install --frozen-lockfile
       - name: Check deployment CLI startup
         run: pnpm exec alchemy deploy --help
       - run: pnpm typecheck
+      # Report only finite startup categories. A refusal still reaches the unchanged
+      # mandatory tests, which remain the gate; this probe cannot skip or waive them.
+      - name: Diagnose offline planner startup
+        continue-on-error: true
+        run: node scripts/planning-startup-diagnostic.mjs
       - run: pnpm test
       - name: Validate configured Worker runtime (local only)
         run: pnpm test:configured-runtime
