@@ -111,3 +111,13 @@ fleet/Worker/schema compatibility and rollback evidence; environment policy
 decisions/configuration; explicit human release approval; authorized staged
 rollout and recovery drills. Keep #20 and #29 open. Other readiness decisions
 and restore-containment changes are owned by their existing pending PRs.
+
+## Disabled direct-backend integration on PR111
+
+Local native D1 plan fixtures, confined snapshot acquisition and a retained-plan
+handoff primitive now exist. Their exact behavior, unsupported state forms and
+remaining integration gates are documented in
+[the implementation boundary](../research/protected-native-planner-implementation.md).
+The workflow's refusal remains: these fixtures do not yet supply endpoint
+attestation, full-provider confinement, authenticated candidate approval or an
+exclusive writer window. Do not replace the guard with a second CLI deploy.
