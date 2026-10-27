@@ -187,3 +187,8 @@ Local validation: 11 protocol/limitation tests and all 113 CI-script tests pass;
 Worker typecheck and lint, affected-file ESLint, workflow policy, runtime matrix
 policy and `git diff --check` pass. These results validate this investigation's
 scope only. They neither complete the proposed adapter nor establish readiness.
+
+The subsequent [disabled implementation](protected-native-planner-implementation.md)
+adds native D1 policy fixtures and process-local acquisition/handoff components.
+It preserves the workflow refusal and explicitly records remaining code and
+operational gates; it does not establish live Test F.
