@@ -1279,3 +1279,17 @@ interruption. Publication uses the hook's documented
 `GQ_SUPPORT_SKIP_PRE_PUSH=1` switch to honor the no-DDEV constraint. Required
 Worker/CI/lint/security checks above remain valid; the optional browser hook is
 explicitly interrupted, not passed.
+
+### Discord review correction: propagation policy types
+
+Independent Standards review found no actionable findings. Spec review found
+one P2: string coercion accepted an array containing a supported propagation
+policy and reflected that array into the privileged restoration PATCH.
+Normalization now removes null and accepts only actual strings in the supported
+`authenticated | accept` enum. Arrays, objects, booleans, numbers and unknown
+strings refuse before PATCH and poison custody without replay.
+
+Two array regressions resolved successfully before the fix when rejection was
+required. Added coverage also preserves supported string and null normalization.
+All 140 focused custody/helper/broker tests passed, alongside Worker typecheck,
+affected lint, secret scan and whitespace checks. No live settings, credentials or DDEV operations were used.

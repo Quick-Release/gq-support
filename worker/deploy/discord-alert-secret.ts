@@ -43,7 +43,7 @@ export function checkedObservability(value: unknown): Observability {
   check(obs.logs, ["enabled", "head_sampling_rate", "invocation_logs", "persist", "destinations"]);
   check(obs.traces, ["enabled", "head_sampling_rate", "persist", "destinations", "propagation_policy"]);
   if (obs.traces.propagation_policy === null) delete obs.traces.propagation_policy;
-  if (obs.traces.propagation_policy !== undefined && !["authenticated", "accept"].includes(String(obs.traces.propagation_policy))) throw new Error();
+  if (obs.traces.propagation_policy !== undefined && (typeof obs.traces.propagation_policy !== "string" || !["authenticated", "accept"].includes(obs.traces.propagation_policy))) throw new Error();
   if (obs.issues !== undefined) check(obs.issues, ["enabled"]);
   if (obs.enabled !== true || obs.logs.enabled !== true || typeof obs.traces.enabled !== "boolean") throw new Error();
   return obs;

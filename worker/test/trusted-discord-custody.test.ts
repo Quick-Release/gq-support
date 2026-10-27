@@ -148,3 +148,26 @@ it("also freezes ordinary helper environment before its first await", async () =
   expect(api.secrets.get("DISCORD_ALERT_WEBHOOK_URL")).toBe(privateDiscordURL);
   expect(api.secrets.get("DISCORD_ALERT_RELEASE")).toBe(discord.release);
 });
+
+it.each([
+  { policy: ["accept"] }, { policy: ["authenticated"] }, { policy: {} },
+  { policy: true }, { policy: 1 }, { policy: "unsupported" },
+])("rejects malformed propagation policy $policy before restoration PATCH", async ({ policy }) => {
+  const api = discordApi(worker);
+  Object.assign(api.observability.traces, { propagation_policy: policy });
+  const { custody } = fixture(false, api.request);
+  await expect(custody.run()).rejects.toThrow("apply blocked");
+  expect(api.request.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  const calls = api.request.mock.calls.length;
+  await expect(custody.run()).rejects.toThrow("apply blocked");
+  expect(api.request).toHaveBeenCalledTimes(calls);
+});
+it.each([null, "accept", "authenticated"])("normalizes supported propagation policy %s", async (policy) => {
+  const api = discordApi(worker);
+  Object.assign(api.observability.traces, { propagation_policy: policy });
+  const { custody } = fixture(false, api.request);
+  await custody.run();
+  const patch = api.request.mock.calls.find(([, init]) => init?.method === "PATCH");
+  expect(patch).toBeDefined();
+  expect(JSON.parse(String(patch?.[1]?.body)).observability.traces.propagation_policy).toBe(policy ?? undefined);
+});
