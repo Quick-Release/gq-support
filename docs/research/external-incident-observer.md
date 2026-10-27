@@ -1,6 +1,6 @@
 # External incident observation for MVP #20
 
-Design, offline protocol, Cron producer and fixed observer endpoint CODE, 2026-10-27. **External
+Design, offline protocol, Cron producer, fixed endpoint and HTTPS library CODE, 2026-10-27. **External
 observer disabled; no running external observer, sender, scheduler, credentials or live proof supplied.
 #20 and #29 remain open.**
 Recommendation: use GitHub Actions outside the support Worker for bounded HTTP
@@ -836,3 +836,125 @@ JSON/UTF-8/wire data, size, status, context, batch bounds and same-batch retry.
 All 129 offline tests and five existing negative controls pass after correction;
 Worker typecheck and affected lint pass. This adds no authentication, continuity,
 health or operational authority. No runtime source or LIVE resource changed.
+
+
+### Fixed read-only HTTPS library CODE slice
+
+Based on PR #125 `437ce5baf90c28e249ab937e3f33e2329ed13d96`, on the dedicated
+`t3/observer-https-transport` checkout; no other worktree or source branch changes.
+[`https-transport.ts`](../../worker/tools/observer/https-transport.ts) now connects
+exact readiness/snapshot GETs to the actual v1 decoder and evaluator. The
+[implemented contract and bounds](../../worker/tools/observer/README.md#fixed-https-transport-this-slice)
+supersede earlier statements that transport is absent. No production runtime,
+resource, grants, deployment, scheduler, workflow, journal or sender changes.
+
+The only target is an explicitly supplied reviewed canonical workers.dev HTTPS
+origin whose first label equals the reviewed Worker. No custom routes, paths,
+queries, userinfo, ports, IP/localhost/private literal targets, redirects, cookies
+or ambient credentials/proxies are accepted. Target/context account, stage,
+candidate and generation match before dispatch. Exact deployment/version pins are
+external trusted inputs; no response field authenticates them. Stage-to-origin,
+DNS resolution/target safety, account ownership and current deployment/version
+attestation are still an independent loader duty. **Lexical validation is not DNS
+or ownership proof**. No authenticated loader or live identity evidence exists.
+A valid manifest/digest/caller-created pins cannot establish authority on their own.
+
+The injected standard fetch receives fixed GET/Accept/Accept-Encoding:identity, redirect:error,
+credentials:omit, cache:no-store, AbortSignal and snapshot-only Authorization.
+Readiness has no credential and requires the exact data-free endpoint contract;
+success authorizes no additional operation. Snapshot needs its own explicit stage
+read capability. Private inputs are detached before awaits. Ten seconds bounds
+the entire two-read run, with ≤64 KiB and ≤1024 chunks per body, ≤128 KiB total,
+two responses and ≤240 snapshot cells. Content-Length is checked but not required; only absent/identity Content-Encoding
+is accepted to avoid comparing decoded bytes with compressed lengths.
+Final URL/redirect/status/JSON type are checked, raw headers/body/error text are
+discarded, streams cancelled on refusal and late responses disposed. Cancellation
+or deadline stops remaining dispatches with no retries. Noncooperative injected
+I/O can outlive cancellation; bounded return is not remote cancellation proof.
+
+Public output is ≤2 KiB, finite transport availability, snapshot acceptance,
+reviewed-external-input status, unknown continuity and existing eight-class verdict.
+Private state is request-local carry only. Invalid/denied/stale/future/wrong-pin
+snapshots cannot recover incidents; independently valid explicit failure rows
+remain useful, including partial rings. Read completion times/IDs feed existing
+strictly advancing same-candidate/generation HTTP confirmation. Network/HTTP failure
+is unavailability at this vantage, not proven platform root cause. Route success
+never implies business delivery, Cron, App or Discord health.
+
+#125 private review is consumed before **all validation** of a run requesting
+snapshot, including target, credential, readiness, cancellation and denial failures.
+Only genuine independent custody may grant bounded exact-byte/ID/time external
+claims; continuity/activation wire/coverage stay unknown. No insecure chat/input
+secret plumbing or review boolean was added. The authenticated loader, durable
+reissue/replay refusal and future private parent delivery remain separate work.
+
+Remaining CODE: real GitHub/Cloudflare adapters, authenticated target/review loader,
+continuous progress-storage witness with late-I/O fencing, scheduler, durable
+unresolved journal and sender. Remaining POLICY: parent fallback choice. Remaining
+LIVE: genuine manifests/current pins, scoped permissions, runner/storage proof,
+exclusion/credential custody, approvals, Test F/drills, confirmed receipt and human
+acknowledgment. #20/#29 stay open. No production enablement or operational policy
+was inferred. The configured 2026-10-17 runtime remains unproven by installed
+workerd at test date 2026-09-16; production compatibility is unchanged.
+
+Smallest next safe slice: specify and test the authenticated target/review loader
+against a selected restricted review-record and actor-authentication contract,
+without adding live reads or an enabled entry point. Its real source/custody is
+still missing and must be supplied independently; no boolean can fill that gap.
+
+
+#### HTTPS library validation (offline/local only)
+
+Node 26.12.1 was selected with the explicit supplied path for all Node/pnpm commands.
+Dependencies were linked with `pnpm install --offline --frozen-lockfile --ignore-scripts`
+(1,385 cached packages, zero downloads). Final commands/results:
+
+```sh
+pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts --maxWorkers=1
+# 214 tests / 3 files passed
+pnpm --filter gq-support-worker exec vitest run test/observer-http.test.ts test/cron-progress.test.ts test/observer-custody.test.ts --maxWorkers=1
+# 31 tests / 3 files passed
+node worker/tools/observer/negative-controls.mjs
+# five deliberately broken protocol copies detected by real assertions
+node worker/tools/observer/transport-negative-controls.mjs
+# three deliberately broken transport copies detected by real assertions
+pnpm --filter gq-support-worker typecheck
+pnpm exec eslint worker/tools/observer worker/test/observer-http.test.ts --max-warnings=0
+node scripts/ci/runtime-matrix.mjs policy
+node scripts/ci/workflow-policy.mjs
+scripts/ci/gitleaks.sh dir worker
+scripts/ci/gitleaks.sh dir docs
+git diff --check 437ce5baf90c28e249ab937e3f33e2329ed13d96
+# types, lint, policies, both secret scans and whitespace passed
+```
+
+The injected-fetch vectors verify exact methods/headers, credential-free readiness,
+snapshot-only Authorization, input mutation isolation, final URL/path/query/redirect
+refusal, invalid/delayed headers/body, streaming cancellation, chunk/byte caps without
+Content-Length, exact-cap valid JSON, 403/5xx/invalid 200, runtime-random privacy
+canaries, pre/between/body cancellation and total timeout, late/noncooperative I/O,
+wrong identity/stale/future/partial wire, old failure carry, equal-time/cross-revision
+HTTP refusal and pre-validation one-shot consumption. Local actual endpoint/D1 tests
+exercise both stages and the 240-cell ring without network or TLS assertions.
+
+Initial typechecking exposed the installed Workers type surface's narrower Fetch
+options/Response types; fixed options are retained at runtime and checked against
+that baseline without changing production configuration. Final checks above pass.
+No broad Worker run was warranted: production runtime source is untouched. No live
+observer/provider HTTP, account/State/settings, credentials/profiles/secret requests,
+deployments, notifications/drills, GitHub comments/messages/reviews, merges, DDEV,
+browser, hosted CI polling or watches were performed. Git publication uses
+`GQ_SUPPORT_SKIP_PRE_PUSH=1`. Hosted checks/reviews are uninspected, and parent
+review results are not a review of this slice.
+
+### Transport review correction: deadline response ownership
+
+Independent Standards review found no defects; Spec review found one P2.
+If fetch returned at the clock deadline before the timer callback ran, the
+post-await deadline check could reject before cleanup owned the response.
+The fetch settlement handler now captures the response before that clock check,
+so rejection cancels the stream. Truly late settlement still requests disposal
+and cannot start another dispatch. Two new readiness/snapshot cases reproduced
+zero cancellations before correction and now require exactly one. All 216
+offline observer tests, eight negative controls, typecheck and affected lint pass.
+No runtime source, live TLS/DNS/account evidence or operational authority changed.

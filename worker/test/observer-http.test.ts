@@ -9,6 +9,7 @@ import { decodeObserverSnapshot } from "../src/observer-snapshot.ts";
 import * as Effect from "effect/Effect";
 import { emptyPhases, progressIO, startProgress, writeProgress } from "../src/cron-progress.ts";
 import { localStage } from "./local-d1.ts";
+import { observeHTTPS } from "../tools/observer/https-transport.ts";
 import { validateSnapshotReview } from "../tools/observer/snapshot-evidence.ts";
 import { decodeBatch, evaluate, type Context, type Read } from "../tools/observer/protocol.ts";
 const token = randomBytes(32).toString("hex"), candidate = "a".repeat(40);
@@ -102,6 +103,19 @@ it("returns all 240 cells in one coherent fixed read, preserves overflow/generat
       account: context.account, stage: context.stage, candidate, generation: 0, status: "ok", coverage: "complete", pages: 1, body: bytes };
     const batchEvidence = decodeBatch(context, [read]); expect(batchEvidence.invalid).toBe(false);
     expect(evaluate(context, batchEvidence).public.classes.find(c => c.class === "cron_start_missing")?.verdict).toBe("unknown");
+    // Injected HTTP calls the real authenticated producer and coherent local D1
+    // reader. No external dispatch, TLS or account/deployment attestation here.
+    const transported = await observeHTTPS({ context, observation: 1, snapshotToken: token,
+      target: { account: context.account, stage: context.stage, candidate, generation: 0,
+        worker: "synthetic-staging", origin: "https://synthetic-staging.synthetic.workers.dev",
+        deployment: "11111111-1111-1111-1111-111111111111", version: "22222222-2222-2222-2222-222222222222" },
+    }, { now: Date.now, fetch: async (url, init) => {
+      const response = await observerRequest(new Request(String(url), init), env, async () => query);
+      Object.defineProperty(response, "url", { value: String(url) }); return response;
+    } });
+    expect(transported.public).toMatchObject({ readiness: "available", snapshot: "accepted", review: "unknown", continuity: "unknown" });
+    expect(transported.public.verdict?.classes[2].verdict).toBe("unknown");
+    expect(transported.public.verdict?.classes[3].verdict).toBe("unknown");
     // A separately supplied private review grants only narrow record evidence.
     const deployment = "11111111-1111-1111-1111-111111111111", version = "22222222-2222-2222-2222-222222222222";
     const pins = { account: context.account, stage: context.stage, candidate, deployment, version, generation: 0,
@@ -150,6 +164,24 @@ it("enforces exact DTO keys, ordering, enums and finite bounded values", () => {
     partial: false, activation: null, coverage: "unknown", route: "disabled", ticks: [] };
   for (const bad of [{ ...base, private: `gqcanary_${crypto.randomUUID()}` }, { ...base, activation: 1 }, { ...base, coverage: "complete" },
     { ...base, generation: Infinity }, { ...base, ticks: [["staging", candidate, 0, 120_000, 1, 120_001, 120_002, 8, 0, 0, 0, 0, 0]] }]) expect(() => decodeObserverSnapshot(bad, 180_000)).toThrow("observer_unavailable");
+});
+it("integrates both stage endpoints through injected transport with real local D1 and no live identity claim", async () => {
+  cryptoShim(); const local = await localStage(["ledger"]);
+  try {
+    for (const stage of ["staging", "prod"] as const) {
+      const origin = `https://synthetic-${stage}.synthetic.workers.dev`;
+      const result = await observeHTTPS({ observation: 1, snapshotToken: token,
+        context: { now: Date.now(), account: "8f38791a8c37b182239af2a385ab3c31", stage, candidate, generation: 0, activation: 0, exclusions: [], expected: [] },
+        target: { origin, worker: `synthetic-${stage}`, stage, candidate, generation: 0,
+          account: "8f38791a8c37b182239af2a385ab3c31", deployment: "11111111-1111-1111-1111-111111111111", version: "22222222-2222-2222-2222-222222222222" },
+      }, { now: Date.now, fetch: async (url, init) => {
+        const r = await observerRequest(new Request(String(url), init), { ...env, SUPPORT_RELEASE_STAGE: stage, SUPPORT_OBSERVER_STAGE: stage }, async () => local.databases.ledger);
+        Object.defineProperty(r, "url", { value: String(url) }); return r;
+      } });
+      expect(result.public).toMatchObject({ readiness: "available", snapshot: "accepted", review: "unknown", continuity: "unknown" });
+      expect(result.public.verdict?.stage).toBe(stage);
+    }
+  } finally { await local.dispose(); }
 });
 it("keeps the maximum-width 240-cell valid wire budget below 40 KiB without increasing other query limits", () => {
   const generated = Number.MAX_SAFE_INTEGER, watermark = Math.floor(generated / 60_000) * 60_000;

@@ -443,3 +443,34 @@ and receipt proof remain absent. LIVE review/custody/activation evidence must be
 collected later; no production enablement. Parent fallback choice remains pending;
 #20/#29 remain open. Configured compatibility 2026-10-17 remains unvalidated by the
 local workerd review, which used 2026-09-16; production date was not lowered.
+
+
+### Fixed HTTPS observer library CODE status
+
+The [bounded transport](../../worker/tools/observer/README.md#fixed-https-transport-this-slice)
+now supplies fixed read-only readiness/snapshot provenance to the real wire
+adapter/evaluator. Only explicitly reviewed canonical stage Worker HTTPS inputs
+and optional dedicated snapshot capability are accepted. No env/profile auth,
+CLI, enabled observer, scheduler, journal, sender or provider grant was added.
+The total two-read deadline is 10s; bodies stream under 64 KiB/1024 chunks each;
+redirects, noncanonical origins and unreviewed path/query options are refused.
+Only sanitized finite ≤2 KiB public output is publishable; private carry is not.
+
+Readiness means route/runtime availability only. Snapshot acceptance means valid
+fresh actual wire at the supplied pins; it does not establish deployment/version
+identity from response assertions. Independent target attestation must authenticate
+stage-to-origin/Worker/account/current deployment/version and DNS target safety;
+host syntax does not prove these facts. The private authenticated review loader
+and actual restricted source remain absent. #125 capability is consumed before
+failed snapshot-run validation, never recycled after denial or uncertainty. External
+review claims remain distinct from unknown business/Cron continuity. Partial,
+stale, invalid or unavailable evidence cannot clear retained incidents.
+
+Remaining CODE: GitHub/Cloudflare adapters, authenticated target/review loader and
+private delivery, continuous-storage witness/late-I/O fencing, scheduler, durable
+journal and sender. Remaining LIVE: real manifests/permissions, runner/storage,
+exclusions, credentials/approvals, Test F/drills and receipt/human acknowledgment.
+Parent fallback policy is pending; #20/#29 remain open and production stays disabled.
+Smallest safe next slice is the loader contract/tests once a real restricted record
+and authentication source is identified. Configured runtime 2026-10-17 remains
+unproven under installed workerd test date 2026-09-16; no production date change.
