@@ -5,7 +5,7 @@ Assessment dated 2026-10-27 against `main` commit
 [Issue #20](https://github.com/Quick-Release/gq-support/issues/20), including its
 comments, is a decision ticket. **Readiness is not established.** This document
 inventories evidence and prepares review; it authorizes no deployment, incident
-notification, settings change or destructive drill. Recommendations below are
+notification, settings change or destructive drill. Only the decisions recorded below are approved. Other recommendations remain
 **proposed/unapproved**. Missing live evidence is **not verified**.
 
 ## Settled boundaries
@@ -293,29 +293,34 @@ receipt is a separate pass criterion from a Worker rejection log.
    change after operational checks; preserve revocations/suppression needed for
    restore safety. Record responsible reviewer and private contact handoff.
 
-## Smallest independent user decision frontier
+## Confirmed operational decisions — 2026-10-27
 
-These questions follow repository facts, not missing research. All recommendations
-are **proposed/unapproved**; no names or destinations are assumed.
+The requesting maintainer confirmed the following in the orchestration thread:
 
-1. **Pilot/update scope:** accept a managed Composer/tested-ZIP pilot with deliberate
-   per-installation upgrades, or require native WordPress automatic updates before
-   any pilot? Recommend managed upgrades using the existing digest-tested pipeline;
-   this avoids introducing an unreviewed updater into the readiness gate. If native
-   updates are required, entitlement/secure download design becomes the next branch.
-2. **Operational authority and incident route:** which authorized person/deputy,
-   existing restricted operational record and existing incident destination should
-   own alert acknowledgment, migrations/recovery and Client handoffs? Recommend an
-   explicitly named primary/deputy and the existing incident route, with contacts
-   kept privately; do not infer them from code authors. Ask for verified contract
-   contact evidence per Client only when a Client is selected for onboarding.
-3. **Release authority and compatibility commitment:** who signs off a release,
-   and is a managed pilot allowed to retain every enrolled v1 plugin version until
-   its upgrade is verified? Recommend that no current enrolled version is retired
-   during the pilot, additive v1/expand-only migrations, and recorded human approval
-   for every production rollout. Decide whether to enforce this with required GitHub
-   Environment reviewers (currently absent) or an explicitly recorded approval
-   process. This is not an approval to configure or deploy now.
+- **MVP updates:** managed Composer/tested-ZIP upgrades with deliberate
+  per-installation upgrades. A native WordPress updater is outside the MVP gate.
+- **Incident authority:** vvaz or gmarques may handle incidents and operational
+  recovery. Neither a primary/backup ordering nor an alert destination was
+  specified; do not invent them or infer notification permission.
+- **Release authority:** vvaz or gmarques may provide explicit approval for each
+  production rollout. Naming approvers does not approve a particular rollout.
+- **Pilot compatibility:** retain support for every enrolled v1 plugin version
+  until its upgrade is verified; use additive v1 changes and expand-only
+  migrations during that window.
+
+These decisions do not establish live evidence, authorize deployment or drills,
+configure GitHub Environment reviewers, or complete #20/#29. Keep individual
+Client contact details and restricted operational records outside this repository.
+
+## Remaining decision frontier
+
+- Select the existing incident destination and restricted operational record.
+  Alert routing cannot be enabled until the actual destination is confirmed.
+- Confirm whether vvaz and gmarques are peers or have a primary/backup order;
+  define acknowledgment/escalation coverage without inventing a service promise.
+- Choose enforcement for per-rollout approval: required GitHub Environment
+  reviewers or an explicit recorded approval process. Both identities above are
+  authorized approvers, but no environment settings change was requested.
 
 After those decisions: choose pilot Client/canary/observation and stop criteria,
 alert deduplication/escalation details, effective telemetry retention/access sign-off,
@@ -358,7 +363,7 @@ public records use sanitized outcome plus private-record reference, never contac
 
 ## Proposed next slices
 
-1. Add the fleet/release record and approved policy to the existing release/deploy
+1. Add the fleet/release record and confirmed policy to the existing release/deploy
    workflow, including no-replacement plan review and destructive-command policy.
    No separate CI system or more CI work is started by this assessment.
 2. Extend existing structured telemetry only where measurements are missing;
