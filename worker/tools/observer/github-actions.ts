@@ -61,6 +61,25 @@ function normalize(value: unknown, workflow: Record<string, unknown>, t: Tracked
     !(r.conclusion === null || (typeof r.conclusion === "string" && ["success", "failure", "timed_out", "action_required", "cancelled", "skipped"].includes(r.conclusion)))) refuse();
   return { expectation: e, created, started, updated, status: r.status, conclusion: r.conclusion };
 }
+/** Pure preflight shared with the separate custody adapter; never grants reads. */
+export function validateActionsInput(i: ActionsInput): void {
+  const c = i.context;
+  if (decodeBatch(c, []).invalid || !Array.isArray(i.tracked) || i.tracked.length !== c.expected.length ||
+    i.tracked.length > actionsLimits.expectations || !i.tracked.length) refuse();
+  positive(i.repositoryId); finiteInt(i.observation); finiteInt(i.expiresAt);
+  if (typeof i.actionsReadToken !== "string" || !/^[!-~]{1,4096}$/.test(i.actionsReadToken)) refuse();
+  const identities = new Set<string>();
+  for (const t of i.tracked) {
+    const e = t.expectation;
+    if (!/^[a-f0-9]{64}$/.test(t.identity) || identities.has(t.identity) || !c.expected.some(x => same(x, e))) refuse();
+    identities.add(t.identity);
+    if (e.workflow === "release-plugin.yml" && e.event === "push") {
+      if (!/^refs\/tags\/plugin-v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$/.test(t.ref)) refuse();
+    } else if (t.ref !== "refs/heads/main") refuse();
+  }
+  if (new Set(i.tracked.map(t => `${t.expectation.run}/${t.expectation.attempt}`)).size !== i.tracked.length) refuse();
+  evaluate(c, decodeBatch(c, []), i.previous);
+}
 /** <=3 metadata GETs + <=20 exact attempt GETs, sequential, no list/discovery or
  * retry. Complete means these exact expectations only; never service readiness.
  * Trusted injected context is NOT authenticated custody or human approval. */
@@ -73,21 +92,7 @@ export async function observeGitHubActions(input: ActionsInput, io: TransportIO)
     // Snapshot all private mutable inputs and function references before awaits.
     const i = structuredClone(input), c = i.context, transport = io.fetch, clock = io.now;
     signal = io.signal;
-    if (decodeBatch(c, []).invalid || !Array.isArray(i.tracked) || i.tracked.length !== c.expected.length ||
-      i.tracked.length > actionsLimits.expectations || !i.tracked.length) refuse();
-    positive(i.repositoryId); finiteInt(i.observation); finiteInt(i.expiresAt);
-    if (typeof i.actionsReadToken !== "string" || !/^[!-~]{1,4096}$/.test(i.actionsReadToken)) refuse();
-    const identities = new Set<string>();
-    for (const t of i.tracked) {
-      const e = t.expectation;
-      if (!/^[a-f0-9]{64}$/.test(t.identity) || identities.has(t.identity) || !c.expected.some(x => same(x, e))) refuse();
-      identities.add(t.identity);
-      if (e.workflow === "release-plugin.yml" && e.event === "push") {
-        if (!/^refs\/tags\/plugin-v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$/.test(t.ref)) refuse();
-      } else if (t.ref !== "refs/heads/main") refuse();
-    }
-    if (new Set(i.tracked.map(t => `${t.expectation.run}/${t.expectation.attempt}`)).size !== i.tracked.length) refuse();
-    evaluate(c, decodeBatch(c, []), i.previous);
+    validateActionsInput(i);
     const started = finiteInt(clock()); let last = started;
     if (started < c.now || started - c.now > proposals.freshness || i.expiresAt <= started || i.expiresAt - started > 300_000) refuse();
     const check = () => {

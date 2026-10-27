@@ -604,3 +604,192 @@ production remains disabled. The next smallest safe slice is an offline, separat
 reviewed Actions-read purpose/credential handoff into the existing one-shot private
 custody path, binding exact tracked refs/identities and source scope without enabling
 execution or broadening the existing approval purpose. Discovery is later work.
+
+## Separate Actions private custody handoff (stacked on #130)
+
+`actions-private-launcher.ts::observeActionsPrivateFiles` is a disabled library,
+with injected GitHub review and source HTTP only. It composes #128 descriptor
+custody, the separate `actions-review-loader.ts` and the actual #130 normalized
+output/evaluator. The Worker-only `observePrivateFiles`, credential schema and
+`approve-observer-read` grammar retain their original meaning. Neither an existing
+Worker approval nor delivery grants Actions reads. Nothing in this change is a
+human approval, live permission check or enabled execution path.
+
+The proposed distinct purpose is `observer_actions_reads`, for **one finite read
+of exactly the private tracked expectations**, not discovery, continuous operation,
+Actions writes, deploy, retry, rerun, cancel, notification or policy authority.
+A future vvaz OR gmarques must privately inspect the exact bytes and independent
+session/context/ref/repository evidence, then explicitly approve that purpose,
+session and manifest with exactly this one ASCII line in issue #20:
+
+```text
+approve-observer-actions-read sha256:<64 lowercase hexadecimal manifest digest>
+```
+
+The angle-bracket text is a placeholder, never a literal accepted command. Only the
+digest goes in the public record. No private expectations/origins/run IDs, session
+pins, credentials, token hashes or private supporting evidence belong in the
+comment or public output. No approval record was posted or fetched for this slice.
+Manifest-provided `reviewer`/`approved` fields are rejected, not authority.
+
+Private `manifest.json` is exact UTF-8 JSON, <=32 KiB, no BOM, with precisely:
+
+```text
+schema: 1
+purpose: "observer_actions_reads"
+stage, candidate, session, nonce, readyAt, expiresAt
+repositoryId: independent positive numeric Quick-Release/gq-support identity
+context: {now, account, stage, candidate, activation, generation, exclusions, expected}
+tracked: [{identity, expectation, ref}]  (1..20; exactly the context expectations)
+observation: nonnegative independent observation integer
+```
+
+Session/nonce are 64 lowercase hex, candidate/head are 40 lowercase hex; times are
+UTC integer milliseconds. The independently supplied launcher `ReadSessionPins`
+match stage/candidate/session/nonce/readyAt/expiresAt and SHA-256 of **all bytes**.
+Validity is <=5 minutes; the actual operation window is shorter. Context has the
+fixed account, strict generation/exclusions/expectations from the protocol; every
+expectation has exactly repo/workflow/event/run/attempt/head/stage/candidate.
+Each tracked object has exactly identity/expectation/ref, with unique 64-hex private
+identities, exact expectation joins, and main or the exact allowed plugin-v tag
+semantics from #130. Repository ID, refs, heads, tracked identities and generation
+are digest-bound; no response can choose them. All schema/join/pin validation,
+input byte copying and credential/function capture precede the first await.
+No Worker origin, snapshot review or snapshot token field is accepted.
+
+Private `credentials.json` has exactly `{schema:1, reviewAuthToken, actionsReadToken}`.
+Both are distinct nonempty bounded printable ASCII credentials. The recognized
+64-hex Worker snapshot-token shape is refused as an Actions token. The old
+`githubToken`/`snapshotToken` bundle is refused; old Worker code also refuses the
+new bundle. Syntax and distinctness **cannot prove** real scopes, issuer, audience,
+expiry or ownership: genuine separate delivery and independent scope review remain
+LIVE duties, not caller booleans or supplied fixture evidence.
+
+The review-auth credential is used solely for the fixed issue-comment, current
+`/users/{vvaz|gmarques}` and repository collaborator-permission GETs. Source-reviewed
+independent positive numeric vvaz/gmarques IDs are required (still unconfigured,
+never learned from manifest/API/login alone). The exact fresh unedited #20 comment,
+current matching human identity and admin/write legacy repository permission are
+verified, followed by a reread of the unchanged record after async checks. The
+Actions source credential is used solely for the manifest-selected fixed official
+workflow metadata and exact run-attempt GETs. Neither credential goes to a Worker,
+another origin, redirect, response-selected link, logs or public result.
+
+Current official docs for [workflow metadata](https://docs.github.com/en/rest/actions/workflows?apiVersion=2026-03-10#get-a-workflow)
+and [exact run attempt](https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2026-03-10#get-a-workflow-run-attempt)
+require fine-grained repository **Actions:read** for authenticated access (public
+resources also permit unauthenticated reads). Use a separately restricted source
+credential for this repository only, with no Actions write/deploy/rerun/cancel grant.
+Review authentication has its own ability to read the approval/user/permission
+routes; Actions:read is not asserted to authorize those checks. No credentials
+were acquired and no API entitlement was tested. Only public official docs were
+rechecked locally for the contract on 2026-10-27.
+
+Initial verification, fresh verification immediately before **every** source GET,
+and final verification are compulsory. Each consists of four review GETs; there is
+no stale boolean, reusable fetch grant, retries or asynchronous gap between the
+last synchronous fence and dispatch. Cancel/deadline/expiry, edited/deleted record,
+identity/permission loss or a source-wrapper exception is terminal. #130 catches
+transport exceptions internally; the wrapper's terminal latch and final check
+prevent that catch from conferring acceptance. Refusal returns unknown/null public
+authority; partial evidence can retain positive failures only in private carry.
+A revoked completed success cannot clear an earlier failure. Ordinary unavailable
+source envelopes retain #130 partial/unknown semantics and visible historical
+incidents, including valid disabled/deleted workflow metadata. Untracked discovery
+and continuous evidence coverage remain absent.
+
+End-to-end bounds, **separate from** #130's 23-source-GET cap:
+
+- 100 review GETs = 4 × (initial + 23 source dispatches + final); <=32 KiB/body,
+  <=3,276,800 review bytes, <=1024 chunks/body.
+- <=23 Actions GETs, <=64 KiB/body, <=524,288 source bytes, <=1024 chunks/body.
+- Combined <=123 GETs and <=3,801,088 response bytes in one **10-second** network
+  operation window clipped to approval expiry. Sequential, no retries; neither
+  authentication nor a later source resets the outer deadline. Bounded private
+  file reads precede this network window; synchronous filesystem I/O cannot be
+  forcibly interrupted and its availability is an independent storage assumption.
+
+Both transports check exact response URL/status/type, identity encoding and bounded
+stream length/chunks; refuse redirects, cookies and compression; cancel refused or
+late streams, including #126's response-before-clock-check race. Source dispatch
+also checks the exact GET/init/header envelope. Noncooperative I/O may settle late;
+its stream is disposed and no further calls start. This is not an atomic GitHub
+record/source lock: an edit after the final check cannot be precluded remotely.
+
+Both entry functions share the same descriptor-only `consumePrivateDelivery` seam
+and **same** permanent journal namespace. Files are owner-only 0400, private
+directories 0700 with #128's Linux/ancestor/inode checks. Once both valid distinct
+directories are opened, both delivery names are consumed even if one fails, then
+independently valid session pins are claimed before decoding/authentication/await.
+File fsync and journal-directory fsync, then delivery-directory fsync, all precede
+the first GitHub request. Parse, hash, auth, source failure and process crash never
+release a claimed session. Invalid directory/pins or failed unlink/storage may
+prevent consumption/completion; they never permit network or prove a retry safe.
+Ambiguous/partial journal writes remain blocking evidence.
+
+Journal schema 1 recognizes both `observer_reads` and `observer_actions_reads`,
+with the unchanged finite nonsecret private fields: stage, candidate, session,
+nonce, readyAt, expiresAt, manifest sha256, status=spent. No credentials or token
+hashes. The two-hex slot is derived **only from session**, across purposes; changed
+purpose/digest/nonce cannot reopen it. There are 256 permanent slots, often fewer
+usable sessions because collisions block. Exhaustion, corruption, uncertain storage
+and collisions refuse without eviction, expiry reuse, cleanup or force-clear.
+Earlier entries remain byte-for-byte intact. **Rollback:** pre-handoff code does
+not recognize the new purpose and refuses that journal, including unrelated later
+reads. Keep the evidence and stop; deleting entries or silently using a new journal
+to regain dispatch would defeat replay custody. Capacity/migration ownership is
+unresolved parent work, not an implemented rollover policy.
+
+This journal records finite permanent **read claims**, not alert-send/receipt
+ownership or continuous failure carry. Filesystem type filtering is not proof of
+persistent backing, host-loss/fsync/backup semantics or all-runner exclusion.
+Ephemeral fake private files, injected HTTP and fsync tests discharge no LIVE duty.
+The parent still must establish persistent journal custody/capacity, all-runner
+exclusion, real private transfer, independently reviewed identities/repository IDs/
+refs/targets/scopes, genuine fresh approval, and fallback policy. Continuous durable
+failure carry, Cloudflare adapters, notification journal/sender, receipt/human
+acknowledgment and Test F/drills remain unverified. #20/#29 stay open; nothing enabled.
+#129's configured-date local proof remains valid and separate from live proof;
+production/runtime/CI pins and Cloudflare ownership claims are unchanged.
+
+Next safe slice: parent review of this proposed purpose/grammar and private custody,
+including finite capacity and rollback handling, with independently sourced LIVE
+prerequisites before any enabled read path. No scheduler or sender follows from
+this library, approval command or successful offline tests.
+
+Offline validation for this handoff: Node **26.12.1**, one Vitest worker, **529 tests /
+7 files** (426 baseline +103 handoff cases). Real private filesystem delivery,
+barrier-before-network checks, malformed delivery/auth/source failure replay, both
+numeric actors, exact digest/field joins, revocation/cancellation/expiry at auth/
+metadata/attempt/final boundaries, combined request/window limits, privacy canaries,
+late source/review streams and prior historical-failure cases pass. Shared #128
+process crash/contention/descriptor/storage vectors remain in the isolated suite.
+The original ten protocol/HTTPS/review mutation controls, four #130 Actions controls,
+and four new custody controls are separate counts; all detect real assertion failures.
+
+```sh
+pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts --maxWorkers=1
+node worker/tools/observer/negative-controls.mjs
+node worker/tools/observer/transport-negative-controls.mjs
+node worker/tools/observer/review-negative-controls.mjs
+node worker/tools/observer/actions-negative-controls.mjs
+node worker/tools/observer/actions-custody-negative-controls.mjs
+pnpm --filter gq-support-worker typecheck
+pnpm --filter gq-support-worker lint
+node --test 'scripts/ci/*.test.mjs'
+node scripts/ci/runtime-matrix.mjs policy
+node scripts/ci/workflow-policy.mjs
+scripts/ci/gitleaks.sh dir worker
+scripts/ci/gitleaks.sh dir docs
+git diff --check
+```
+
+Types/lint/policies, 114 CI-script tests, runtime-canary test-output scan, repository
+secret scans and whitespace pass. Dependencies installed offline (zero downloads).
+No broad Worker suite, configured-runtime rerun, live source/account/API/State/settings,
+credential/profile/secret request, issue comment/message/review, deployment,
+notification/drill/merge, DDEV/browser or CI poll/watch. Git push and this focused draft
+publication alone use the authorized repository hosting path, with
+`GQ_SUPPORT_SKIP_PRE_PUSH=1`; hosted checks/reviews remain uninspected. The low-level
+session factory supplies no durable-storage proof; any future enabled launcher must
+use the private-files claim path and independently discharge every LIVE duty above.

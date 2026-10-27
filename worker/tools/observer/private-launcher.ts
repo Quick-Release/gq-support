@@ -70,13 +70,14 @@ function pins(value: ReadSessionPins): ReadSessionPins {
   if (p.expiresAt <= p.readyAt || p.expiresAt - p.readyAt > 300_000) refuse();
   return p;
 }
-function evidence(p: ReadSessionPins) {
-  return { schema: 1, purpose: "observer_reads", ...p, status: "spent" };
+type ReadPurpose = "observer_reads" | "observer_actions_reads";
+function evidence(p: ReadSessionPins, purpose: ReadPurpose) {
+  return { schema: 1, purpose, ...p, status: "spent" };
 }
 /** Fixed 256 permanent slots. Collisions/exhaustion block, never evict. The slot
  * depends only on session: altered digest/nonce/purpose cannot reopen a session.
  * No outcome update: even failed/unknown/crashed reads remain spent. */
-function claim(fd: number, p: ReadSessionPins, io: CustodyFS) {
+function claim(fd: number, p: ReadSessionPins, purpose: ReadPurpose, io: CustodyFS) {
   // Linux local implementations only. Type is a refusal filter, never proof of
   // persistent backing, fsync semantics, backup integrity or all-runner exclusion.
   if (![0xef53, 0x58465342, 0x9123683e, 0x794c7630].includes(Number(io.statfsSync(fdpath(fd, ".")).type))) refuse();
@@ -98,13 +99,13 @@ function claim(fd: number, p: ReadSessionPins, io: CustodyFS) {
         ["schema", "purpose", "stage", "candidate", "session", "nonce", "readyAt", "expiresAt", "sha256", "status"]);
       const { schema, purpose, status, ...rest } = v;
       const prior = pins(rest as unknown as ReadSessionPins);
-      if (schema !== 1 || purpose !== "observer_reads" || status !== "spent" || hash(prior.session).slice(0, 2) !== name) refuse();
+      if (schema !== 1 || (purpose !== "observer_reads" && purpose !== "observer_actions_reads") || status !== "spent" || hash(prior.session).slice(0, 2) !== name) refuse();
     } finally { io.closeSync(entry); }
   }
   const entry = io.openSync(fdpath(fd, hash(p.session).slice(0, 2)),
     flags.O_WRONLY | flags.O_CREAT | flags.O_EXCL | flags.O_NOFOLLOW, 0o600);
   try {
-    const bytes = Buffer.from(JSON.stringify(evidence(p)));
+    const bytes = Buffer.from(JSON.stringify(evidence(p, purpose)));
     if (bytes.length > limit) refuse();
     let offset = 0;
     while (offset < bytes.length) {
@@ -125,13 +126,12 @@ export interface PrivateLaunch {
 /** Files are consumed synchronously before parsing/authentication/await. Only
  * finite public output escapes; #122 carry stays caller-owned private memory.
  * Parent must attest storage domain/durability and target independently. This
- * function cannot establish those facts and is deliberately not an enabled CLI. */
-export async function observePrivateFiles(input: PrivateLaunch, transport: ObserverReviewIO, io: CustodyFS = fs) {
+ * function cannot establish those facts and is deliberately not an enabled CLI. * Shared descriptor delivery, never authentication. Purpose is code-selected. */
+export function consumePrivateDelivery(input: Pick<PrivateLaunch, "deliveryDirectory" | "journalDirectory" | "pins">,
+  purpose: ReadPurpose, io: CustodyFS = fs) {
   const descriptors: number[] = [];
   try {
-    const p = structuredClone(input.pins), policy = structuredClone(input.policy), commentId = input.commentId;
-    const previous = input.previous === undefined ? undefined : structuredClone(input.previous);
-    const network = { ...transport };
+    const p = structuredClone(input.pins);
     const delivery = directory(input.deliveryDirectory, io); descriptors.push(delivery);
     const journal = directory(input.journalDirectory, io); descriptors.push(journal);
     const a = io.fstatSync(delivery), b = io.fstatSync(journal);
@@ -152,12 +152,21 @@ export async function observePrivateFiles(input: PrivateLaunch, transport: Obser
     // Invalid delivery still spends the independently supplied session; malformed
     // JSON/UTF8/auth never permits a corrected retry with these pins.
     pins(p);
-    claim(journal, p, io);
+    claim(journal, p, purpose, io);
     io.fsyncSync(delivery);
     if (failed || opened.length !== 2 || !manifest || !credentials || hash(manifest) !== p.sha256) refuse();
     // Release consumed inodes before any parsing/auth/await; only our byte copies
     // remain. This is unlink/close custody, not secure storage erasure.
     while (descriptors.length) io.closeSync(descriptors.pop()!);
+    return { manifest, credentials, pins: p };
+  } finally { for (const fd of descriptors.reverse()) { try { io.closeSync(fd); } catch { /* fixed output */ } } }
+}
+export async function observePrivateFiles(input: PrivateLaunch, transport: ObserverReviewIO, io: CustodyFS = fs) {
+  try {
+    const policy = structuredClone(input.policy), commentId = input.commentId;
+    const previous = input.previous === undefined ? undefined : structuredClone(input.previous);
+    const network = { ...transport };
+    const { manifest, credentials, pins: p } = consumePrivateDelivery(input, "observer_reads", io);
     const c = exact(parse(credentials), ["schema", "githubToken", "snapshotToken"]);
     parse(manifest); // encoding/JSON before authenticated review; exact schema remains #127's.
     if (c.schema !== 1 || typeof c.githubToken !== "string" || !/^[!-~]{1,4096}$/.test(c.githubToken) ||
@@ -168,5 +177,4 @@ export async function observePrivateFiles(input: PrivateLaunch, transport: Obser
       snapshotToken: c.snapshotToken === null ? undefined : c.snapshotToken as string }, network);
   } catch { return { public: { readiness: "unknown" as const, snapshot: "unavailable" as const,
     review: "unknown" as const, continuity: "unknown" as const, verdict: null } }; }
-  finally { for (const fd of descriptors.reverse()) { try { io.closeSync(fd); } catch { /* fixed output */ } } }
 }

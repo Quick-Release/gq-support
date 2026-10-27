@@ -1188,3 +1188,43 @@ acknowledgment and parent fallback policy remain open. #20/#29 stay open. Next
 smallest safe slice: offline Actions-read purpose/credential delivery through the
 existing one-shot custody path, binding tracked refs/identities and scope, with
 explicit separate review before any execution is enabled.
+
+## Offline Actions private handoff, stacked on #130
+
+The separate [Actions custody contract](../../worker/tools/observer/README.md#separate-actions-private-custody-handoff-stacked-on-130)
+now composes descriptor delivery and permanent read-session custody with the actual
+tracked Actions adapter/evaluator. Proposed purpose `observer_actions_reads` requires
+its own future explicit vvaz OR gmarques approval of the exact private purpose,
+session and manifest. Proposed public grammar is exactly
+`approve-observer-actions-read sha256:<64 lowercase hexadecimal manifest digest>`;
+only the digest is public. No approval is granted or record posted by this task.
+Worker-only approval/bundle remain exclusive. Review-auth and dedicated Actions:read
+credentials are distinct, stay on their respective fixed GitHub GET routes, and
+never reach Worker endpoints or another origin. Manifest bytes bind every independent
+repository/context/generation/ref/tracked expectation/head/identity and session pin
+before awaits; supplied reviewer/approved assertions cannot confer authority.
+
+Initial/final verification and four authenticated record/user/permission/re-read
+GETs before every source dispatch cost <=100 review GETs **in addition to** <=23
+source GETs. Total <=123 calls, <=3,801,088 streamed bytes and one ten-second network
+window clipped to expiry, no retries. Synchronous file I/O precedes that window and
+requires available storage. Exact URL/method/header checks, stream caps and late
+response disposal preserve #126. Terminal wrapper failure cannot be laundered by
+#130's catch; lost authority withholds acceptance and cannot clear private failures.
+Valid disabled/deleted workflow metadata still permits historical failure reads.
+
+Shared journal schema recognizes both purposes, retaining old entries. Session-only
+slot selection prevents cross-purpose/digest/nonce replay. Its 256 permanent slots
+have collision/exhaustion/corruption/storage-uncertainty refusal and no cleanup.
+Older code refuses new-purpose records on rollback: preserve evidence and stop,
+never delete or switch journals to regain reads. This remains finite read claims,
+not durable failure/notification carry, send ownership, receipt or continuous proof.
+
+Persistent backing, all-runner exclusion, actual private delivery, independent
+numeric identities/IDs/refs/scopes and genuine approval remain LIVE prerequisites,
+not test booleans. Parent fallback policy/capacity/rollback review remains pending;
+#20/#29, receipt/acknowledgment and drills stay open/unverified. No scheduler, sender,
+enabled entry point or new operational policy. Next safe slice is parent review of
+these proposed contracts and custody duties before any real enabled use. #129 local
+configured-date proof remains separate and valid; no live performance, entitlement,
+custody or Cloudflare ownership claim follows from this work.
