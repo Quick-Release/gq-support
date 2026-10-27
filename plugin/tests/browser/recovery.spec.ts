@@ -1,14 +1,12 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { forgetLogIn, logIn, sync, testSite } from '../performance/test-site.cjs';
+import { wp, forgetLogIn, logIn, sync, testSite } from '../performance/test-site.cjs';
 
 // Outage and draft recovery (docs/research/outage-draft-recovery.md, tests 2-5, 7, 8 and 10), with
 // the gq-support REST routes and the session check stubbed, and the page clock controlled.
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
-const wp = (args: string[]) => execFileSync('ddev', ['wp', '--path=.test-site', ...args], { encoding: 'utf8' });
 
 // The Operator's independent contact, as wp-config.php would set it.
 const constants = join(testSite, 'wp-content', 'mu-plugins', 'gq-support-help-test.php');

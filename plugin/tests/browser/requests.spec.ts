@@ -1,12 +1,10 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
-import { forgetLogIn, logIn } from '../performance/test-site.cjs';
+import { wp, forgetLogIn, logIn } from '../performance/test-site.cjs';
 
 // The My requests projection (#26), with the gq-support REST routes stubbed. The service-side
 // scope checks are covered by worker/test and plugin/tests/contract.
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
-const wp = (args: string[]) => execFileSync('ddev', ['wp', '--path=.test-site', ...args], { encoding: 'utf8' }).trim();
 const grantSite = (granted: boolean) => wp(['eval', `get_role('administrator')->${granted ? 'add_cap' : 'remove_cap'}('gq_support_view_site_requests');`]);
 
 test.beforeAll(() => {

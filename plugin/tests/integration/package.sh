@@ -12,7 +12,7 @@ site=${GQ_SUPPORT_TEST_URL:-https://gq-support-lifecycle-testsite.ddev.site}
 package_dir=$(dirname "$zip")
 plugin=.test-site/wp-content/plugins/gq-support
 version=$(jq -r .version "$package_dir/gq-support.manifest.json")
-wp() { ddev wp --path=.test-site "$@"; }
+source scripts/ci/wp-cli.sh
 check() { wp eval-file plugin/tests/integration/package.php "$@"; }
 # Blocks every outgoing request and records the plugin's, from before the first request that loads new code.
 probe=.test-site/wp-content/mu-plugins/package-test-http-probe.php

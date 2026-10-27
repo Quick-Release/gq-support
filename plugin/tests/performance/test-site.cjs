@@ -12,11 +12,10 @@ exports.probe = join(exports.testSite, 'wp-content', 'mu-plugins', 'gq-support-p
 exports.probeSource = join(__dirname, 'gq-probe.php');
 exports.adminPassword = 'launcher-test-password';
 
-// `ddev exec` hands its arguments to a shell, so quote each one. (`ddev wp` is far slower on macOS.)
-const shellQuote = (arg) => `'${arg.replace(/'/g, `'\\''`)}'`;
-
 /** @param {string[]} args WP-CLI arguments. */
-exports.wp = (args) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.test-site', ['wp', ...args].map(shellQuote).join(' ')], { encoding: 'utf8' }).trim();
+// Raw arguments keep PHP variables literal. stderr preserves bootstrap diagnostics
+// without contaminating captured JSON/IDs. Keep the fast macOS exec path.
+exports.wp = (args) => execFileSync('ddev', ['exec', '--raw', '--dir', '/var/www/html/.test-site', '--', 'php', '-d', 'display_errors=stderr', '/usr/local/bin/wp-cli', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
 
 /** macOS mounts the site through Mutagen, so files written on the host need a sync. */
 exports.sync = () => { if (process.platform === 'darwin') execFileSync('ddev', ['mutagen', 'sync']); };
