@@ -15,7 +15,7 @@ cd "$(dirname "$0")/../.."
 # An assignment keeps a failed lookup fatal; eval of a failed substitution would not be.
 cell_env=$(node scripts/ci/runtime-matrix.mjs env "${1:?usage: run-cell.sh <cell-id>}")
 eval "$cell_env"
-wp() { ddev wp --path=.test-site "$@"; }
+source scripts/ci/wp-cli.sh
 mkdir -p runtime-results
 
 # Records what actually ran, then fails unless it is the cell's declared runtime.

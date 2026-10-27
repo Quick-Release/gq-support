@@ -9,4 +9,8 @@
 .gq-support-launcher-help[hidden] { display: none; }
 .gq-support-launcher-help a { color: #135e96; }
 .gq-support-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-@media (max-width: 782px) { .gq-support-root { inset-inline-end: 0; bottom: 0; } }
+@media (max-width: 782px) {
+  .gq-support-root { inset-inline-end: 0; bottom: 0; }
+  /* Core can show update links here on narrow screens. Leave them scrollable above the launcher. */
+  #wpfooter { padding-block-end: 64px; }
+}

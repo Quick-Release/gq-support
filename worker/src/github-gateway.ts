@@ -1,3 +1,5 @@
+import { admitOperation, finishOperation } from "./maintenance.ts";
+import type { QueryDatabase } from "./storage.ts";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -33,6 +35,8 @@ export interface RepositoryState {
 }
 
 export interface GitHubAppConfig {
+  /** Production writes require fresh ledger authorization; test adapters may omit it. */
+  readonly ledger?: QueryDatabase;
   readonly clientId: string;
   readonly slug: string;
   /** PKCS#8 PEM; GitHub's PKCS#1 download is converted once at custody. */
@@ -393,7 +397,24 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
   ) => Effect.gen(function* () {
     const token = yield* Cache.get(tokens, keyOf(target));
     yield* authorize;
-    const result = yield* send(build(`${API}/repos/${token.fullName}`), token.token);
+    const request = build(`${API}/repos/${token.fullName}`);
+    const mutation = request.method !== "GET" && request.method !== "HEAD";
+    let operation: string | null = null;
+    if (mutation && config.ledger) {
+      operation = yield* Effect.promise(() => admitOperation(config.ledger!, "provider",
+        `${target.installationId}/${target.repositoryId}/${request.method}/${request.url.match(/\/issues\/(\d+)/)?.[1] ?? "create"}`).catch(() => null));
+      if (!operation) return yield* Effect.fail(new OutcomeUnknown());
+    }
+    const result = yield* send(request, token.token);
+    // 5xx/transport failure/interruption may still execute remotely. Never
+    // expire that obstruction or mistake a local timeout for cancellation.
+    // The same trusted 301 classified as IssueMoved below is a synchronous
+    // non-mutation; redirects are never followed. Other redirects stay unknown.
+    const movedIssue = result.response.status === 301 && request.method === "PATCH" &&
+      /\/issues\/\d+$/.test(request.url) && result.response.headers.location?.startsWith(`${API}/`);
+    if (operation && (movedIssue || [200, 201, 204, 400, 401, 403, 404, 410, 422, 429].includes(result.response.status))) {
+      yield* Effect.promise(() => finishOperation(config.ledger!, operation!));
+    }
     const status = result.response.status;
     // A rejected token is dropped so the next call re-mints.
     if (status === 401) yield* Cache.invalidate(tokens, keyOf(target));

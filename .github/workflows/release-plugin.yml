@@ -144,6 +144,8 @@ jobs:
   publish:
     name: Publish Composer package
     needs: [candidate, installed, compatibility]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    environment: prod
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write
@@ -152,6 +154,11 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Verify environment approval enforcement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/release-evidence.mjs approval prod
 
       - name: Download the tested candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -169,6 +176,7 @@ jobs:
           set -euo pipefail
           [ "$(jq -r .version package-zip/gq-support.manifest.json)" = "$VERSION" ]
           [ "$(sha256sum package-zip/gq-support.zip | cut -d' ' -f1)" = "$SHA256" ]
+          node scripts/ci/release-evidence.mjs candidate
           node scripts/ci/release-package.mjs extract package-zip package-dist
 
       - name: Publish package branch and tag
@@ -195,7 +203,7 @@ jobs:
   dispatch-registry:
     name: Rebuild Composer registry after release
     needs: publish
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     permissions: {}
     # Tags pushed by publish's GITHUB_TOKEN do not trigger push workflows.
     uses: ./.github/workflows/dispatch-registry.yml

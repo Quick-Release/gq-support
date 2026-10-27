@@ -67,9 +67,10 @@ try {
 	$gq_support_token     = WP_Session_Tokens::get_instance( $gq_support_user )->create( time() + HOUR_IN_SECONDS );
 	$gq_support_processes = array();
 	for ( $gq_support_i = 0; $gq_support_i < 2; ++$gq_support_i ) {
+		// Reuse this PHP/CLI entry and stream policy in each independent process.
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Disposable CLI test requires independent WordPress processes.
 		$gq_support_process     = proc_open(
-			array( 'wp', '--path=' . ABSPATH, 'eval-file', __DIR__ . '/subject-worker.php', (string) $gq_support_user, $gq_support_token ),
+			array( PHP_BINARY, '-d', 'display_errors=stderr', $_SERVER['argv'][0], '--path=' . ABSPATH, 'eval-file', __DIR__ . '/subject-worker.php', (string) $gq_support_user, $gq_support_token ),
 			array(
 				1 => array( 'pipe', 'w' ),
 				2 => array( 'pipe', 'w' ),
@@ -82,6 +83,8 @@ try {
 	foreach ( $gq_support_processes as list( $gq_support_process, $gq_support_pipes ) ) {
 		$gq_support_subjects[] = trim( stream_get_contents( $gq_support_pipes[1] ) );
 		$gq_support_stderr     = stream_get_contents( $gq_support_pipes[2] );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Preserve child-process diagnostics on the CLI stream.
+		fwrite( STDERR, $gq_support_stderr );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Close a process pipe, not a filesystem file.
 		fclose( $gq_support_pipes[1] );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Close a process pipe, not a filesystem file.

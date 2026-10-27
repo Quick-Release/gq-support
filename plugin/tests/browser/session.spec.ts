@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { wp } from '../performance/test-site.cjs';
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
-const wp = (args: string[]) => execFileSync('ddev', ['wp', '--path=.test-site', ...args], { encoding: 'utf8' }).trim();
 
 test.beforeAll(() => {
   wp(['eval', "GQ_Support_State::update(array('connection' => 'connected')); get_role('administrator')->add_cap('gq_support_submit_requests');"]);

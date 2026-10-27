@@ -36,11 +36,7 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
   };
   if (command === "restore-recorded" && args.length === 3 && ACTOR.test(reference ?? "") && actor === "time-travel-restore") {
     ledger();
-    // Every Worker replays the ledger into the restored database before serving traffic or sweeping again.
-    await ledgerQuery!(`INSERT INTO ledger_audit (id, actor, action, reason, occurred_at) VALUES (?, ?, 'restore', ?, ?)`,
-      [crypto.randomUUID(), reference!, actor, now]);
-    await ledgerQuery!("UPDATE ledger_epoch SET epoch = epoch + 1, recorded_at = ? WHERE id = 1", [now]);
-    return "Restore recorded; Workers replay the ledger before serving traffic";
+    throw new Error("restore-recorded requires the exclusive maintenance Operator boundary");
   }
   if (!ACTOR.test(actor ?? "")) throw new Error(USAGE);
   if (command === "erase" && args.length === 4) {

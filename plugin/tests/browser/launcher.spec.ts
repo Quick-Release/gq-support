@@ -1,8 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { wp } from '../performance/test-site.cjs';
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
-const wp = (args: string[]) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.test-site', 'wp', ...args], { encoding: 'utf8' }).trim();
 const setConnection = (connection: string) => wp(['eval', `GQ_Support_State::update( array( 'connection' => '${connection}' ) );`]);
 
 // Run against a disposable DDEV site: plugin is symlinked under wp-content/plugins.
@@ -272,6 +271,26 @@ test('the closed launcher never covers admin controls', async ({ page }) => {
   // Prove the probe detects cover: stretch the launcher over the whole viewport.
   await page.locator('#gq-support-root').evaluate((root) => { root.style.inset = '0'; });
   expect((await controlsCoveredByLauncher(page)).length).toBeGreaterThan(0);
+});
+
+test('a visible responsive admin footer keeps its update link clear of the launcher', async ({ page }) => {
+  await logIn(page);
+  for (const width of [782, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${site}/wp-admin/`);
+    // WordPress 7.2 shows this footer on narrow screens; older core hides it.
+    // Reproduce that layout on stable versions too, including the development-build link.
+    await page.locator('#wpfooter').evaluate((footer) => {
+      footer.style.display = 'block';
+      footer.style.position = 'relative';
+      footer.querySelector('#footer-upgrade')!.innerHTML = 'You are using a development version (7.2-beta1). Cool! Please <a href="update-core.php">stay updated</a>.';
+    });
+    await expect(page.locator('#gq-support-root')).toBeVisible();
+    expect(await controlsCoveredByLauncher(page), `${width}px`).toEqual([]);
+    // Check actual pointer access as well as the geometry probe.
+    await page.locator('#footer-upgrade a').click();
+    await expect(page).toHaveURL(/update-core\.php/);
+  }
 });
 
 const schemes = ['fresh', 'light', 'modern', 'blue', 'coffee', 'ectoplasm', 'midnight', 'ocean', 'sunrise'];
