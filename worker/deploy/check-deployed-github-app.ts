@@ -6,6 +6,8 @@ import { decodeRpcResult } from "alchemy/Rpc";
 import * as Effect from "effect/Effect";
 import { SUPPORT_ACCOUNT_ID, type AppConfig } from "./github-app.ts";
 
+import { checkStage, protectedAppSlugs } from "./planning-state.ts";
+
 export class DeployedGitHubAppCheckError extends Error {
   constructor(step: "connection" | "rpc" | "identity" | "fingerprint") {
     super(`Deployed GitHub App key check failed (${step})`);
@@ -17,6 +19,8 @@ export async function checkDeployedGitHubApp(config: AppConfig & { fingerprint: 
   const directory = await mkdtemp(join(tmpdir(), "gq-key-custody-"));
   let step: ConstructorParameters<typeof DeployedGitHubAppCheckError>[0] = "connection";
   try {
+    checkStage(config.stage);
+    if (config.slug !== protectedAppSlugs[config.stage]) throw new Error();
     const configPath = join(directory, "wrangler.jsonc");
     await writeFile(configPath, JSON.stringify({
       name: "gq-key-custody-check",
