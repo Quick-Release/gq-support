@@ -99,4 +99,3 @@ export const executeOperator = async (args: readonly string[], options: Operator
     throw error;
   }
 };
-

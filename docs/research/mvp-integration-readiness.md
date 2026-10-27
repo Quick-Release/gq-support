@@ -123,8 +123,23 @@ All Node checks used Node 26.12.1. Every Worker/native run used `--maxWorkers=1`
   two real-helper/broker refusal cases, covered in the 15-test run above).
 - Additive policy/native transition run: 124 passed / 2 failed. The failures were
   main-only fixtures still leaving ledger additions pending after integration;
-  the fixture now selects current ledger history for that case. Final results
-  are recorded below after validation completes.
+  the fixture now selects current ledger history for that case; both targeted
+  native main-only cases then passed. A hypothetical DiscordAlertSecret snapshot
+  also refuses in the offline graph test.
+- The first full run started before seam edits: 1,148 passed / 2 failed, with the
+  stage-gate assertions observing a cached pre-edit entry module. Fresh targeted
+  stage/provider/gate tests passed. A second full run uses committed, unchanged
+  Worker source at `56c0561`: **1,159 tests / 46 files passed** in 612 seconds.
+  The final follow-up only removes inherited EOF blank lines in
+  `maintenance-operator.ts` and `support-stack.ts` and completes this evidence.
+  Whole-candidate whitespace checks then pass; no additional full run is needed
+  for those whitespace-only edits.
+- Current Worker/docs/ZIP secret scans and candidate-reachable history scan
+  (`--log-opts=HEAD`, 198 commits) passed. The default all-local-refs scan reported
+  a generic-key match in `operational-readiness.md` at unreachable checkpoint
+  `60e6b2e79a0f5c2b9e89a6c57d19141d089efbbc`, outside candidate ancestry and all
+  branches. Only redacted finding metadata was inspected; no exception or
+  source-history rewrite was introduced.
 
 DDEV refused this checkout because the named running project belongs to another
 checkout; it was left untouched. Direct PHP contract execution without WordPress

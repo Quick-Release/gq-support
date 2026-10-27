@@ -65,5 +65,3 @@ export const supportStack = (state: Parameters<typeof Alchemy.Stack>[1]["state"]
     };
   }),
 );
-
-
