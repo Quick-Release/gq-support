@@ -1,3 +1,4 @@
+import { provisionObserverReadSecret, type ObserverCustodyBinding } from "./observer-read-secret.ts";
 import { Resource } from "alchemy/Resource";
 import * as Provider from "alchemy/Provider";
 import * as Effect from "effect/Effect";
@@ -17,6 +18,7 @@ export const GitHubAppSecret = Resource<GitHubAppSecret>("GQSupport.GitHubAppSec
 export interface AppSecretCustody {
   provisionKey: typeof provisionAppKey;
   provisionWebhook: typeof provisionWebhookSecrets;
+  readonly observer?: ObserverCustodyBinding;
   readonly discord?: DiscordCustodyBinding;
   provisionDiscord(worker: string): Promise<void>;
   check: typeof checkDeployedGitHubApp;
@@ -24,7 +26,7 @@ export interface AppSecretCustody {
 export const GitHubAppSecretProvider = (custody: AppSecretCustody = {
   provisionKey: provisionAppKey,
   provisionWebhook: provisionWebhookSecrets,
-  provisionDiscord: provisionDiscordAlertSecret,
+  provisionDiscord: async (worker) => { await provisionObserverReadSecret(worker); await provisionDiscordAlertSecret(worker); },
   check: checkDeployedGitHubApp,
 }) => Provider.succeed(GitHubAppSecret, {
   // Worker uploads can drop out-of-band secrets. Reapply after the Worker on

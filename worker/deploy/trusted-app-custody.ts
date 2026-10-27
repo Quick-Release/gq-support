@@ -1,3 +1,4 @@
+import { trustedObserverCustody, disabledObserver, type ObserverCustodyBinding } from "./observer-read-secret.ts";
 // Apply-only trusted broker operation. No graph/plan is imported in the RPC
 // checker, and no state bearer is inherited by Wrangler or its subprocesses.
 import { isDeepStrictEqual } from "node:util";
@@ -15,10 +16,11 @@ import type { AppSecretCustody } from "./github-app-secret.ts";
 import { requireEvidence, refusal, checkStage, protectedAppSlugs, type ProtectedStage } from "./planning-state.ts";
 import { boundedBody } from "./planning-read.ts";
 
-export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>, dispatch: () => void, targetStage: ProtectedStage, discord: DiscordCustodyBinding): AppSecretCustody {
+export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, transport: typeof fetch, check: () => Promise<void>, dispatch: () => void, targetStage: ProtectedStage, discord: DiscordCustodyBinding, observer: ObserverCustodyBinding = disabledObserver(targetStage, discord.release, discord.commitment)): AppSecretCustody {
   env = { ...env };
   checkStage(targetStage);
   requireEvidence(env.GITHUB_APP_SLUG === protectedAppSlugs[targetStage]);
+  const aggregate = trustedObserverCustody(env, workerName, observer, transport, check, dispatch);
   const alerts = trustedDiscordCustody(env, workerName, discord, transport, check, dispatch);
   let running = false, closed = false, phase = 0, ticket = 0;
   const expected: [string, string, unknown?][] = [
@@ -64,8 +66,9 @@ export function trustedAppCustody(env: NodeJS.ProcessEnv, workerName: string, tr
     } catch { closed = true; throw refusal(); }
   };
   return {
+    observer: aggregate.binding,
     discord: alerts.binding,
-    provisionDiscord: (worker) => guard(2, async () => { requireEvidence(worker === workerName); await alerts.run(); }),
+    provisionDiscord: (worker) => guard(2, async () => { requireEvidence(worker === workerName); await aggregate.run(); await alerts.run(); }),
     provisionKey: (stage, worker) => guard(0, async () => { requireEvidence(stage === targetStage && worker === workerName); provisioned = await provisionAppKey(stage, worker, env, request); return provisioned; }),
     provisionWebhook: (worker, appId) => guard(1, async () => { requireEvidence(worker === workerName && provisioned && appId === provisioned.appId); return provisionWebhookSecrets(worker, appId, env, request); }),
     check: (metadata, worker) => guard(3, async () => {

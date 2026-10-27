@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { disabledObserver } from "../deploy/observer-read-secret.ts";
 import { discord } from "./fixtures/discord-custody.ts";
 import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +29,9 @@ vi.mock("node:child_process", async (load) => {
     expect(JSON.stringify(options?.env)).not.toContain(privateDiscordURL);
     const child = new EventEmitter(), output = new PassThrough();
     const stdin = new Writable({ write(chunk, _encoding, done) {
-      const { metadata } = JSON.parse(String(chunk));
+      const input = JSON.parse(String(chunk));
+      expect(Object.keys(input).sort()).toEqual(["metadata", "stage", "worker"]);
+      const { metadata } = input;
       queueMicrotask(() => { output.emit("data", Buffer.from(JSON.stringify({ appId: metadata.appId, checkedAt: new Date().toISOString() }))); child.emit("close", 0); });
       done();
     } });
@@ -35,8 +39,10 @@ vi.mock("node:child_process", async (load) => {
   } };
 });
 const repo = fileURLToPath(new URL("../../", import.meta.url));
-function fixture(stage: "prod" | "staging" = "prod", enabled = false) {
+function fixture(stage: "prod" | "staging" = "prod", enabled = false, observerEnabled = false) {
   const binding = { ...discord, enabled };
+  const observer = { ...disabledObserver(stage, binding.release, binding.commitment), enabled: observerEnabled };
+  const readCapability = randomBytes(32).toString("hex");
   const policy = { ...approvalPolicy, stage };
   const input = confinedInput(stage);
   const worker = stage === "prod" ? "synthetic-worker" : "synthetic-worker-staging";
@@ -61,7 +67,7 @@ function fixture(stage: "prod" | "staging" = "prod", enabled = false) {
   const fingerprint = createHash("sha256").update(publicKey.export({ type: "spki", format: "der" })).digest("base64");
   const metadata = { stage, appId, slug: stage === "prod" ? "getquick-support" : "getquick-support-staging", clientId: `synthetic-client-${stage}`, fingerprint };
   const env = { CLOUDFLARE_ACCOUNT_ID: ACCOUNT, CLOUDFLARE_API_TOKEN: "CF_CREDENTIAL_CANARY", GITHUB_APP_ID: String(appId), GITHUB_APP_SLUG: metadata.slug,
-    GITHUB_SHA: binding.release, DISCORD_ALERTS_ENABLED: String(enabled), ...(enabled ? { DISCORD_ALERT_WEBHOOK_URL: privateDiscordURL } : {}),
+    ...(observerEnabled ? { SUPPORT_OBSERVER_READ_TOKEN: readCapability } : {}), GITHUB_SHA: binding.release, DISCORD_ALERTS_ENABLED: String(enabled), ...(enabled ? { DISCORD_ALERT_WEBHOOK_URL: privateDiscordURL } : {}),
     GITHUB_APP_CLIENT_ID: metadata.clientId, GITHUB_APP_PRIVATE_KEY: pem, GITHUB_WEBHOOK_SECRET: "WEBHOOK_CREDENTIAL_CANARY" };
   const alerts = discordApi(worker);
   const appHttp: typeof fetch = async (url, init) => {
@@ -81,7 +87,7 @@ function fixture(stage: "prod" | "staging" = "prod", enabled = false) {
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer STATE_CREDENTIAL_CANARY");
       state.push(JSON.parse(String(init?.body))); return Response.json({});
     }),
-    app: { discord: binding,
+    app: { observer, discord: binding,
       provisionDiscord: vi.fn((worker: string) => trusted.provisionDiscord(worker)),
       provisionKey: vi.fn((stage: string, worker: string) => trusted.provisionKey(stage, worker)),
       provisionWebhook: vi.fn((worker: string, appId: number) => trusted.provisionWebhook(worker, appId)),
@@ -90,15 +96,17 @@ function fixture(stage: "prod" | "staging" = "prod", enabled = false) {
   };
   const controller = new AbortController();
   const config: ProtectedContinuation = { repo, sourceManifest, input, app: metadata, policy, githubToken: "GITHUB_CREDENTIAL_CANARY", github: http.fetch,
-    appCustody: (check, dispatch) => { trusted = trustedAppCustody(env, worker, appHttp, check, dispatch, stage, binding); return custody.app; }, broker: { discord: binding, stage, worker, stateOrigin: "https://state.invalid", databases: input.databases }, custody, evidence,
+    appCustody: (check, dispatch) => { trusted = trustedAppCustody(env, worker, appHttp, check, dispatch, stage, binding, observer); return custody.app; }, broker: { observer, discord: binding, stage, worker, stateOrigin: "https://state.invalid", databases: input.databases }, custody, evidence,
     revalidate: async () => ({ ...evidence }), checkWindow: () => {}, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),
     publish: (candidate) => {
       expect(JSON.stringify(candidate)).not.toMatch(/CANARY|fingerprint|instance|databaseId|private/);
+      expect(JSON.stringify(candidate)).not.toContain(readCapability);
+      expect(JSON.stringify(candidate)).not.toContain(createHash("sha256").update(readCapability).digest("hex"));
       // GitHub timestamp precision is seconds. This is post-plan creation.
       setTimeout(() => http.approve(candidate, Math.floor(Date.now() / 1000) * 1000), 1100);
     },
   };
-  return { config, calls, state, http, controller, alerts, env, app: custody.app };
+  return { config, calls, state, http, controller, alerts, env, readCapability, app: custody.app };
 }
 describe.each(["prod", "staging"] as const)("%s retained offline native candidate -> authenticated approval -> installed provider apply", (stage) => {
   it("refuses a release different from the reviewed candidate head before launching the offline child", async () => {
@@ -120,13 +128,14 @@ describe.each(["prod", "staging"] as const)("%s retained offline native candidat
       expect(calls).toEqual([]); expect(state).toEqual([]);
     }
   });
-  it.each([false, true])("applies enabled=%s through the same native graph with real installed Worker reconcile and State commits, preserving both DB identities", async (enabled) => {
-    const { config, calls, state, app, alerts, env } = fixture(stage, enabled);
+  it.each([[false, false], [false, true], [true, false], [true, true]])("applies discord=%s observer=%s through the same native graph with real installed Worker reconcile and State commits, preserving both DB identities", async (enabled, observerEnabled) => {
+    const { config, calls, state, app, alerts, env, readCapability } = fixture(stage, enabled, observerEnabled);
     const publish = config.publish;
-    config.publish = (candidate) => { publish(candidate); env.DISCORD_ALERT_WEBHOOK_URL = "mutated-after-candidate"; env.GITHUB_SHA = "e".repeat(40); env.DISCORD_ALERTS_ENABLED = String(!enabled); };
+    config.publish = (candidate) => { publish(candidate); env.DISCORD_ALERT_WEBHOOK_URL = "mutated-after-candidate"; env.GITHUB_SHA = "e".repeat(40); env.DISCORD_ALERTS_ENABLED = String(!enabled); env.SUPPORT_OBSERVER_READ_TOKEN = randomBytes(32).toString("hex"); };
     const execute = execution.runOfflineModule;
     const offline = vi.spyOn(execution, "runOfflineModule").mockImplementation((repo, entry, input, channel) => {
       expect(JSON.stringify(input)).not.toContain(privateDiscordURL);
+      expect(JSON.stringify(input)).not.toContain(readCapability);
       expect(JSON.stringify(input)).not.toMatch(/STATE_CREDENTIAL_CANARY|PRIVATE KEY/);
       return execute(repo, entry, input, channel);
     });
@@ -143,6 +152,9 @@ describe.each(["prod", "staging"] as const)("%s retained offline native candidat
       expect(alerts.secrets.get("DISCORD_ALERT_WEBHOOK_URL")).toBe(enabled ? privateDiscordURL : undefined);
       expect(alerts.secrets.get("DISCORD_ALERT_RELEASE")).toBe(enabled ? discord.release : undefined);
       expect(JSON.stringify(state)).not.toContain(privateDiscordURL);
+      expect(JSON.stringify(state)).not.toContain(readCapability);
+      expect(alerts.secrets.get("SUPPORT_OBSERVER_READ_TOKEN")).toBe(observerEnabled ? readCapability : undefined);
+      expect(alerts.secrets.get("SUPPORT_OBSERVER_STAGE")).toBe(observerEnabled ? stage : undefined);
       expect(alerts.request.mock.calls.every(([url]) => String(url).startsWith("https://api.cloudflare.com/"))).toBe(true);
       expect(ambient).not.toHaveBeenCalled();
     } finally { ambient.mockRestore(); offline.mockRestore(); }
@@ -232,10 +244,11 @@ describe.each(["prod", "staging"] as const)("%s retained offline native candidat
       window.close();
       expect(existsSync(path)).toBe(true);
       expect(() => exclusiveLocalWindow(path, spec)).toThrow();
-      expect(alerts.request).toHaveBeenCalledTimes(4); expect(app.check).not.toHaveBeenCalled();
+      expect(alerts.request).toHaveBeenCalledTimes(10); expect(app.check).not.toHaveBeenCalled();
       expect(state.at(-1)).toMatchObject({ fqn: "GitHubAppSecret", status: "updating" });
       expect(state.every((row) => row.fqn !== undefined)).toBe(true);
       expect(JSON.stringify(state)).not.toContain(privateDiscordURL);
+
     } finally { window.close(); rmSync(directory, { recursive: true, force: true }); }
   }, 90_000);
 

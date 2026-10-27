@@ -1,6 +1,7 @@
-/** Offline only. Bodies below are PROPOSED normalized contracts, not provider API
- * responses. A future adapter must project documented wire envelopes and establish
- * provenance separately. No body field authenticates an account, stage or source. */
+import { decodeObserverSnapshot, observerOutcomes, terminalOutcomes } from "../../src/observer-snapshot.ts";
+/** Offline only. Original normalized fixture contracts remain proposals. The v1
+ * snapshot branch adapts the actual producer wire; other sources still require
+ * wire/transport adapters. Provenance is independent of all body assertions. */
 export const classes = ["http_unavailable", "worker_errors", "cron_start_missing", "cron_incomplete",
   "workflow_failure", "deployment_drift", "telemetry_unavailable", "alert_route_unavailable"] as const;
 export type Class = typeof classes[number];
@@ -39,10 +40,10 @@ export interface Read {
 const outcomes = ["ok", "failed", "timed_out", "contained", "not_run"] as const;
 type Outcome = typeof outcomes[number];
 type Phases = { delivery: Outcome; cleanup: Outcome; refresh: Outcome; sweep: Outcome; drain: Outcome };
-interface Tick { slot: number; attempt: number; start: number; terminal: number | null; phases: Phases | null }
+interface Tick { slot: number; attempt: number; start: number; terminal: number | null; phases: Phases | null; outcome?: "settled" | "failed" | "interrupted" | null }
 interface Snapshot {
-  generated: number; stage: Stage; candidate: string; activation: number; generation: number;
-  from: number; to: number; storage: "ok" | "unavailable"; ticks: Tick[];
+  generated: number; stage: Stage; candidate: string; activation: number | null; generation: number;
+  from: number; to: number; storage: "ok" | "unavailable"; ticks: Tick[]; coverageUnknown?: boolean;
 }
 interface Workflow extends Expectation {
   created: number; started: number | null; updated: number;
@@ -134,6 +135,20 @@ function decode(source: Source, v: unknown, c: Context, r: Read): Payload {
     if (created > updated || (started !== null && started < created) ||
       (status === "completed") !== (conclusion !== null) || (status === "in_progress" && started === null)) bad();
     return { ...e, created, started, updated, status, conclusion };
+  }
+  // Actual v1 wire adapter. Body cannot grant transport provenance or activation.
+  if (v && typeof v === "object" && Object.hasOwn(v, "version")) {
+    const wire = decodeObserverSnapshot(v, r.at);
+    if (wire.stage !== c.stage || wire.candidate !== c.candidate || wire.generation !== c.generation) return bad();
+    const ticks: Tick[] = wire.ticks.filter(t => t[0] === c.stage && t[1] === c.candidate && t[2] === c.generation).map(t => ({
+      slot: t[3], attempt: t[4], start: t[5], terminal: t[6], outcome: t[7] === null ? null : terminalOutcomes[t[7]],
+      phases: { delivery: observerOutcomes[t[8]], cleanup: observerOutcomes[t[9]],
+        refresh: observerOutcomes[t[10]], sweep: observerOutcomes[t[11]], drain: observerOutcomes[t[12]] },
+    }));
+    // The producer has no activation/continuous-coverage witness. Always unknown,
+    // even when a caller accidentally labels transport coverage complete.
+    return { generated: wire.generated, stage: wire.stage, candidate: wire.candidate, activation: null,
+      generation: wire.generation, from: r.from, to: r.to, storage: "ok", ticks, coverageUnknown: true };
   }
   const o = object(v, ["generated", "stage", "candidate", "activation", "generation", "from", "to", "storage", "ticks"]);
   const generated = time(o.generated, r.at), from = time(o.from, generated), to = time(o.to, generated);
@@ -266,7 +281,7 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
       let incomplete = false, contained = false;
       for (const t of s.ticks) {
         const values = t.phases && Object.values(t.phases);
-        if (values?.some(v => v === "failed" || v === "timed_out") ||
+        if (t.outcome === "failed" || t.outcome === "interrupted" || values?.some(v => v === "failed" || v === "timed_out") ||
           (t.terminal === null && c.now - t.start >= proposals.completion)) {
           put("cron_incomplete", "incident", e, t.slot); incomplete = true;
           const known = cronFailures.findIndex(x => x.slot === t.slot && x.attempt === t.attempt);
@@ -277,7 +292,7 @@ export function evaluate(c: Context, batch: Batch, previous?: State): Evaluation
           } else if (t.terminal !== null && cronFailures[known].open) cronFailures[known] = failure;
         } else if (values?.some(v => v === "contained" || v === "not_run")) contained = true;
       }
-      if (!complete(e, c)) { telemetryUnknown = true; continue; }
+      if (s.coverageUnknown || !complete(e, c)) { telemetryUnknown = true; continue; }
       const end = Math.floor(c.now / minute) * minute - 2 * minute, start = end - 10 * minute;
       const covered = s.from <= start && s.to >= end && c.activation <= start;
       const expected = Array.from({ length: 10 }, (_, i) => start + i * minute).filter(t => !excluded(t));

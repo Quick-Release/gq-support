@@ -1,4 +1,4 @@
-import { discord } from "./fixtures/discord-custody.ts";
+import { discord, observer } from "./fixtures/discord-custody.ts";
 import { describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import { GitHubAppSecret, GitHubAppSecretProvider } from "../deploy/github-app-secret.ts";
@@ -6,6 +6,8 @@ import { provisionDiscordAlertSecret } from "../deploy/discord-alert-secret.ts";
 import { planningApplyBroker } from "../deploy/planning-apply-broker.ts";
 import { ACCOUNT } from "../deploy/planning-state.ts";
 import { assertIntegratedCustodyReady, integrationCodeBlockers } from "../deploy/planning-entry.ts";
+
+vi.mock("../deploy/observer-read-secret.ts", async (original) => ({ ...await original<object>(), provisionObserverReadSecret: async () => { calls.push("observer"); } }));
 
 const calls = vi.hoisted(() => [] as string[]);
 vi.mock("../deploy/github-app.ts", async (original) => ({ ...await original<object>(),
@@ -27,7 +29,7 @@ describe("combined App and Discord custody", () => {
     const provider = await Effect.runPromise(GitHubAppSecret.Provider.pipe(Effect.provide(GitHubAppSecretProvider())));
     // Exercise the provider lifecycle, rather than only the standalone helper.
     await Effect.runPromise(provider.reconcile({ news: { stage: "prod", workerName: "synthetic-worker" } } as Parameters<typeof provider.reconcile>[0]));
-    expect(calls).toEqual(["key", "webhook", "discord", "check"]);
+    expect(calls).toEqual(["key", "webhook", "observer", "discord", "check"]);
   });
 
   it("requires explicit Discord custody in injected protected providers", async () => {
@@ -56,7 +58,7 @@ describe("combined App and Discord custody", () => {
     vi.mocked(provisionDiscordAlertSecret).mockRejectedValueOnce(new Error("Discord alert Worker secret update failed"));
     const provider = await Effect.runPromise(GitHubAppSecret.Provider.pipe(Effect.provide(GitHubAppSecretProvider())));
     await expect(Effect.runPromise(provider.reconcile({ news: { stage: "prod", workerName: "synthetic-worker" } } as Parameters<typeof provider.reconcile>[0]))).rejects.toThrow("GitHub App secret provisioning failed");
-    expect(calls).toEqual(["key", "webhook"]);
+    expect(calls).toEqual(["key", "webhook", "observer"]);
   });
 });
 
@@ -70,11 +72,11 @@ describe("generic Discord HTTP requests remain outside the child protocol", () =
     const transport = vi.fn<typeof fetch>(async () => Response.json({ success: true,
       result: { observability: { enabled: true, traces: { enabled: false } }, bindings: [] },
     }));
-    const broker = planningApplyBroker({ discord, stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid",
+    const broker = planningApplyBroker({ observer, discord, stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid",
       instances: { Worker: "worker-instance", GitHubAppSecret: "app-instance" }, bundle: "b".repeat(64), databases: [],
       app: { stage: "prod", appId: 123, clientId: "synthetic", slug: "getquick-support", fingerprint: "synthetic" },
     }, { cloudflareToken: "CF_SYNTHETIC", stateBearer: "STATE_SYNTHETIC", cloudflare: transport, state: transport,
-      app: { discord, provisionDiscord: async () => {}, provisionKey: vi.fn(), provisionWebhook: vi.fn(), check: vi.fn() },
+      app: { observer, discord, provisionDiscord: async () => {}, provisionKey: vi.fn(), provisionWebhook: vi.fn(), check: vi.fn() },
     }, async () => {}, () => {});
     const bridge: typeof fetch = async (url, init) => {
       const result = await broker.handle({ op: "cloudflare", method: init?.method ?? "GET", url: String(url),
@@ -91,11 +93,11 @@ describe("generic Discord HTTP requests remain outside the child protocol", () =
     ["PUT", "/secrets"], ["DELETE", "/secrets/DISCORD_ALERT_WEBHOOK_URL"], ["PATCH", "/script-settings"],
   ])("refuses Discord %s %s before any privileged dispatch", async (method, suffix) => {
     const transport = vi.fn<typeof fetch>();
-    const broker = planningApplyBroker({ discord, stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid",
+    const broker = planningApplyBroker({ observer, discord, stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid",
       instances: { Worker: "worker-instance", GitHubAppSecret: "app-instance" }, bundle: "b".repeat(64), databases: [],
       app: { stage: "prod", appId: 123, clientId: "synthetic", slug: "getquick-support", fingerprint: "synthetic" },
     }, { cloudflareToken: "CF_SYNTHETIC", stateBearer: "STATE_SYNTHETIC", cloudflare: transport, state: transport,
-      app: { discord, provisionDiscord: async () => {}, provisionKey: vi.fn(), provisionWebhook: vi.fn(), check: vi.fn() },
+      app: { observer, discord, provisionDiscord: async () => {}, provisionKey: vi.fn(), provisionWebhook: vi.fn(), check: vi.fn() },
     }, async () => {}, () => {});
     await expect(broker.handle({ op: "cloudflare", method, url: `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/workers/scripts/synthetic-worker${suffix}`,
       body: "", contentType: "" })).rejects.toThrow("apply blocked");

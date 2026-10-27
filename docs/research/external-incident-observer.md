@@ -1,6 +1,6 @@
 # External incident observation for MVP #20
 
-Design, offline protocol and internal Cron producer CODE, 2026-10-27. **External
+Design, offline protocol, Cron producer and fixed observer endpoint CODE, 2026-10-27. **External
 observer disabled; no running external observer, sender, scheduler, credentials or live proof supplied.
 #20 and #29 remain open.**
 Recommendation: use GitHub Actions outside the support Worker for bounded HTTP
@@ -9,6 +9,12 @@ missing-work coverage. Keep Discord as the main route. Begin with read-only
 verdicts; enable automated sending only after durable sender custody is proven.
 No new vendor, monitoring platform, privileged proxy or Cloudflare resource is
 needed for that first slice.
+
+The current implemented endpoint contract is [documented below](#fixed-readiness-and-aggregate-wire-snapshot-this-code-slice).
+It adds data-free route/runtime readiness and a disabled-by-default aggregate GET;
+activation and continuous coverage remain unknown. Earlier sections retain the
+design/producer history. This slice uses `t3/observer-progress-snapshot` based on
+PR123 `4f3cffa096f091cda89872b04e5aa6946141c0cb`; source branches are untouched.
 
 ## Evidence boundary
 
@@ -170,12 +176,13 @@ and no action clears support/restore/provider ownership.
 
 ## Bounded contracts and proposed windows
 
-A future CODE slice adds a fixed authenticated aggregate snapshot
+The original design proposed a fixed authenticated aggregate snapshot
 `GET /internal/observer/v1/snapshot` (read-only, no support records) and a data-free
 readiness GET **before** support admission. Readiness may check binding availability
 without listing/creating support data; its success claims only its listed checks.
 Snapshot reads existing stage-local state; no new side-effecting probe or hidden
-GitHub/Discord test. Neither endpoint is implemented by this document.
+GitHub/Discord test. These endpoints are now implemented by the CODE slice below;
+readiness checks only route/runtime execution, and activation/coverage stay unknown.
 
 Record a bounded 60-minute ring of scheduled slots: scheduled UTC minute from the
 controller, attempt ordinal (at most four retained attempts/slot, overflow explicitly partial), actual start time, terminal time and finite
@@ -244,7 +251,8 @@ pins account/stage/candidate/activation/generation and exact workflow expectatio
 response fields cannot authenticate themselves. Public output is at most 2 KiB
 and excludes private identities, topology, raw content and error causes.
 
-Snapshot/readiness wire contracts remain **proposed and unwired**. The internal
+At the offline-only slice, snapshot/readiness wire contracts were **proposed and unwired**;
+the current CODE section below supersedes that status. The internal
 Cron producer CODE below now records local progress; it supplies no external read
 capability or activation/coverage proof.
 Workflow/deployment JSON is explicitly a normalized projection, not a fabricated
@@ -426,7 +434,7 @@ produce `unknown` and the runtime skips progress, while support still runs.
 The binding is release identity, **not** activation proof. Activation time and
 snapshot coverage remain **unknown/unimplemented**.
 
-### Next read-only capability and snapshot contract (unwired)
+### Producer slice follow-up contract (historical; implemented conservatively below)
 
 No endpoint, new secret, external reader, broker resource, workflow, scheduler,
 sender, journal or observer enablement is supplied here. A next slice must
@@ -495,3 +503,169 @@ and documentation only, so no additional expensive full run was performed.
 Hosted checks/reviews remain **uninspected**; no CI polling/watch or merge was
 performed. Pushes use `GQ_SUPPORT_SKIP_PRE_PUSH=1`; no shared DDEV/browser work ran.
 No LIVE operation, credential/profile access or notification was performed.
+
+### Fixed readiness and aggregate wire snapshot (this CODE slice)
+
+This section supersedes the unwired endpoint/100-row limitation described above.
+`GET /internal/observer/v1/readiness` now runs before raw D1 acquisition, App key
+setup, support admission, CRUD, wakeups and runtime alert persistence. Its fixed
+`{version:1,check:"route_runtime",result:"available"}` means only that this route
+executed. It reads no storage or private configuration and asserts no D1, App,
+Cron or Discord health. It can therefore answer despite a raw binding failure.
+
+`GET /internal/observer/v1/snapshot` is disabled by default. Exact reviewed
+configuration and App-owned private custody must supply an independent random
+32-byte capability, encoded as exactly 64 lowercase hex characters, in the
+Authorization Bearer header. This is solely aggregate-GET authority. It is not
+an App key, general State bearer, SQL credential or deployment token. The Worker
+hashes the current two fixed-format values per request and compares fixed-size
+buffers using the installed Workers `crypto.subtle.timingSafeEqual` extension.
+Unsupported crypto, missing/wrong tokens and disabled mode fail before storage.
+There is no warm secret/digest/response cache. The API is documented in
+[Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/#timingsafeequal).
+
+Both routes reject methods other than GET, queries (including empty `?`), bodies,
+cookies and Origin. They issue no redirects, CORS grants or cookies. Every
+response, including denial/unavailability, carries browser/CDN no-store headers.
+No endpoint takes SQL, paging, limits, stage, candidate or timestamps from the
+request. Authentication is followed by current release/stage custody-pin checks.
+
+The snapshot executes one fixed SELECT inside one D1 batch, including progress
+control, maintenance generation/mode, finite Discord control and every retained
+cell. A single statement supplies coherence without separate-page races. No
+SupportDB, support records, receipts, App identity, Reporter, Client, repository,
+request, CLI output or Alchemy State is read. It acquires no restore owner and
+cannot release generations or alter admission/drain/replay. Controls and rows
+are validated before output; malformed/missing bindings, storage errors and a
+250ms cooperative deadline return fixed 503 `observer_unavailable`, without
+causes. Already dispatched read-only D1 work cannot be cancelled by this deadline.
+
+Version 1 has exact keys: version, generated, stage, candidate, generation,
+maintenance, watermark, partial, activation, coverage, route, ticks. Ticks are
+13-element tuples: stage, candidate, generation, scheduled minute, attempt,
+start, terminal-or-null, terminal outcome index-or-null, then delivery/cleanup/
+refresh/sweep/drain outcome indices. Terminal indices are settled/failed/
+interrupted (0–2); phase indices are not_run/ok/failed/timed_out/contained (0–4).
+All integers must be nonnegative safe integers, timestamps cannot exceed generated,
+slots must be ordered distinct minute/attempt pairs, attempts are 1–4, and
+terminal time/outcome must agree. Candidate is exact lowercase 40-hex. Rows from
+prior candidates/generations remain visible; they cannot prove current health.
+The route enum describes only local configuration/control, not Discord delivery
+or human receipt. Disabled notifications remain explicit; not_run/contained never
+become ok. No provider request occurs.
+
+This heartbeat-only decoder explicitly accepts **240 cells**, preserving the
+producer's entire 60-minute × four-attempt capacity. Other query decoders remain
+at 100 rows. Count plus fixed LIMIT refuses excess cells, and sticky partial is
+preserved. SQL bounds malformed strings and rejects noninteger numeric storage
+before JSON crosses the binding. A valid maximum-width tuple is under 160 ASCII
+bytes (including safe-integer widths); 240 tuples plus fixed envelope stay below
+40 KiB. The implementation additionally enforces 60 KiB of row JSON and 64 KiB
+for the complete response. There is no pagination or cursor consistency claim.
+
+**Activation is null and coverage is unknown on every response.** No reviewed
+activation/continuous-coverage witness exists in the producer. Watermark, generated
+and latest row cannot supply that proof. The actual-wire adapter in protocol.ts
+validates this DTO, pins stage/candidate/maintenance generation, preserves failed/
+interrupted terminals and phase failures, and always refuses missing-start proof
+or affirmative recovery from this wire version. It does not fabricate activation
+from the private context. A retained incident cannot recover on invalid, partial,
+stale or unknown evidence. Prior HTTP identity/advancing timestamps and late-Cron
+failure ownership remain unchanged. Supporting affirmative recovery later needs
+reviewed activation, continuous coverage and maintenance exclusion metadata.
+
+The existing GitHubAppSecret lifecycle now owns a bounded observer-secret
+transition before Discord custody: disable, inspect, exact token/stage/release
+writes or verified removal, then inspect. It uses one-shot ordered operations,
+nested authentication and final synchronous abort/deadline/window guards; checks
+binding names/types and leaves observability unchanged. Disabled mode removes old
+observer secrets before Discord's verified removal can restore traces. Enabled
+Discord still has logs on and traces off; disabled Discord restores traces only
+after removals. An Authorization header supplies no evidence for a new trace
+exception. Public mode/stage/release plus an opaque per-session nonce participate
+in the retained candidate. No token or token hash enters props, State, offline
+child, public candidate, errors, logs or the App RPC subprocess. The retained
+launcher alone can consume a future privately delivered owner-only file; this
+slice requested/accessed no credentials. Unset LIVE config still refuses before
+private file acquisition. Privileged profiles/resources remain unchanged.
+
+Remaining: external HTTPS transport/endpoint origin validation, independently
+reviewed activation/expectations/exclusions, scheduler/workflow, durable sender
+and journal, POLICY fallback decision, private custody delivery and LIVE proof.
+No observer is enabled and no notification, drill, deployment, setting or State
+operation was performed. Receipt/human acknowledgment remain unverified; #20
+and #29 remain open. The smallest next CODE step is a reviewed activation and
+continuous-coverage evidence contract; transport can then consume this DTO without
+inventing coverage. The pending parent fallback policy is independent of these
+endpoints.
+
+### Endpoint validation evidence (CODE only)
+
+All commands ran with `/home/valerio/.local/share/mise/installs/node/26.12.1/bin`
+first in PATH (**Node 26.12.1**). Every Vitest run used `--maxWorkers=1`.
+
+- RED: two actual-registration tests failed because readiness/default-disabled
+  snapshot acquired bindings first. Another RED test failed because malformed
+  unrelated support configuration prevented handler initialization. The final
+  registration bypasses that configuration and raw storage, and tests an
+  authenticated snapshot with SupportDB absent and no admission/support/App work.
+- Focused final route/custody/broker/provider run: **103 tests / 5 files passed**.
+  This covers installed-workerd timing-safe verification, current-token rotation,
+  unsupported crypto, fixed errors, query/body/method/cookie/origin denial,
+  cooperative hung-read timeout, full 240-cell coherent D1 output, overflow,
+  malformed/NUL-corrupted data, generation/candidate pins, ordering/staleness,
+  real-wire failure carry and maximum-width byte budget. New custody-name upload
+  rejection tests use otherwise valid metadata and matching bundle digests.
+- Final complete Worker run on frozen runtime commit
+  `9f061351e64067721f45e70b6c1bf12c5d7f0c42`: **1,333 tests / 55 files passed**,
+  **777.25 seconds**. The actual shared native graph/Worker/App custody/broker/
+  output tests exercise both stages and all four Discord/observer mode pairs.
+  Only first-party fake HTTP and fake private inputs are used. App RPC execution
+  is synthetic; its exact environment/input keys exclude observer capability
+  material. No live App identity, binding, setting or receipt is inferred.
+- Offline protocol: **81 tests passed**, retaining prior advancing HTTP pins and
+  late-Cron failure ownership. All **five negative controls** are detected by real
+  assertion failures. The temporary-copy runner now includes the shared actual
+  wire decoder; module-load failure is not accepted as a detected regression.
+- **114 CI-script tests**, runtime/workflow policies, Worker typecheck/lint,
+  root/app JS lint, **three lint controls**, Worker/docs and candidate-reachable
+  history secret scans, and whole-slice whitespace checks pass.
+
+Exploratory runs while source was changing found missing tracked-source copies,
+empty-query handling and configuration-before-readiness defects. Two incomplete
+broad runs were stopped for corrections; none is counted as passing evidence.
+Only the complete frozen-source run above establishes the full-suite result.
+Afterward, only tests/docs changed: the workerd fixture now explicitly asserts
+that correct authentication reaches the ledger callback and wrong authentication
+does not. That focused file passed **17 tests**; typecheck and lint were rerun; runtime/custody source
+was unchanged and the full suite was not repeated.
+
+Reproduction commands (from the repository root):
+
+```sh
+pnpm --filter gq-support-worker exec vitest run --maxWorkers=1
+pnpm --filter gq-support-worker exec vitest run test/observer-http.test.ts test/observer-custody.test.ts test/worker-runtime-alerts.test.ts test/planning-apply-broker.test.ts test/mvp-integration.test.ts --maxWorkers=1
+pnpm --filter gq-support-worker exec vitest run --config tools/observer/vitest.config.ts --maxWorkers=1
+node worker/tools/observer/negative-controls.mjs
+pnpm --filter gq-support-worker typecheck
+pnpm --filter gq-support-worker lint
+pnpm test:ci
+node scripts/ci/runtime-matrix.mjs policy
+node scripts/ci/workflow-policy.mjs
+pnpm lint:js
+pnpm test:lint
+scripts/ci/gitleaks.sh dir worker
+scripts/ci/gitleaks.sh dir docs
+scripts/ci/gitleaks.sh git --log-opts='4f3cffa096f091cda89872b04e5aa6946141c0cb..HEAD' .
+git diff --check 4f3cffa096f091cda89872b04e5aa6946141c0cb
+```
+
+The actual-wire adapter supplies no disabled-drain or maintenance exclusion proof;
+a settled terminal with drain=not_run still cannot count as healthy completion.
+The smallest next step remains a reviewed activation/continuous-coverage and
+exclusion contract, followed by fixed external transport. POLICY fallback,
+scheduler/workflow, durable sender/journal and private LIVE delivery/proof remain
+pending. Receipt is unverified and #20/#29 stay open. No LIVE operation, credential/
+profile access, remote settings/State change, deploy, notification, drill, GitHub comment,
+merge, hosted-check polling/watch, browser, PHP or DDEV work was performed.
+Pushes use `GQ_SUPPORT_SKIP_PRE_PUSH=1`; hosted checks/reviews remain uninspected.

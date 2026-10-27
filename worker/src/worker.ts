@@ -1,3 +1,5 @@
+import * as Result from "effect/Result";
+import { observerPath, observerRequest } from "./observer-http.ts";
 import { ReviewedRelease } from "./release-identity.ts";
 import * as Exit from "effect/Exit";
 import * as Cause from "effect/Cause";
@@ -53,27 +55,31 @@ export default Effect.gen(function* () {
     // createStorageFor (src/storage.ts), with the binding's `raw` database as `shared`.
     const database = yield* Cloudflare.D1.QueryDatabase(yield* SupportDB);
     const ledgerDatabase = yield* Cloudflare.D1.QueryDatabase(yield* SupportLedger);
-    const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
-    const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
-    const appId = yield* Config.String("GITHUB_APP_ID").pipe(Config.withDefault(""));
-    // Only this stage's reviewed mappings: the slug is pinned per stage at deployment.
-    const repositoryMappings = mappingsForSlug(slug);
-    const webhookDiagnostics = yield* Config.Boolean("GITHUB_WEBHOOK_DIAGNOSTICS").pipe(Config.withDefault(false));
-    // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
-    const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
-      Config.map(Option.filter((value) => value >= minimum)));
-    const sweep = Object.fromEntries(Object.entries(yield* Config.all({
-      intervalMs: setting("STATUS_SWEEP_INTERVAL_MS", 60_000),
-      skewMs: setting("STATUS_SWEEP_SKEW_MS", 0),
-      pagesPerTick: setting("STATUS_SWEEP_PAGES_PER_TICK", 1),
-      pagesPerRepository: setting("STATUS_SWEEP_PAGES_PER_REPOSITORY", 1),
-    })).flatMap(([key, value]) => Option.isSome(value) ? [[key, value.value]] : [])) as Partial<SweepConfig>;
-    const refresh = Object.fromEntries(Object.entries(yield* Config.all({
-      dailyIntervalMs: setting("STATUS_REFRESH_DAILY_INTERVAL_MS", 60_000),
-      dailyBatchSize: setting("STATUS_REFRESH_DAILY_BATCH_SIZE", 1),
-      readsPerTick: setting("STATUS_REFRESH_READS_PER_TICK", 1),
-    })).flatMap(([key, value]) => Option.isSome(value) ? [[key, value.value]] : [])) as Partial<RefreshConfig>;
+    const supportConfig = Effect.gen(function* () {
+      const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
+      const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
+      const appId = yield* Config.String("GITHUB_APP_ID").pipe(Config.withDefault(""));
+      // Only this stage's reviewed mappings: the slug is pinned per stage at deployment.
+      const repositoryMappings = mappingsForSlug(slug);
+      const webhookDiagnostics = yield* Config.Boolean("GITHUB_WEBHOOK_DIAGNOSTICS").pipe(Config.withDefault(false));
+      // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
+      const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
+        Config.map(Option.filter((value) => value >= minimum)));
+      const sweep = Object.fromEntries(Object.entries(yield* Config.all({
+        intervalMs: setting("STATUS_SWEEP_INTERVAL_MS", 60_000),
+        skewMs: setting("STATUS_SWEEP_SKEW_MS", 0),
+        pagesPerTick: setting("STATUS_SWEEP_PAGES_PER_TICK", 1),
+        pagesPerRepository: setting("STATUS_SWEEP_PAGES_PER_REPOSITORY", 1),
+      })).flatMap(([key, value]) => Option.isSome(value) ? [[key, value.value]] : [])) as Partial<SweepConfig>;
+      const refresh = Object.fromEntries(Object.entries(yield* Config.all({
+        dailyIntervalMs: setting("STATUS_REFRESH_DAILY_INTERVAL_MS", 60_000),
+        dailyBatchSize: setting("STATUS_REFRESH_DAILY_BATCH_SIZE", 1),
+        readsPerTick: setting("STATUS_REFRESH_READS_PER_TICK", 1),
+      })).flatMap(([key, value]) => Option.isSome(value) ? [[key, value.value]] : [])) as Partial<RefreshConfig>;
+      return { clientId, slug, appId, repositoryMappings, webhookDiagnostics, sweep, refresh };
+    }).pipe(Effect.catchCause(() => Effect.die("Support configuration unavailable")));
     const deliver = Effect.gen(function* () {
+      const { clientId, slug, repositoryMappings } = yield* supportConfig;
       const env = yield* WorkerEnvironment;
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
@@ -99,6 +105,7 @@ export default Effect.gen(function* () {
           if (ledger && owner) yield* progressIO(() => writeProgress(ledger, owner, { ...phases }));
         });
         const work = Effect.gen(function* () {
+          const { clientId, slug, repositoryMappings, sweep, refresh } = yield* supportConfig;
           if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return yield* Effect.die("Support scheduled configuration unavailable");
           const db = yield* database.raw;
           if (!db || !ledger) return yield* Effect.die("Support scheduled bindings unavailable");
@@ -139,6 +146,15 @@ export default Effect.gen(function* () {
       fetch: Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const env = yield* WorkerEnvironment;
+        // The fixed observer boundary precedes raw storage/private setup/admission.
+        if (observerPath(new URL(request.url, "https://support.invalid").pathname)) {
+          const web = HttpServerRequest.toWebResult(request);
+          if (Result.isFailure(web)) return HttpServerResponse.fromWeb(Response.json({ code: "invalid_observer_request" }, { status: 400, headers: { "Cache-Control": "no-store" } }));
+          const services = yield* Effect.context<RuntimeContext>();
+          return HttpServerResponse.fromWeb(yield* Effect.promise(() => observerRequest(web.success, env,
+            () => Effect.runPromiseWith(services)(ledgerDatabase.raw))));
+        }
+        const { clientId, slug, appId, repositoryMappings, webhookDiagnostics, refresh } = yield* supportConfig;
         const context = yield* WorkerExecutionContext;
         const { ledger, db } = yield* Effect.gen(function* () {
           return { ledger: yield* ledgerDatabase.raw, db: yield* database.raw };

@@ -20,7 +20,8 @@ for (const [name, before, after] of variants) {
   if (!original.includes(before)) throw new Error('negative_control_anchor_missing');
   const temp = mkdtempSync(join(tmpdir(), 'gq-observer-negative-'));
   try {
-    writeFileSync(join(temp, 'protocol.ts'), original.replace(before, after));
+    writeFileSync(join(temp, 'protocol.ts'), original.replace(before, after).replace('../../src/observer-snapshot.ts', './observer-snapshot.ts'));
+    copyFileSync(join(root, '../../src/observer-snapshot.ts'), join(temp, 'observer-snapshot.ts'));
     for (const file of ['protocol.test.ts', 'analytics-wire.ts']) copyFileSync(join(root, file), join(temp, file));
     symlinkSync(join(root, '../../node_modules'), join(temp, 'node_modules'), 'dir');
     writeFileSync(join(temp, 'vitest.config.mjs'), `export default { root: ${JSON.stringify(temp)}, test: { include: ['protocol.test.ts'], maxWorkers: 1 } };`);

@@ -14,6 +14,7 @@ import { approvalCommand, githubCandidateApproval } from "./github-candidate-app
 // Fixed App custody now owns the Discord transition; live metadata remains mandatory.
 export const integrationCodeBlockers = Object.freeze([] as string[]);
 export function assertIntegratedCustodyReady(config?: ReviewedPlannerConfig): void {
+  requireEvidence(config?.observer === undefined || (Object.keys(config.observer).join() === "enabled" && typeof config.observer.enabled === "boolean"));
   requireEvidence(config?.discord && Object.keys(config.discord).join() === "enabled" && typeof config.discord.enabled === "boolean");
 }
 
@@ -61,7 +62,10 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       const discord = Object.freeze({ enabled: config.discord.enabled, release: approval.head, commitment: randomBytes(32).toString("hex") });
       requireEvidence(!env.DISCORD_ALERT_WEBHOOK_URL && !env.DISCORD_ALERTS_ENABLED && !env.DISCORD_ALERT_RELEASE &&
         (discord.enabled ? env.DISCORD_ALERT_WEBHOOK_URL_FILE === "/dev/shm/gq-protected/discord-alert-webhook-url" : !env.DISCORD_ALERT_WEBHOOK_URL_FILE));
-      const appEnv = { DISCORD_ALERTS_ENABLED: String(discord.enabled), GITHUB_SHA: discord.release,
+      const observer = Object.freeze({ enabled: config.observer?.enabled === true, stage, release: approval.head, commitment: randomBytes(32).toString("hex") });
+      requireEvidence(!env.SUPPORT_OBSERVER_ENABLED && !env.SUPPORT_OBSERVER_READ_TOKEN && !env.SUPPORT_OBSERVER_STAGE && !env.SUPPORT_OBSERVER_RELEASE &&
+        (observer.enabled ? env.SUPPORT_OBSERVER_READ_TOKEN_FILE === "/dev/shm/gq-protected/observer-read-token" : !env.SUPPORT_OBSERVER_READ_TOKEN_FILE));
+      const appEnv = { ...(observer.enabled ? { SUPPORT_OBSERVER_READ_TOKEN: readPrivate(env.SUPPORT_OBSERVER_READ_TOKEN_FILE) } : {}), DISCORD_ALERTS_ENABLED: String(discord.enabled), GITHUB_SHA: discord.release,
         ...(discord.enabled ? { DISCORD_ALERT_WEBHOOK_URL: readPrivate(env.DISCORD_ALERT_WEBHOOK_URL_FILE) } : {}), CLOUDFLARE_ACCOUNT_ID: config.endpoint.account, CLOUDFLARE_API_TOKEN: deploymentToken,
         GITHUB_APP_ID: String(config.app.id), GITHUB_APP_CLIENT_ID: config.app.clientId, GITHUB_APP_SLUG: config.app.slug,
         GITHUB_APP_PRIVATE_KEY: readPrivate(env.GITHUB_APP_PRIVATE_KEY_FILE), GITHUB_WEBHOOK_SECRET: readPrivate(env.GITHUB_WEBHOOK_SECRET_FILE),
@@ -72,7 +76,7 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       const initial = await snapshotInput(await acquire(), config.endpoint.target);
       const app = await planningPreflight(appEnv, transport, stage);
       requireEvidence(app.appId === config.app.id && app.clientId === config.app.clientId && app.slug === config.app.slug);
-      const evidence = { ...originalSource, target: digest({ account: config.endpoint.account, stack: STACK, stage, worker: config.worker, endpoint: config.endpoint, app: config.app, discord, approval: config.approval }),
+      const evidence = { ...originalSource, target: digest({ account: config.endpoint.account, stack: STACK, stage, worker: config.worker, endpoint: config.endpoint, app: config.app, observer, discord, approval: config.approval }),
         state: digest(initial), window: window.binding };
       const controller = new AbortController();
       const cancel = () => controller.abort();
@@ -80,9 +84,9 @@ export const protectedPlanningEntry = (credentialFile: string, reviewed: Reviewe
       try {
         return await window.runApply(() => continueProtectedPlan({ repo, sourceManifest, input: { ...initial, target: config.endpoint.target, databases: config.endpoint.databases }, app, policy: approval,
           githubToken, github: transport, evidence, signal: controller.signal, checkWindow: window.check,
-          broker: { discord, stage, worker: config.worker, stateOrigin: config.endpoint.origin, databases: config.endpoint.databases },
+          broker: { observer, discord, stage, worker: config.worker, stateOrigin: config.endpoint.origin, databases: config.endpoint.databases },
           custody: { cloudflareToken: deploymentToken, stateBearer, cloudflare: transport, state: transport },
-          appCustody: (check, dispatch) => trustedAppCustody(appEnv, config.worker, transport, check, dispatch, stage, discord),
+          appCustody: (check, dispatch) => trustedAppCustody(appEnv, config.worker, transport, check, dispatch, stage, discord, observer),
           revalidate: async () => {
             window.check();
             const fresh = await snapshotInput(await acquire(), config.endpoint.target);

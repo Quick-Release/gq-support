@@ -261,3 +261,22 @@ compatibility date `2026-10-17`:
 - [Workers automatic span attributes](https://developers.cloudflare.com/workers/observability/traces/spans-and-attributes/): outbound url.full/path/query exposure.
 - [Patch script settings](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/settings/methods/edit/): script-level observability update; preserve the observed Logs configuration.
 - [Script settings API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/settings/methods/get/): deployed observability metadata for custody checks.
+
+### Observer read capability boundary
+
+The separate fixed aggregate GET is disabled until reviewed source configuration
+explicitly enables observer custody. The retained launcher may later consume only
+`/dev/shm/gq-protected/observer-read-token`, delivered through the approved private
+file mechanism; never pass the token in a URL, command argument, graph, State or
+RPC subprocess. This CODE slice has not requested or accessed such a file.
+The parent retains credential delivery and LIVE approval ownership.
+
+Existing App custody first disables the observer endpoint, inspects settings,
+sets exactly its token/stage/release or removes those secrets, and verifies their
+names/types without changing observability. Discord custody then follows its
+existing disable/verify/removal/trace-restoration sequence. No Authorization-header
+trace exception was introduced. Readiness proves only route/runtime execution;
+snapshot `route=ready` is local configuration/control evidence, never delivery or
+human acknowledgment. Activation/coverage stay unknown. External transport,
+scheduler, journal, sender, fallback policy and all LIVE/receipt proof remain
+outstanding. See the [exact implemented observer contract](../research/external-incident-observer.md#fixed-readiness-and-aggregate-wire-snapshot-this-code-slice).

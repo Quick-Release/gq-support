@@ -405,3 +405,15 @@ Known orchestration follow-ups #104 (footer), #105 (Vitest reservation), #106
 handoff context, not freshly verified evidence here; none was modified, merged,
 deployed or monitored. Merge #105 before #106 if authorized later; #104 is
 independent. This document closes neither #20 nor #29.
+
+### Fixed observer endpoint CODE status
+
+The data-free readiness GET now runs before support configuration, raw bindings,
+admission and support work. The authenticated aggregate GET and real-wire offline
+adapter are implemented, disabled by default, with one fixed coherent read of the
+complete 240-cell ring. App-owned custody removes disabled observer secrets before
+Discord may restore traces. Activation and continuous coverage remain unknown;
+this wire cannot prove missing starts or clear incidents. External HTTPS transport,
+scheduler/workflow, durable sender/journal, POLICY fallback and private LIVE
+custody/receipt evidence remain outstanding. #20/#29 stay open. See the
+[implemented contract](external-incident-observer.md#fixed-readiness-and-aggregate-wire-snapshot-this-code-slice).
