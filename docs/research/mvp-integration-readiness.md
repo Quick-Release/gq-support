@@ -281,6 +281,18 @@ closed on encountering it. Alert state needs review under existing controls;
 this is not permission to release support/provider ownership or reopen a route.
 Inherited PR119 evidence above is not new proof for these runtime changes.
 
+## External observer design follow-up (DOCS only)
+
+[External incident observation](external-incident-observer.md) specifies bounded
+Actions observations, source/permission limits, separate Cron start/terminal
+heartbeat requirements, durable sender ownership and the remaining receipt policy
+frontier. It is based on PR120's pinned `6f57bf1381d80fb42c7d30b76eef2f7f0321310d`;
+actual head branch is `t3/outer-runtime-failures`, not `t3/outer-runtime-alerts`.
+No observer, workflow, scheduler, heartbeat, transport or live configuration is
+implemented or enabled. A protected persistent journal is a prerequisite, not an
+assumed property of hosted Actions runners. GitHub failure visibility is not an
+approved or verified fallback notification route. #20 and #29 remain open.
+
 ## Remaining CODE and LIVE gates
 
 #20 still lacks external platform-generated 5xx, absent-Cron, workflow/deployment
