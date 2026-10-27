@@ -1148,3 +1148,134 @@ fix, 144 evidence/broker/additive-policy tests passed, including lost-response
 reacquisition, fresh-window refusal after expiry, cleanup during pending work,
 successful release and one-shot behavior. Worker typecheck and affected ESLint
 passed. These are local lock/transport proofs, not live settlement evidence.
+
+### Bounded Discord custody on integration PR118
+
+This follow-up is stacked on `a15e32c3e86752716bbaa656d21ec1b7b7263ddc`,
+retains the four-resource graph and does not authorize live work. It supersedes
+PR118's unconditional integrated-Discord CODE gate with actual checked custody.
+The default reviewed endpoint/configuration manifests remain unset.
+
+Interface choice: Discord belongs to GitHubAppSecret's existing apply custody.
+The mandatory `provisionDiscord(worker)` operation follows webhook provisioning
+and precedes deployed-App verification, final App State and output. The child
+has a single `app-discord` operation with no privileged arguments. The broker
+requires the exact retained Worker, completed migrations/upload/key/webhook and
+one-shot operation order; direct PUT/DELETE/PATCH secret/settings requests from
+the child remain denied. A protected custody implementation additionally exposes
+its immutable public Discord binding for equality with the candidate's binding.
+Ordinary custody need not expose a session binding but cannot omit the operation.
+
+The launcher reads reviewed source mode, uses candidate head as release, and
+creates a random opaque private-session commitment. Its frozen private URL
+snapshot is tied to those values before publishing the candidate. No secret or
+unsalted secret digest enters props, native State, offline input, candidate or
+transport errors. Only a separately authorized parent delivery may provide
+`DISCORD_ALERT_WEBHOOK_URL_FILE=/dev/shm/gq-protected/discord-alert-webhook-url`;
+the existing owner/mode/link/tmpfs/one-shot checks apply. Disabled mode rejects
+that file. Ambient mode/release/URL cannot override reviewed configuration.
+The state bearer and URL remain in the trusted launcher; the RPC subprocess
+inherits only the existing deployment token and fixed non-secret launch settings.
+
+Uploads explicitly keep Logs enabled and traces disabled in both modes. Trusted
+custody uses the real Discord helper through a fixed method/path/body sequence:
+disable, inspect Logs/traces, install URL/release and enable-last, then readback;
+or disable, inspect, remove URL/release, verify absence, restore traces while
+preserving Logs/settings, then readback. Only the two Discord removal names and
+the exact observed observability object with traces enabled are authorized.
+Every request consumes its ticket before awaiting authentication and checks the
+synchronous local dispatch guard afterwards. Any failed/uncertain HTTP/readback,
+abort, expiry or window failure poisons the operation and continuation. There is
+no retry, blind rollback or force-clear. The inherited whole-continuation
+`window.runApply` retains ownership after any failed continuation, including
+before dispatch; external exclusion still must survive runner loss and incident
+reconciliation. The implementation does not establish that external fact.
+
+API evidence retrieved 2026-10-27:
+
+- [Worker script and version settings](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/methods/get/)
+  documents GET `/settings` including bindings and observability.
+- [Patch script settings](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/settings/methods/edit/)
+  documents PATCH `/script-settings` with the observability object. Null trace
+  propagation policy is normalized as absent, matching installed beta.83's
+  null-to-undefined handling; authenticated/accept values are preserved.
+- [Secret PUT](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/secrets/methods/update/)
+  and [secret DELETE](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/secrets/methods/delete/)
+  document the exact script secret routes. Secret values cannot be read back;
+  verification combines exact acknowledged writes with names/types/settings.
+- Installed Alchemy beta.83 WorkerProvider uploads observability in multipart
+  metadata and preserves observed settings during its Issues patch. Its API
+  input requires camelCase `invocationLogs`, serialized as `invocation_logs`.
+  Installed Wrangler 4.133.0 `config-schema.json` confirms Logs/traces fields.
+  The Worker runtime continues structured JSON logging. No Discord fetch is used
+  for custody verification. Child HTTP replies discard secret binding values,
+  error arrays, headers and unrelated response fields, retaining minimal evidence
+  needed by installed reconcile. Custody settings responses never enter the child.
+
+Remaining CODE limitations: exact existing four-resource, same-account/stage
+update graph only; no bootstrap/adopt/replace/delete/orphan/rename, generic secret
+proxy, arbitrary settings patch, SQL outside the reviewed additive profile,
+foreign/legacy history conversion or pending destructive ledger 0002. Unknown
+observability fields or destinations other than the supported Cloudflare
+observability destination refuse rather than being reflected into a patch.
+Binding presence/types are observable; secret values and actual Discord receipt
+are not proved by settings reads. These are explicit limits, not permission to
+skip custody or leave traces off when alerts are disabled.
+
+LIVE remains blocked: real endpoint/Worker/App/native graph/D1/full history
+manifests, permissions and numeric reviewers, protected runner proof, private
+credentials, all-writer exclusion through reconciliation/runner loss, fresh
+candidate approval, remote RPC/key/binding proof, Test F, restore/alert/privacy
+readback drills and destination access/retention/receipt arrangements. #20 still
+lacks external platform 5xx, missing Cron, deploy, outer tick/prompt wrapper and
+failed-route observations. Managed Composer/tested ZIP, Discord webhook routing,
+vvaz OR gmarques authority and the approved tracing policy remain settled user
+policy; this code adds no new operational authority. #20/#29 are not MVP accepted.
+No live state, credential/profile, remote RPC, settings, deployment, Discord
+message, drill or merge was performed. Browser/PHP evidence is inherited from
+source PRs and is not current integration evidence. See the publication-hook
+incident below; DDEV was unintentionally touched by that hook.
+
+Validation for this follow-up, Node **26.12.1**, every Worker/native run with
+`--maxWorkers=1`:
+
+- RED on pinned integration: the injected-provider regression failed because the
+  Discord operation was absent (1 failed / 8 passed). No production guard was
+  bypassed to obtain that result.
+- Final full Worker run: **1,233 tests / 48 files passed**, 686.57 seconds. This
+  includes all four retained native stage/mode happy paths using real shared
+  graph/installed provider/trusted custody/broker/State output, private-environment
+  mutation and offline-input/native-State/candidate leakage controls, fake RPC
+  environment confinement, native lost-response retained-marker cases in both
+  stages/modes, nested authentication abort/expiry/window controls, every custody
+  HTTP failure/readback position, wrong method/name/type/value/body/order/stage/
+  account/mode/revision and secret-presence/observability negative controls.
+- Before that final run, the broad retained/helper/marker run exposed two stale
+  test expectations that incorrectly required Discord after a failed webhook.
+  They now require Discord not to run; the full final run passes both cases.
+- Frozen pnpm install, Worker typecheck and lint, root/app JS lint and all three
+  lint negative controls passed. **114 CI-script tests passed**; workflow policy
+  and `runtime-matrix.mjs policy` passed.
+- Worker/docs secret scans and whitespace checks passed. The candidate-reachable
+  history scan passed (**200 commits**); unrelated local refs are not treated
+  as candidate evidence. Hosted checks/reviews are uninspected;
+  there was no CI polling or watch.
+
+Only validation documentation is completed after the full Worker run. No extra
+full Worker rerun is needed for those documentation-only result updates.
+
+
+Publication-hook incident: the first branch push invoked the repository's
+optional browser pre-push hook. Because this was a new branch, its affected-file
+list included inherited integration changes and triggered the shared DDEV browser
+site despite the task's no-DDEV constraint. The hook built app assets, copied the
+plugin, changed the site's plugin symlink and reloaded PHP. Seven browser cases
+passed before the eighth was interrupted with SIGINT; 112 did not run. This is
+not a complete browser/runtime result and is not readiness evidence. The hook's
+EXIT cleanup ran and removed its local test-site symlink after restoring the
+shared plugin link/reloading PHP; browser fixture state may have changed. No
+further DDEV or browser operation was run. The initial push failed on that
+interruption. Publication uses the hook's documented
+`GQ_SUPPORT_SKIP_PRE_PUSH=1` switch to honor the no-DDEV constraint. Required
+Worker/CI/lint/security checks above remain valid; the optional browser hook is
+explicitly interrupted, not passed.

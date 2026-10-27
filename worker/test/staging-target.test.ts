@@ -24,7 +24,7 @@ describe.each(["prod", "staging"] as const)("%s protected target", (stage) => {
   });
   it("refuses mismatched reviewed manifest/approval/window/App targets before source or custody", async () => {
     const other = stage === "prod" ? "staging" : "prod";
-    const config: ReviewedPlannerConfig = {
+    const config: ReviewedPlannerConfig = { discord: { enabled: false },
       endpoint: { target: { stack: "GQSupportWorker", stage }, account: "8f38791a8c37b182239af2a385ab3c31",
         origin: "https://synthetic.invalid", script: "synthetic", scriptDigest: "a".repeat(64), protocol: 7, path: "/state", mainModule: "main.js",
         scriptEtag: "synthetic", versionId: "synthetic", deploymentId: "synthetic", bindings: [], graph: [], outputPaths: [], databases: [] },
@@ -49,13 +49,13 @@ describe.each(["prod", "staging"] as const)("%s protected target", (stage) => {
       }
       await expect(Effect.runPromise(protectedPlanningEntry("PRIVATE_PATH_CANARY", config, env, transport))).rejects.toThrow("apply blocked");
       expect(source).toHaveBeenCalledOnce(); expect(transport).not.toHaveBeenCalled();
-      // Even otherwise-valid source cannot acquire the window or private
-      // delivery while the integrated Discord custody path is unsupported.
+      // Reviewed mode now permits reaching the window prerequisite; the sentinel
+      // still prevents any private delivery or first-party network operation.
       source.mockReturnValue({ manifest: [], source: "synthetic", lockfiles: "synthetic", migrations: "synthetic" });
       const window = vi.spyOn(evidence, "exclusiveLocalWindow").mockImplementation(() => { throw new Error("window reached"); });
       try {
         await expect(Effect.runPromise(protectedPlanningEntry("PRIVATE_PATH_CANARY", config, env, transport))).rejects.toThrow("apply blocked");
-        expect(window).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
+        expect(window).toHaveBeenCalledOnce(); expect(transport).not.toHaveBeenCalled();
       } finally { window.mockRestore(); }
     } finally { source.mockRestore(); }
   });

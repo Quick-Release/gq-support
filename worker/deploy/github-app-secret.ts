@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import { provisionAppKey } from "./github-app.ts";
 import { provisionWebhookSecrets } from "./github-webhook-secrets.ts";
 import { checkDeployedGitHubApp, DeployedGitHubAppCheckError } from "./check-deployed-github-app.ts";
-import { provisionDiscordAlertSecret } from "./discord-alert-secret.ts";
+import { type DiscordCustodyBinding, provisionDiscordAlertSecret } from "./discord-alert-secret.ts";
 
 type GitHubAppSecret = Resource<
   "GQSupport.GitHubAppSecret",
@@ -17,14 +17,14 @@ export const GitHubAppSecret = Resource<GitHubAppSecret>("GQSupport.GitHubAppSec
 export interface AppSecretCustody {
   provisionKey: typeof provisionAppKey;
   provisionWebhook: typeof provisionWebhookSecrets;
+  readonly discord?: DiscordCustodyBinding;
+  provisionDiscord(worker: string): Promise<void>;
   check: typeof checkDeployedGitHubApp;
 }
 export const GitHubAppSecretProvider = (custody: AppSecretCustody = {
   provisionKey: provisionAppKey,
-  provisionWebhook: async (worker, appId) => {
-    await provisionWebhookSecrets(worker, appId);
-    await provisionDiscordAlertSecret(worker);
-  },
+  provisionWebhook: provisionWebhookSecrets,
+  provisionDiscord: provisionDiscordAlertSecret,
   check: checkDeployedGitHubApp,
 }) => Provider.succeed(GitHubAppSecret, {
   // Worker uploads can drop out-of-band secrets. Reapply after the Worker on
@@ -34,6 +34,7 @@ export const GitHubAppSecretProvider = (custody: AppSecretCustody = {
     try: async () => {
       const metadata = await custody.provisionKey(news.stage, news.workerName);
       await custody.provisionWebhook(news.workerName, metadata.appId);
+      await custody.provisionDiscord(news.workerName);
       const evidence = await custody.check(metadata, news.workerName);
       return { ...metadata, ...evidence };
     },

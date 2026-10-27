@@ -1,3 +1,4 @@
+import { discord } from "./fixtures/discord-custody.ts";
 import { describe, expect, it, vi } from "vitest";
 import { planningApplyBroker } from "../deploy/planning-apply-broker.ts";
 import { verifyDispatch } from "../deploy/protected-plan-continuation.ts";
@@ -7,10 +8,10 @@ const origin = "https://api.cloudflare.com";
 const script = `${origin}/client/v4/accounts/${ACCOUNT}/workers/scripts/synthetic-worker`;
 function fixture(check = vi.fn(async () => {}), dispatch = () => {}, stage: "prod" | "staging" = "prod") {
   const metadata = { ...app, stage, slug: stage === "prod" ? "getquick-support" : "getquick-support-staging" };
-  const transport = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: {} }));
+  const transport = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: { observability: { issues: { enabled: false } } } }));
   const custody = { cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: transport, state: transport,
-    app: { provisionKey: vi.fn(async () => metadata), provisionWebhook: vi.fn(async () => {}), check: vi.fn(async () => ({ appId: 123, checkedAt: new Date().toISOString() })) } };
-  const broker = planningApplyBroker({ stage, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app: metadata }, custody, check, dispatch);
+    app: { discord, provisionDiscord: async () => {}, provisionKey: vi.fn(async () => metadata), provisionWebhook: vi.fn(async () => {}), check: vi.fn(async () => ({ appId: 123, checkedAt: new Date().toISOString() })) } };
+  const broker = planningApplyBroker({ discord, stage, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app: metadata }, custody, check, dispatch);
   return { broker, transport, custody, check };
 }
 describe("narrow real-provider broker", () => {
@@ -24,6 +25,25 @@ describe("narrow real-provider broker", () => {
     await expect(broker.handle({ op: "cloudflare", method, url, body: "", contentType: "" })).rejects.toThrow("apply blocked");
     await expect(broker.handle({ op: "cloudflare", method: "GET", url: script + "/settings", body: "", contentType: "" })).rejects.toThrow("apply blocked");
     expect(transport).not.toHaveBeenCalled();
+  });
+  it.each(["enabled", "release", "commitment"] as const)("denies interchanged Discord %s before transport", (key) => {
+    const config = { discord, stage: "prod" as const, instances: { Worker: "i", GitHubAppSecret: "j" }, bundle: "b".repeat(64), worker: "synthetic-worker", stateOrigin: "https://state.invalid", databases: [], app };
+    const transport = vi.fn<typeof fetch>();
+    const changed = { ...discord, [key]: key === "enabled" ? true : key === "release" ? "e".repeat(40) : "e".repeat(64) };
+    expect(() => planningApplyBroker(config, { cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: transport, state: transport,
+      app: { discord: changed, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: vi.fn() } }, async () => {}, () => {})).toThrow("apply blocked");
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("returns no private response fields or binding values to the child", async () => {
+    const { broker, transport } = fixture();
+    transport.mockResolvedValueOnce(Response.json({ success: true, errors: [{ message: "PRIVATE_RESPONSE" }], result: {
+      bindings: [{ type: "secret_text", name: "DISCORD_ALERT_WEBHOOK_URL", text: "PRIVATE_RESPONSE" }],
+      observability: { issues: { enabled: false } }, private: "PRIVATE_RESPONSE",
+    } }));
+    const response = await broker.handle({ op: "cloudflare", method: "GET", url: script + "/settings", body: "", contentType: "" }) as { body: string };
+    const text = Buffer.from(response.body, "base64").toString();
+    expect(text).not.toMatch(/PRIVATE_RESPONSE|DISCORD_ALERT_WEBHOOK_URL/);
+    expect(JSON.parse(text)).toEqual({ success: true, result: { bindings: [], observability: { issues: { enabled: false } } } });
   });
   it("authenticates at each call and never forwards child headers", async () => {
     const { broker, transport, check } = fixture();
@@ -76,9 +96,9 @@ describe("narrow real-provider broker", () => {
 it("rejects changed approved bundle bytes before the script PUT", async () => {
   const app = { stage: "prod", clientId: "synthetic", slug: "getquick-support", appId: 123, fingerprint: "public" };
   const send = vi.fn<typeof fetch>();
-  const broker = planningApplyBroker({ stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid", instances: { Worker: "i", GitHubAppSecret: "j" }, databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app, bundle: "b".repeat(64) }, {
+  const broker = planningApplyBroker({ discord, stage: "prod", worker: "synthetic-worker", stateOrigin: "https://state.invalid", instances: { Worker: "i", GitHubAppSecret: "j" }, databases: [{ fqn: "SupportDB", databaseId: "db1", databaseName: "db1", instanceId: "d1" }, { fqn: "SupportLedger", databaseId: "db2", databaseName: "db2", instanceId: "d2" }], app, bundle: "b".repeat(64) }, {
     cloudflareToken: "CF_CANARY", stateBearer: "STATE_CANARY", cloudflare: send, state: send,
-    app: { provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 123, checkedAt: new Date().toISOString() }) },
+    app: { discord, provisionDiscord: async () => {}, provisionKey: async () => app, provisionWebhook: async () => {}, check: async () => ({ appId: 123, checkedAt: new Date().toISOString() }) },
   }, async () => {}, () => {});
   const form = new FormData();
   form.append("metadata", JSON.stringify({ main_module: "main.js", bindings: [{ type: "d1", name: "DB", id: "db1" }, { type: "d1", name: "LEDGER", id: "db2" }] }));

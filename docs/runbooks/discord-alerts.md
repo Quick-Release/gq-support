@@ -162,14 +162,19 @@ No such sender is provisioned here. Do not expose a URL credential to traces.
    the existing authorized Discord incident channel/webhook and access policy;
    do not invent a channel, responder order or contact. No child secret request.
    Keep values out of prompts, CLI arguments, plaintext repo files and artifacts.
-3. With separately authorized configuration work, put it in the intended GitHub
-   Environment encrypted secret `SUPPORT_DISCORD_ALERT_WEBHOOK_URL`. Its variable
-   `SUPPORT_DISCORD_ALERTS_ENABLED` remains absent/false until enablement approval.
-   The deploy step injects these as `DISCORD_ALERT_WEBHOOK_URL` and
-   `DISCORD_ALERTS_ENABLED`; `GITHUB_SHA` supplies the revision. No value enters
-   Alchemy resource props/outputs: the existing apply-only App-secret provider
-   installs `secret_text` after the owning Worker and enables last. Disabled
-   deployment removes URL/revision bindings and sets enabled false.
+3. With separately authorized configuration work, the protected integration
+   selects mode from reviewed source metadata and release from the authenticated
+   candidate head. Enabled mode reserves parent-private one-shot delivery at
+   `/dev/shm/gq-protected/discord-alert-webhook-url`, named by
+   `DISCORD_ALERT_WEBHOOK_URL_FILE`; disabled mode refuses that delivery file.
+   Ambient Discord URL/mode/release values are refused by the protected entry.
+   A random session commitment binds the private snapshot to the reviewed
+   candidate. No URL/token or unsalted secret hash enters Alchemy props, native
+   State, the offline child or public evidence. The existing App-secret apply
+   owner performs key, webhook, explicit Discord custody and deployed-App check
+   in that order; final App State/output requires verified custody. The ordinary
+   provider also requires this Discord step. No generic secret/settings HTTP
+   authority is added to the child.
 4. #109's safe-plan/Test F/reviewer gates and explicit production-rollout approval
    still apply. This candidate authorizes no deploy. Apply additive ledger
    migration before code; do not roll back the ledger schema. Verify disabled

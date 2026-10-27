@@ -427,8 +427,12 @@ scheduled entry, local workerd D1, fake GitHub and the signed installation API.
 
 The [Discord runbook](../docs/runbooks/discord-alerts.md) describes the exact
 producer allowlist, proposed aggregation/recovery policy, independent-ledger
-containment and private provisioning. `SUPPORT_DISCORD_ALERTS_ENABLED` defaults
-false; no URL or live receipt is established. Automatic Worker traces are disabled
-in this candidate because outbound fetch spans would expose the webhook credential
-in its URL path; structured Logs remain enabled. Review that tradeoff before
-rollout. #108 is required; #109's apply block remains in force.
+containment and private provisioning. The protected entry requires reviewed
+source mode and a parent-private one-shot URL delivery when enabled; ambient
+Discord configuration is refused. No URL or live receipt is established here.
+Uploads keep Logs on and traces off during custody transitions. Approved policy
+keeps traces off while Discord is enabled and restores them only after verified
+URL/release removal when disabled. The existing App-secret custody owns that
+transition before final App verification and output. Reviewed live manifests,
+permissions, runner/exclusion proof, private delivery and candidate approval
+remain required; no live deployment or drill is authorized by this candidate.

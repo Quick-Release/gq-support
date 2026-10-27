@@ -39,7 +39,7 @@ export default Effect.gen(function* () {
     // Upload with traces off so an old credential cannot leak during a transition.
     // The apply-only custody provider restores traces when Discord is disabled,
     // after verifying credential removal. Logs remain enabled in both modes.
-    observability: { enabled: true, traces: { enabled: false } },
+    observability: { enabled: true, logs: { enabled: true, invocationLogs: true }, traces: { enabled: false } },
   },
   Effect.gen(function* () {
     // Binds SupportDB. Routes reach Slot-owned records only through
