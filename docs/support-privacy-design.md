@@ -242,3 +242,19 @@ retry after verified release through the existing Client privacy process. Record
 suppressions remain in the independent ledger. Outstanding maintenance registrations
 hold only opaque execution metadata and numeric provider targets, never report text;
 completed rows are deleted, unresolved rows block restore until investigated.
+
+
+### Proposed Discord operational-data destination (#20)
+
+The disabled [Discord candidate](runbooks/discord-alerts.md) adds fixed stage/event
+classes, release, counts and first/last times to the independent SupportLedger
+and, only after explicit enablement, the existing incident channel. No Reporter
+or report identifier/content enters this state. Local rows expire after seven
+quiet days during an admitted drain; bounded class cardinality limits active
+rows. Control/admission obstructions do not expire. Operators own access and
+cleanup. Discord channel copies require their own access/retention and synthetic
+drill cleanup review; local expiry does not remove those copies. This policy
+is proposed, not approved or live-verified. The maintainer separately approved
+structured Logs with automatic fetch traces disabled while Discord is enabled,
+to protect URL-path credentials. When Discord is disabled, credential absence
+is verified before traces are restored; the post-apply audit checks that state.

@@ -1,3 +1,4 @@
+import { provisionDiscordAlertSecret } from "./discord-alert-secret.ts";
 import { Resource } from "alchemy/Resource";
 import * as Provider from "alchemy/Provider";
 import * as Effect from "effect/Effect";
@@ -21,6 +22,7 @@ export const GitHubAppSecretProvider = () => Provider.succeed(GitHubAppSecret, {
     try: async () => {
       const metadata = await provisionAppKey(news.stage, news.workerName);
       await provisionWebhookSecrets(news.workerName, metadata.appId);
+      await provisionDiscordAlertSecret(news.workerName);
       const evidence = await checkDeployedGitHubApp(metadata, news.workerName);
       return { ...metadata, ...evidence };
     },

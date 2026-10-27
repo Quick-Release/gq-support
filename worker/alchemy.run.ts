@@ -7,6 +7,7 @@ import { GitHubAppSecret, GitHubAppSecretProvider } from "./deploy/github-app-se
 import { appConfig, verifyApp } from "./deploy/github-app.ts";
 import { SupportDB, SupportLedger } from "./src/support-db.ts";
 import Worker from "./src/worker.ts";
+import { validateDiscordAlertConfig } from "./deploy/discord-alert-secret.ts";
 import { validateWebhookSecrets } from "./deploy/github-webhook-secrets.ts";
 
 export default Alchemy.Stack(
@@ -24,6 +25,7 @@ export default Alchemy.Stack(
         try: async () => {
           const app = await verifyApp(appConfig(stack.stage, process.env), process.env.GITHUB_APP_PRIVATE_KEY ?? "");
           validateWebhookSecrets(process.env, app.appId);
+          validateDiscordAlertConfig(process.env);
         },
         catch: () => new Error("GitHub App preflight failed; see the key custody runbook"),
       }).pipe(Effect.orDie);

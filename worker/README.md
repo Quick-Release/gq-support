@@ -401,3 +401,14 @@ response bodies or tokens enter them.
 
 Verification: `pnpm exec vitest run test/status-refresh.test.ts` exercises the
 scheduled entry, local workerd D1, fake GitHub and the signed installation API.
+
+
+## Discord incident notifications (disabled candidate)
+
+The [Discord runbook](../docs/runbooks/discord-alerts.md) describes the exact
+producer allowlist, proposed aggregation/recovery policy, independent-ledger
+containment and private provisioning. `SUPPORT_DISCORD_ALERTS_ENABLED` defaults
+false; no URL or live receipt is established. Automatic Worker traces are disabled
+in this candidate because outbound fetch spans would expose the webhook credential
+in its URL path; structured Logs remain enabled. Review that tradeoff before
+rollout. #108 is required; #109's apply block remains in force.
