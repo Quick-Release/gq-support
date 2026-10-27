@@ -1,4 +1,4 @@
-import revocations from "../revocations.json";
+import revocations from "../revocations.json" with { type: "json" };
 import type { CredentialDatabase } from "./operator.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256, verifySignature } from "./signature.ts";

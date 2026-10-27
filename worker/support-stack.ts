@@ -7,19 +7,28 @@ import { GitHubAppSecret, GitHubAppSecretProvider } from "./deploy/github-app-se
 import { appConfig, verifyApp } from "./deploy/github-app.ts";
 import { SupportDB, SupportLedger } from "./src/support-db.ts";
 import Worker from "./src/worker.ts";
-import { defaultDeploymentGuard } from "./deploy/planning-state.ts";
+import { defaultDeploymentGuard, refusal } from "./deploy/planning-state.ts";
 import { validateWebhookSecrets } from "./deploy/github-webhook-secrets.ts";
 
-export const supportStack = (state: Parameters<typeof Alchemy.Stack>[1]["state"], purpose: "deployment" | "planning" = "deployment") => Alchemy.Stack(
+export interface PlanningDeclaration {
+  readonly preflight: Effect.Effect<void>;
+  readonly providers: Parameters<typeof Alchemy.Stack>[1]["providers"];
+}
+
+export const supportStack = (state: Parameters<typeof Alchemy.Stack>[1]["state"], purpose: "deployment" | "planning" = "deployment", planning?: PlanningDeclaration) => Alchemy.Stack(
   "GQSupportWorker",
   {
-    providers: Layer.merge(Cloudflare.providers(), GitHubAppSecretProvider()),
+    providers: purpose === "deployment" ? Layer.merge(Cloudflare.providers(), GitHubAppSecretProvider()) : planning?.providers ?? Layer.effectDiscard(Effect.die(refusal())),
     state,
   },
   Effect.gen(function* () {
     const stack = yield* Alchemy.Stack;
     if (purpose === "deployment") yield* defaultDeploymentGuard(stack.stage);
-    if (stack.stage === "staging" || stack.stage === "prod") {
+    if (purpose === "planning") {
+      if (!planning) return yield* Effect.die(refusal());
+      yield* planning.preflight;
+    }
+    if (purpose === "deployment" && (stack.stage === "staging" || stack.stage === "prod")) {
       // Read-only preflight before declaring any resources. Secret values stay
       // in this process, outside the resource graph and persisted plan/state.
       yield* Effect.tryPromise({

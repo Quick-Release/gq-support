@@ -298,3 +298,197 @@ unsettled state, missing action hash, history, reference scope/cycles and callba
 refusal. No native policy bypass was introduced; PR112's D1 rejection tests pass.
 No live endpoint, authoritative state, provider confinement, human approval,
 exclusive writer window, Test F, release or deployment is established here.
+
+## Sequential offline declaration/provider slice (2026-10-27)
+
+This supersedes blocker 3 above **for this pinned, trusted, existing four-resource
+prod graph**. It adds an executable Linux offline boundary and a real native
+local plan; it does not enable the production entry, acquire live state, or
+implement approval/continuation/apply. The previously exported in-process
+`planningStackFromSnapshot` factory is removed: importing the blocked entry no
+longer imports the application's declaration graph. Ordinary durable-stage
+CLI/workflow refusal remains unchanged.
+
+### Execution and credential boundary
+
+`runConfinedPlan` accepts only synthetic/already-acquired state, independently
+supplied reviewed database identities, and a trusted preflight adapter. It never
+accepts or reads a state bearer, metadata token, credential file, profile or
+approval flag. `planningPreflight` invokes the existing `verifyApp` with a
+separate injected transport restricted to `GET https://api.github.com/app`:
+JWT header only, no body, redirects refused, 64 KiB response bound, exact App
+identity/owner/permissions/events, webhook configuration validation, no retries.
+The JWT is derived locally as before; no installation token, exchange or token
+minting API is invoked. Only public verified App metadata leaves that adapter.
+The caller/adapter and first-party transport are trusted code, not an interface
+that grants a user the ability to assert preflight success. Wiring to live
+credential delivery is still absent.
+
+State bearer acquisition and read-only Cloudflare endpoint attestation retain
+PR113's separate exact-route transports. Neither transport/capability enters the
+application process. No Cloudflare provider read is needed for the supported
+complete existing-state path, so **no provider network operation is allowed**,
+including POST query APIs. Cloudflare's [D1 query API](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/)
+can execute SQL; this implementation grants it no permission, including for a
+request claiming to be read-only. Missing state never causes bootstrap,
+repair, recovery, adoption, edge-preview provisioning or metadata fabrication.
+
+The launcher copies tracked Worker source plus root package/workspace/lock files
+to a private temporary directory. It refuses symlinks and credential-file names;
+there is no checkout, `.git`, dotenv, home/profile, credential-file or host socket
+mount. Source copying uses `git ls-files` with empty credential-bearing environment,
+system/global config disabled and fsmonitor disabled. The installed dependency
+trees and Node executable directory are mounted read-only. No install or upgrade
+happens inside the planner. The temporary source directory contains **no input
+state or credentials** and is removed on success/error. Raw snapshot data enters
+only via an anonymous stdin pipe.
+
+`/usr/bin/bwrap --unshare-all --cap-drop ALL --new-session --clearenv` creates new
+network, PID, user, IPC and mount namespaces before importing any declaration.
+The only host mounts are read-only source/dependencies/runtime and `/usr`, `/lib`,
+`/lib64`. The child gets private `/tmp`, `/proc` and `/dev`, no inherited proxy,
+Node options, tracing/exporter or credential environment, and no host socket.
+Network isolation also covers the native Rolldown binding, alternate SDKs,
+TCP/TLS/UDP/DNS, direct global fetch and **all descendant subprocesses**. Local
+scratch/build writes are allowed only in the private runtime filesystem; the
+source/dependency mounts cannot change. There is no monkeypatch-based security
+claim. Missing bubblewrap, denied namespaces, unsupported platform/runtime/import,
+build errors, missing state and unknown reads are executable constant refusals;
+there is no unconfined fallback. A synchronous runtime guard runs before the
+application imports: it checks the actual read-only source/dependency mounts,
+network interfaces, hidden host directories, executable/cwd and cleared
+environment. Accidental direct invocation refuses before loading declarations.
+These checks supplement the trusted launcher, not an environment attestation or
+an authentication mechanism for malicious runtimes.
+
+Trust is explicitly placed in the Linux kernel, bubblewrap binary/options,
+Node/system libraries/toolchain, trusted checkout, reviewed lockfile/dependencies,
+launcher and preflight/acquisition adapters. This is not a generic malicious-code
+sandbox, kernel-exploit defense, or denial-of-service boundary. `/usr` and the
+runtime/dependency mounts must contain only trusted toolchain files, not
+credentials or host service sockets. Availability of this runtime has been
+proved on this workstation (Node 24.21.0, bubblewrap 0.11.1), **not on a protected
+runner**. The runner must establish the same assumptions and run the canaries;
+the tests deliberately do not silently skip missing isolation. Neither network
+namespaces nor a lockfile attest that the code or a deployed endpoint is benign.
+The [bubblewrap documentation](https://github.com/containers/bubblewrap/blob/main/README.md)
+states that protection depends on the supplied mounts/options and describes its
+network namespace and socket limitations. The [Node Permission Model](https://nodejs.org/api/permissions.html)
+is not used as a substitute for this OS boundary.
+
+### Audited beta.83 graph paths
+
+- `supportStack` uses the same D1 + Worker + GitHubAppSecret declarations in both
+  modes. Planning requires an explicit preflight/provider dependency; absence
+  refuses. Default deployment still uses its existing preflight/providers and
+  durable-stage guard. The isolated process supplies only verified public App
+  config and the immutable snapshot, with no ambient profile/config loader.
+- `Cloudflare/D1/Database.ts` `ProviderLive.diff` checks account/name/jurisdiction,
+  replication and `SQL/Migrations/Registry.ts` local migration/import hashing.
+  With both settled rows retained, these paths need filesystem/metadata only.
+  No migrations or provider reconcile run. Both independently supplied physical
+  IDs/names and native instance IDs must pass the existing native policy.
+- `Cloudflare/Workers/WorkerProvider.ts` `LiveWorkerProvider.diff` compares
+  account/namespace/name, domain/routes/crons, metadata and source hashes.
+  Current source has no custom domain/routes/source adapter/Vite/preview/version
+  or custom build hooks. `Sources/Rolldown.ts` and `Bundle/Bundle.ts` build the
+  actual shared `src/worker.ts` entry and its declared exports. An explicit
+  installed build is required even if diff short-circuits on metadata. The
+  native planner then uses the installed Worker diff, not a handwritten plan.
+  Unsupported source/build/preview/version inputs refuse. Future code changes
+  remain offline and require review; a new required API read is a refusal,
+  not a reason to broaden GET/POST permissions.
+- `GitHubAppSecretProvider.diff` deliberately returns update. Its key/webhook
+  provisioning and deployed-key check are apply-only and cannot run here.
+- `planningProviders` uses only installed live D1 and Worker providers plus the
+  application secret provider. A supported `Provider.effect` wrapper preserves
+  their actual diff/stables/version and replaces **read/list/precreate/reconcile/
+  delete** with immediate defects; tail/logs/local-mode capabilities are absent.
+  It does not construct `Cloudflare.providers()`, `CloudflareApiLive`, any auth,
+  credential/profile store, Docker/local-runtime or `Cloudflare.state()` layer.
+  Cloudflare account metadata is explicit and SDK credential resolution dies.
+  A deny-all Effect HttpClient is additional defense; it is not the OS boundary.
+  Alchemy's [state-store documentation](https://alchemy.run/state-store/) describes
+  bootstrap and CI edge-preview credential resolution, reinforcing the decision
+  to omit that backend entirely. Installed beta.83 source/types, rather than
+  rolling documentation examples, determine the exact API used here.
+- Before declaration, immutable acquisition requires exactly the four settled
+  resources/types. Missing resources refuse before ownership probes. Unknown
+  actions/resources, history, deletions/orphans, wrong identity and checksum/SQL
+  violations still fail the existing policy without discarding evidence.
+
+Node's [synchronous module hooks](https://nodejs.org/api/module.html#moduleregisterhookshooks)
+load the checkout's TypeScript through its already installed compiler, because
+native strip-only mode cannot handle its parameter properties. The existing
+revocation JSON import now has the standard JSON import attribute so it can be
+loaded by Node. No dependency or compatibility-date change was made.
+
+### Local native evidence and output contract
+
+`confined-planning.test.ts` executes the shared application with installed native
+`Plan.make`, installed D1/Worker/GitHubAppSecret diffs, and the installed Worker
+build inside the offline runtime. The representative existing-state plan is
+`SupportDB=noop`, `SupportLedger=noop`, `Worker=update`,
+`GitHubAppSecret=update`; neither DB changes physical identity. The application
+secret provider intentionally updates on every deployment. No apply is invoked
+by the planning entry.
+
+A separate fixture runs native Plan + **simulated local** Apply against inert
+providers for the same shared declaration, producing native instances, props,
+bindings, downstream edges and outputs. Installed StateEncoding, synthetic HTTP
+and installed `makeHttpStateStore` then acquire that graph through nine confined
+GETs. Installed provider planning/build consumes the acquired graph. This
+fixture-only simulated apply neither calls live provider reconcile nor applies
+SQL. It is separate from the real provider diffs used for the resulting plan.
+There is no claim that the synthetic Worker hash matches deployed source.
+
+Canaries cover direct global fetch, HTTP(S), HTTP/2, TCP/TLS, UDP, DNS, host Unix
+sockets, descendant Node fetch, host-file reads, read-only source writes, proxy
+and environment inheritance. Provider lifecycle probes verify immediate refusal
+of every read/list/precreate/reconcile/delete for all three providers, absence of
+log/tail/local-mode capabilities, direct POST query refusal and actual installed
+SDK `queryDatabase` refusal. Missing each resource, mismatched independently
+supplied DB identity, and preflight 401/403/404/429/500/redirect/malformed/oversize/
+transport errors refuse. Preflight errors make exactly one request. Existing
+HTTP acquisition/attestation error/retry tests still cover exact GET-only state
+and metadata access without recovery or writes.
+
+Native loggers are empty and progress defaults to no-op. The launcher discards
+child stdout/stderr without retaining or replaying errors. Only a 1 KiB-bounded
+fd-3 response with exactly four resource names and action enums passes the parent
+schema. Raw state, Redacted canaries, JWT/header/key/webhook material, plan props,
+source/bundle text and native errors never reach that summary. Canary tests put
+sensitive synthetic state into the snapshot and print simulated sensitive
+progress/errors in the child; parent output remains clean. The native plan and
+its service context are never serialized or exported.
+
+### Remaining code and live gates
+
+The offline worker intentionally exits after its local summary. That summary is
+**not** an approvable/applicable candidate or a retained continuation. A later
+slice must keep the exact native object/context alive inside the protected
+process, implement fresh authenticated candidate-specific approval and writer-
+window verification, and provide a separately reviewed narrow apply/writer
+capability only after those checks. Reconstructing a plan from this summary or
+relaxing the offline boundary is not an implemented continuation. No real apply
+adapter exists here; production remains blocked.
+
+Live prerequisites remain the reviewed endpoint/version/bundle manifest and
+physical DB identities, authorized credential delivery via separate transports,
+confirmation that the authoritative native graph/outputs fit the supported
+format, protected-runner isolation proof, owner-controlled exclusion of **all**
+state writers from acquisition through apply, required vvaz/gmarques reviewers,
+a candidate-specific production approval, and separately authorized live Test F.
+The already approved direct existing backend bearer custody decision is unchanged.
+No credential was requested/read/extracted/minted; no service, environment,
+setting, production state, release or deployment was touched. #20/#29 remain open.
+
+Slice validation: 218 planner/guard/custody tests across ten files (21 new
+confinement tests), plus 169 affected application/webhook tests across eight
+files; Worker typecheck/lint; all 113 CI-script tests; workflow/runtime policies;
+affected deploy/test/research secret scans and diff checks pass. A local negative
+control temporarily allowed provider reads: the lifecycle canary failed with an
+assertion (exit 1). Restoring the wrapper returned it to green. Transport probes
+require actual kernel error codes (including ENETUNREACH and EROFS); a timeout is
+not accepted as proof of denial. This is local fixture/runtime evidence, not a
+live Test F or protected-runner result.
