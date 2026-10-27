@@ -11,13 +11,13 @@ allowBuilds:
   unrs-resolver: false
   workerd: true
 minimumReleaseAgeExclude:
-  - '@cloudflare/workerd-darwin-64@1.20260916.1'
-  - '@cloudflare/workerd-darwin-arm64@1.20260916.1'
-  - '@cloudflare/workerd-linux-64@1.20260916.1'
-  - '@cloudflare/workerd-linux-arm64@1.20260916.1'
-  - '@cloudflare/workerd-windows-64@1.20260916.1'
+  - '@cloudflare/workerd-darwin-64@1.20260916.1 || 1.20261027.1'
+  - '@cloudflare/workerd-darwin-arm64@1.20260916.1 || 1.20261027.1'
+  - '@cloudflare/workerd-linux-64@1.20260916.1 || 1.20261027.1'
+  - '@cloudflare/workerd-linux-arm64@1.20260916.1 || 1.20261027.1'
+  - '@cloudflare/workerd-windows-64@1.20260916.1 || 1.20261027.1'
   - miniflare@5.20260916.0-alpha
-  - workerd@1.20260916.1
+  - workerd@1.20260916.1 || 1.20261027.1
   - wrangler@4.133.0
   - '@cloudflare/workers-types@5.20260916.1'
 # Lift transitive dependencies whose parents pin a version with a high advisory to the first

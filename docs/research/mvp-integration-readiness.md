@@ -465,3 +465,15 @@ notification/provider/restore authority, continuous evidence or incident recover
 follows from read replay refusal. #20/#29 stay open; receipt/human acknowledgment
 and fallback policy remain unverified. No production enablement or live action;
 configured 2026-10-17 runtime remains unproven under the 2026-09-16 test runtime.
+
+## Configured runtime local validation follow-up
+
+[Configured runtime evidence](configured-runtime-validation.md) closes the narrow
+local startup gap at the unchanged **2026-10-17** date. The actual Alchemy Worker
+build and local D1 execute under exact gate-only workerd `1.20261027.1`; two
+configured cases pass and the intentional September fallback is refused.
+Historical September fixtures are not reclassified. This does not establish
+provider/hosted binding, TLS/DNS/account, storage or persistent custody proof.
+Parent fallback policy, real manifests/permissions/exclusion/credentials/approval,
+Test F, drills, receipt and human acknowledgment remain outstanding. #20/#29 stay
+open; no global MVP-ready claim or production enablement.

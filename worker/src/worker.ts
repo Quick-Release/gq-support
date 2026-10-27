@@ -1,4 +1,5 @@
 import * as Result from "effect/Result";
+import { workerCompatibility } from "./worker-compatibility.ts";
 import { observerPath, observerRequest } from "./observer-http.ts";
 import { ReviewedRelease } from "./release-identity.ts";
 import * as Exit from "effect/Exit";
@@ -44,7 +45,7 @@ export default Effect.gen(function* () {
     main: import.meta.url,
     env: { SUPPORT_RELEASE_CANDIDATE: releaseIdentity?.candidate ?? "unknown", SUPPORT_RELEASE_STAGE: releaseIdentity?.stage ?? "unknown" },
     workersDev: Output.map(databasesReady, () => ({ enabled: true, previewsEnabled: false })),
-    compatibility: { date: "2026-10-17" },
+    compatibility: workerCompatibility,
     // Upload with traces off so an old credential cannot leak during a transition.
     // The apply-only custody provider restores traces when Discord is disabled,
     // after verifying credential removal. Logs remain enabled in both modes.
