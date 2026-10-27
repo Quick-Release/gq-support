@@ -39,7 +39,8 @@ ddev start
 # A running site keeps its PHP until restarted, including after an earlier cell's override.
 php_version=${GQ_SUPPORT_PHP_VERSION:-$(sed -n 's/^php_version: *"\(.*\)"/\1/p' .ddev/config.yaml)}
 if [[ "$(ddev exec php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')" != "$php_version" ]]; then ddev restart; fi
-wp() { ddev wp --path=.test-site "$@"; }
+source scripts/ci/wp-cli.sh
+bash plugin/tests/integration/cli-streams.sh
 if ! ddev exec test -f .test-site/wp-includes/version.php 2>/dev/null; then
   core_args=(--skip-content)
   if [[ -n "${WP_VERSION:-}" ]]; then core_args+=("--version=$WP_VERSION"); fi
