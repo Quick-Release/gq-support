@@ -171,11 +171,123 @@ source evidence: #104 reports nightly Chromium, Firefox and counter passes; #106
 reports PHP 8.5 and PHP 8.1 contract/runtime/browser/counter passes. Those results
 belong to their pinned source heads, not this integrated candidate.
 
+## Bounded outer runtime observation follow-up (CODE only)
+
+Based on PR119 `674a5994cf8a43e2a80c19c43d659cab0cf02ad3`, stacked on
+`t3/bounded-discord-custody`. No migration, provider, secret, deployment setting
+or live operation is introduced. This remains a draft integration candidate;
+#20 and #29 remain open and are not MVP accepted.
+
+Boundary inventory before the change:
+
+- Prompt delivery resolved environment/credentials and raw bindings, then ran
+  `recordAlerts(contained(sweepDelivery))`. Its 25s `timeoutOption` and failure
+  catch enclosed that collector, so outer failure logs escaped collection and
+  timeout `None` was silently discarded.
+- Tick resolved raw bindings and derived its title key before `recordAlerts`;
+  its outer catch was outside collection. Scheduled phases individually caught
+  failures inside collection, but all four timeout results were discarded.
+  Persistence preceded the separately caught alert drain.
+- Fetch resolved request/environment/execution context, receiver, services, key
+  and bindings before its request collector. It registered persistence only
+  after successful contained handling. Escaped failure/cancellation bypassed
+  registration. Separately started webhook refresh already caught failures
+  inside its own collector; that catch is preserved.
+
+Newly wired CODE: one invocation collector encompasses failure logging and exit
+finalization once usable bindings exist. Tick key setup and delivery/request
+handler failures are observed without changing original errors or response
+codes. Existing cooperative deadlines (25/5/11/16s scheduled, 25s delivery wake,
+12s webhook refresh) now produce fixed existing failure classes; support work is
+never restarted. Delivery's synchronous binding acquisition precedes its bounded
+actual work; missing bindings remain logs-only. No new request-handler deadline
+is invented. The installation API's existing unexpected-exception 503 catch
+marks a data-free internal flag; only that catch emits the new
+`request_handler_failed` class. Validation/client errors and intentional
+containment 503s remain unalerted. There are now 25 finite classes, with unchanged
+privacy, incident keys, recovery and deduplication rules.
+
+Request finalization registers independent persistence through the existing
+execution context without awaiting I/O, including on failure/cancellation.
+Registration failure cannot change an accepted response. Background/Cron exit
+persistence has a separate two-second cooperative bound and stops starting
+further event observations on cancellation. An already-started observation
+(at most two D1 statements) may finish only against finite alert state. These local writes no longer acquire a support
+runtime admission or read SupportDB: an alert-store failure cannot strand a
+support recovery obstruction. Support work, uncertain provider ownership and
+Discord transport retain their original containment/admission checks. Phase
+ordering and persistence-before-drain ordering remain intact. Nominal phase
+bounds total 57s, plus at most the cooperative 2s persistence and 2s transport
+bounds; this does not promise completion before the next tick or cancel
+non-cooperative support cleanup.
+
+Unknown pre-binding failures cannot persist without bindings; fixed fallback
+logs and external observation are required, without a reacquisition loop.
+Alert-drain/store outages remain nonrecursive fixed logs. A failed/uncertain
+Discord route remains latched locally and cannot report its own outage through
+that route. External monitoring still needs to integrate platform 5xx, missing
+Cron, workflow/deployment failures outside the Worker, total-route/pre-binding
+failures and route health; operator receipt remains separate from HTTP 200.
+No external monitor, live routing, acknowledgment or escalation ownership is
+implemented or claimed by this slice.
+
+### Runtime follow-up validation
+
+New execution evidence on Node **26.12.1** (not inherited PR119 results):
+
+- RED: temporarily restore only `worker/src/worker.ts` from pinned PR119, run
+  `pnpm --filter gq-support-worker test --maxWorkers=1 test/worker-runtime-alerts.test.ts`:
+  **3 failed**, each missing the expected outer tick/delivery/request alert row.
+  Restore the implementation before further checks. The tests use the actual
+  Worker registration/handlers with registration/setup doubles, real collectors,
+  local workerd D1 and fake transport; they do not provision or invoke live services.
+- Focused final command:
+  `pnpm --filter gq-support-worker test --maxWorkers=1 test/runtime-alerts.test.ts test/worker-runtime-alerts.test.ts test/scheduled-alerts.test.ts test/discord-alerts.test.ts test/maintenance.test.ts test/github-webhooks.test.ts test/lifecycle-webhooks.test.ts test/status-webhooks.test.ts`:
+  **173 tests / 8 files passed**. Includes cooperative timeout finalization,
+  original cause/response preservation, the unexpected application 503 boundary,
+  disabled mode, absence of private payload values, duplicate prevention,
+  maintenance denial, retained support ownership, hung persistence and absent raw
+  bindings. The real four scheduled deadlines are exercised with Effect TestClock;
+  support work/finalizer order is asserted, not inferred from timeout log strings.
+- `pnpm --filter gq-support-worker test --maxWorkers=1 test/retained-provider-continuation.test.ts -t 'applies enabled='`:
+  **4 passed / 40 excluded**, after staging the new tracked source.
+- Final complete run on committed, unchanged Worker source `2f08d19`:
+  `pnpm --filter gq-support-worker test --maxWorkers=1`:
+  **1,263 tests / 51 files passed**, **693.30 seconds**. This full run is justified
+  by the shared persistence, HTTP adapter and scheduled deadline changes.
+- `pnpm --filter gq-support-worker typecheck`,
+  `pnpm --filter gq-support-worker lint`, `pnpm lint:js` and `pnpm test:lint`
+  passed (the latter: **3** lint controls).
+- `pnpm test:ci`: **114 passed**;
+  `node scripts/ci/workflow-policy.mjs` and
+  `node scripts/ci/runtime-matrix.mjs policy` passed.
+- `scripts/ci/gitleaks.sh dir worker`, `scripts/ci/gitleaks.sh dir docs`,
+  `scripts/ci/gitleaks.sh git . --log-opts=HEAD`, and whole-slice
+  `git diff 674a5994cf8a43e2a80c19c43d659cab0cf02ad3..HEAD --check` passed.
+  Final documentation-only evidence is scanned again before publication.
+
+An initial full run was interrupted for the absent-binding correction. Before
+interruption it reported **18** native fixture failures: the newly imported
+helper was untracked and excluded from the fixture's tracked-source manifest.
+Staging/committing the final source resolved the four retained native happy paths;
+the complete final run above passes all native cases. The interrupted run is not
+passing evidence. No browser/PHP/DDEV, deployment, credential/profile access,
+notification, hosted CI polling/watch or merge was performed. Publication uses
+`GQ_SUPPORT_SKIP_PRE_PUSH=1` to skip the optional shared-DDEV hook.
+
+Rollback caveat: older code does not recognize the newly persisted
+`request_handler_failed` class and can latch the existing notification route
+closed on encountering it. Alert state needs review under existing controls;
+this is not permission to release support/provider ownership or reopen a route.
+Inherited PR119 evidence above is not new proof for these runtime changes.
+
 ## Remaining CODE and LIVE gates
 
-#20 still lacks external platform 5xx,
-missing-Cron and deployment-failure observations, outer tick/prompt wrapper failure
-observations and failed-route observations. Existing Discord producer tests do
+#20 still lacks external platform-generated 5xx, absent-Cron, workflow/deployment
+failure outside the Worker, total route/pre-binding failure and operator-receipt
+observations. The bounded outer-runtime follow-up below wires application tick,
+prompt delivery and request failure observations, but cannot close those external
+gaps or prove live Discord routing. Existing Discord producer tests do
 not make #20 accepted. Managed Composer/tested-ZIP MVP upgrades, vvaz **or**
 gmarques authority (no hierarchy), Discord routing and the approved tracing policy
 are settled decisions, not LIVE settings or candidate approval.

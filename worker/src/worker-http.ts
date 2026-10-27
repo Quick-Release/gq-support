@@ -19,7 +19,10 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
     return yield* webhook(web.success, waitUntil, status);
   }
   const db = yield* database;
-  const response = yield* Effect.promise(() => handleRequest(web.success, db, mappings, installation));
+  let unexpected = false;
+  const response = yield* Effect.promise(() => handleRequest(web.success, db, mappings,
+    { ...installation, onUnexpectedFailure: () => { unexpected = true; } }));
+  if (unexpected) yield* Effect.logError("Support request handler failed");
   // Only the service's successful mutation receipt enters telemetry. Never use
   // request bodies, URLs, headers or authentication Request IDs as annotations.
   const mutation = web.success.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(url.pathname);

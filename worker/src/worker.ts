@@ -19,7 +19,8 @@ import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
-import { alertConfig, collectAlerts, drainAlerts, persistCollected, recordAlerts } from "./discord-alerts.ts";
+import { alertConfig, drainAlerts, recordAlerts } from "./discord-alerts.ts";
+import { boundedWork, observeRuntime } from "./runtime-alerts.ts";
 import { contained } from "./maintenance.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
@@ -71,22 +72,27 @@ export default Effect.gen(function* () {
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const ledger = yield* ledgerDatabase.raw;
-      yield* recordAlerts(contained(db, ledger, sweepDelivery({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]` }).pipe(
+      if (!db || !ledger) return yield* Effect.logError("Support delivery sweep failed");
+      yield* observeRuntime(boundedWork(Effect.suspend(() => contained(db, ledger, sweepDelivery({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]` }).pipe(
         Effect.provide(GitHubGateway.live({ clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY, ledger })),
-      ), undefined), db, ledger, alertConfig(env, slug));
-    }).pipe(Effect.timeoutOption(25_000), Effect.catchCause(() => Effect.logError("Support delivery sweep failed")));
+      ), undefined)), 25_000, "Support delivery sweep failed"), db, ledger, alertConfig(env, slug), "Support delivery sweep failed").pipe(Effect.catchCause(() => Effect.void));
+    }).pipe(Effect.catchCause(() => Effect.logError("Support delivery sweep failed")));
     // Delivery and reconciliation first, then the status sweep (src/scheduled.ts).
     const tick = Effect.gen(function* () {
       const env = yield* WorkerEnvironment;
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const ledger = yield* ledgerDatabase.raw;
-      const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY, ledger };
-      const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
-      yield* recordAlerts(scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
-        Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
-      ), db, ledger, alertConfig(env, slug));
-      yield* Effect.promise(() => drainAlerts(db, ledger, alertConfig(env, slug))).pipe(
+      if (!db || !ledger) return yield* Effect.logError("Support scheduled tick failed");
+      const completed = yield* observeRuntime(Effect.gen(function* () {
+        const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY as string, ledger };
+        const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
+        yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
+          Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
+        );
+        return true;
+      }), db, ledger, alertConfig(env, slug), "Support scheduled tick failed").pipe(Effect.catchCause(() => Effect.succeed(false)));
+      if (completed) yield* Effect.promise(() => drainAlerts(db, ledger, alertConfig(env, slug))).pipe(
         Effect.catchCause(() => Effect.logError("Support alert drain unavailable")));
     }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));
     yield* Cloudflare.Workers.cron("* * * * *", () => tick.pipe(Effect.asVoid));
@@ -100,37 +106,44 @@ export default Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const env = yield* WorkerEnvironment;
         const context = yield* WorkerExecutionContext;
-        webhookReceiver ??= createGitHubWebhookReceiver({ appId,
-          diagnostics: webhookDiagnostics && slug === "getquick-support-staging",
-          secret: typeof env.GITHUB_WEBHOOK_SECRET === "string" ? env.GITHUB_WEBHOOK_SECRET : undefined,
-          previousSecret: typeof env.GITHUB_WEBHOOK_PREVIOUS_SECRET === "string" ? env.GITHUB_WEBHOOK_PREVIOUS_SECRET : undefined,
-        });
-        const services = yield* Effect.context<RuntimeContext>();
-        const key = yield* Effect.promise(() => titleDigestKey ??= typeof env.GITHUB_APP_PRIVATE_KEY === "string"
-          ? digestKey(env.GITHUB_APP_PRIVATE_KEY) : Promise.resolve(null));
-        const ledger = yield* ledgerDatabase.raw;
-        const db = yield* database.raw;
-        const alerts = collectAlerts();
-        const unavailable = Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } });
-        const response = yield* contained(db, ledger, handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
-          (task) => context.raw.waitUntil(task), {
-            mappings: repositoryMappings, botLogin: `${slug}[bot]`,
-            database: () => Effect.runPromiseWith(services)(database.raw),
-            refresh: (db) => Effect.runPromise(recordAlerts(contained(db, ledger, Effect.gen(function* () {
-              if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
-              yield* refreshStatus({ db, config: refresh }).pipe(Effect.provide(GitHubReader.live({
-                clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY,
-              })));
-            }), undefined).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
-              Effect.catchCause(() => Effect.logError("Support webhook status refresh failed"))), db, ledger, alertConfig(env, slug))),
-          }, { digestKey: key, ledger }), unavailable).pipe(Effect.provide(alerts.layer));
-        yield* context.waitUntil(persistCollected(alerts, db, ledger, alertConfig(env, slug)));
-        // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
-        if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
-          response.status === 202) {
-          yield* context.waitUntil(deliver);
+        const { ledger, db } = yield* Effect.gen(function* () {
+          return { ledger: yield* ledgerDatabase.raw, db: yield* database.raw };
+        }).pipe(Effect.tapCause(() => Effect.logError("Support request invocation failed")));
+        if (!db || !ledger) {
+          yield* Effect.logError("Support request invocation failed");
+          return HttpServerResponse.fromWeb(Response.json({ code: "service_unavailable" },
+            { status: 503, headers: { "Retry-After": "60" } }));
         }
-        return HttpServerResponse.fromWeb(response);
+        return yield* observeRuntime(Effect.gen(function* () {
+          webhookReceiver ??= createGitHubWebhookReceiver({ appId,
+            diagnostics: webhookDiagnostics && slug === "getquick-support-staging",
+            secret: typeof env.GITHUB_WEBHOOK_SECRET === "string" ? env.GITHUB_WEBHOOK_SECRET : undefined,
+            previousSecret: typeof env.GITHUB_WEBHOOK_PREVIOUS_SECRET === "string" ? env.GITHUB_WEBHOOK_PREVIOUS_SECRET : undefined,
+          });
+          const services = yield* Effect.context<RuntimeContext>();
+          const key = yield* Effect.promise(() => titleDigestKey ??= typeof env.GITHUB_APP_PRIVATE_KEY === "string"
+            ? digestKey(env.GITHUB_APP_PRIVATE_KEY) : Promise.resolve(null));
+
+          const unavailable = Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } });
+          const response = yield* contained(db, ledger, handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
+            (task) => context.raw.waitUntil(task), {
+              mappings: repositoryMappings, botLogin: `${slug}[bot]`,
+              database: () => Effect.runPromiseWith(services)(database.raw),
+              refresh: (db) => Effect.runPromise(recordAlerts(contained(db, ledger, Effect.gen(function* () {
+                if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
+                yield* refreshStatus({ db, config: refresh }).pipe(Effect.provide(GitHubReader.live({
+                  clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY,
+                })));
+              }), undefined).pipe((work) => boundedWork(work, 12_000, "Support webhook status refresh failed"),
+                Effect.catchCause(() => Effect.logError("Support webhook status refresh failed"))), db, ledger, alertConfig(env, slug))),
+            }, { digestKey: key, ledger }), unavailable);
+          // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
+          if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
+            response.status === 202) {
+            yield* context.waitUntil(deliver).pipe(Effect.catchCause(() => Effect.logError("Support delivery sweep failed")));
+          }
+          return HttpServerResponse.fromWeb(response);
+        }), db, ledger, alertConfig(env, slug), "Support request handler failed", (persistence) => context.waitUntil(persistence));
       }),
     };
   }).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive), Effect.provide(Cloudflare.D1.QueryDatabaseBinding)),

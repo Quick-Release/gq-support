@@ -91,6 +91,8 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
 };
 
 export interface InstallationApiOptions {
+  /** Internal observation of the unexpected exception boundary, without error data. */
+  readonly onUnexpectedFailure?: () => void;
   /** The title-digest key for erasures (src/cleanup.ts); without it, redacted titles need review. */
   readonly digestKey?: CryptoKey | null;
   /** The suppression ledger (src/ledger.ts); erasures are recorded there first. */
@@ -178,6 +180,7 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     }
     return json({ ...binding(key, mapping), mapping_state: suspended ? "suspended" : "active" });
   } catch {
+    try { options.onUnexpectedFailure?.(); } catch { /* Observation cannot alter the response. */ }
     // Neither SQL errors nor request data (including Enrollment codes) enter logs/responses.
     return json({ code: "service_unavailable", message: "Service unavailable." }, 503);
   }
