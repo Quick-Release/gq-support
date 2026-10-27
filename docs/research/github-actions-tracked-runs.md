@@ -76,3 +76,17 @@ reviewed zero findings/two configured-date cases are retained evidence, not a ne
 configured-runtime run or live proof from this slice. Only public official docs
 were retrieved for the new technical contract; git push/draft-PR publication is
 limited to this authorized change.
+
+## Independent review correction
+
+Standards review found no issues; Spec review found one P2. Requiring metadata
+state `active` suppressed a valid outstanding historical attempt after workflow
+disablement. The adapter now accepts the finite workflow-state enum from the
+[official GitHub OpenAPI schema](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.json)
+while retaining exact metadata/run identity joins. Current enabledness is not a
+condition for observing a tracked historical failure; unknown/malformed states
+still refuse. Four disabled/deleted cases reproduced the missing attempt read
+before correction; all 426 observer tests and four Actions negative controls
+pass afterward, alongside Worker typecheck, affected lint and secret/whitespace
+checks. Privacy fixture values now use runtime scanner-compatible canaries.
+No live source, credential custody or production enablement is established.

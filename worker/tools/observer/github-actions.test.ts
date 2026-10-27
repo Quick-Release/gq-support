@@ -5,7 +5,7 @@ import { decodeBatch, evaluate, type Context } from "./protocol.ts";
 
 const root = "https://api.github.com/repos/Quick-Release/gq-support";
 const now = Date.parse("2026-10-27T12:00:00Z"), sha = "a".repeat(40);
-const canary = () => randomBytes(24).toString("hex");
+const canary = () => `gqcanary_${randomBytes(24).toString("hex")}`;
 const token = canary(), privateText = canary();
 const iso = (n: number) => new Date(n).toISOString();
 function input(): ActionsInput {
@@ -80,7 +80,7 @@ it.each([
   const f = fixture([workflow(), { ...run(), ...patch }]), r = await observeGitHubActions(input(), f.io);
   expect(r.reads).toHaveLength(0); expect(cell(r)?.verdict).toBe("unknown");
 });
-it.each([{ id: 0 }, { path: ".github/workflows/ci.yml" }, { url: `${root}/actions/workflows/9` }, { state: "disabled_manually" }])("refuses authoritative metadata mismatch %#", async patch => {
+it.each([{ id: 0 }, { path: ".github/workflows/ci.yml" }, { url: `${root}/actions/workflows/9` }, { state: "unsupported" }])("refuses authoritative metadata mismatch %#", async patch => {
   const f = fixture([{ ...workflow(), ...patch }]);
   expect((await observeGitHubActions(input(), f.io)).reads).toHaveLength(0); expect(f.calls).toHaveLength(1);
 });
@@ -266,4 +266,13 @@ it("unrelated success and cross-candidate success cannot recover private retaine
   expect(cell(await observeGitHubActions(i, fixture([workflow(), unrelated]).io))?.verdict).toBe("incident");
   i.context.candidate = "d".repeat(40); e.candidate = i.context.candidate;
   expect(cell(await observeGitHubActions(i, fixture([workflow(), unrelated]).io))?.verdict).toBe("incident");
+});
+
+it.each(["disabled_manually", "disabled_inactivity", "disabled_fork", "deleted"])("still reads an outstanding historical failure when workflow metadata is %s", async state => {
+  const f = fixture([{ ...workflow(), state }, run()]);
+  const result = await observeGitHubActions(input(), f.io);
+  expect(f.calls).toHaveLength(2);
+  expect(result.reads).toHaveLength(1);
+  expect(cell(result)?.verdict).toBe("incident");
+  expect(result.state?.workflowFailures).toEqual(input().context.expected);
 });

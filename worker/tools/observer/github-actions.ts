@@ -153,7 +153,7 @@ export async function observeGitHubActions(input: ActionsInput, io: TransportIO)
         if (!w) {
           w = obj(await get(`/actions/workflows/${e.workflow}`));
           positive(w.id);
-          if (w.path !== `.github/workflows/${e.workflow}` || w.url !== `${root}/actions/workflows/${w.id}` || w.state !== "active") refuse();
+          if (w.path !== `.github/workflows/${e.workflow}` || w.url !== `${root}/actions/workflows/${w.id}` || (typeof w.state !== "string" || !["active", "deleted", "disabled_fork", "disabled_inactivity", "disabled_manually"].includes(w.state))) refuse();
           workflows.set(e.workflow, w);
         }
         check();

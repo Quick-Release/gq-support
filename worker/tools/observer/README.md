@@ -524,8 +524,10 @@ means no list pagination; it does not conceal HTTP request cost. Metadata is cac
 only within this invocation. There are no retries, cancel/rerun calls, scheduler,
 CLI, sender, enabled workflow or added privileges.
 
-Metadata's numeric `id`, exact `.github/workflows/{filename}` path, URL and active
-state join `workflow_id`/`workflow_url` from the actual run object. Run and head
+Metadata's numeric `id`, exact `.github/workflows/{filename}` path and URL join
+`workflow_id`/`workflow_url` from the actual run object. Supported workflow states
+include disabled/deleted states: current enabledness cannot suppress a tracked
+historical attempt. Unknown or malformed states still refuse. Run and head
 repository numeric IDs/full names/API URLs must match independently supplied repo
 identity and the fixed repo. Run ID, attempt, event, SHA and head branch must match.
 CI is push/main; deploy is workflow_dispatch/main; release is workflow_dispatch/main
