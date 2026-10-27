@@ -1,5 +1,10 @@
 # MVP integration candidate — 2026-10-27
 
+Current execution-review entry point: [MVP staging acceptance packet](mvp-staging-acceptance-packet.md).
+It pins PR #132 evidence, current source prerequisites, private attestations and
+finite drills; it grants no live authority or acceptance. Historical assessments
+below retain their original scope.
+
 Draft aggregation of unmerged work, targeting `origin/main`, not deployment or
 candidate approval. No source PR is superseded or closed. #20 and #29 stay open.
 
