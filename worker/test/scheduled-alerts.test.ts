@@ -1,3 +1,4 @@
+import { notePhaseFailure } from "../src/phase-observation.ts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -11,7 +12,7 @@ import { scheduledTick } from "../src/scheduled.ts";
 const events = vi.hoisted(() => [] as string[]);
 const mode = vi.hoisted(() => ({ value: "timeout" }));
 beforeEach(() => { events.length = 0; mode.value = "timeout"; });
-vi.mock("../src/delivery.ts", () => ({ sweepDelivery: () => mode.value === "failure" ? Effect.die(`gqcanary_${crypto.randomUUID()}`) : mode.value === "caught" ? Effect.logError("Support delivery requires review") : mode.value === "ok" ? Effect.void : Effect.sync(() => { events.push("delivery"); }).pipe(
+vi.mock("../src/delivery.ts", () => ({ sweepDelivery: () => mode.value === "failure" ? Effect.die(`gqcanary_${crypto.randomUUID()}`) : mode.value === "caught" ? notePhaseFailure.pipe(Effect.andThen(Effect.logError("Support delivery requires review"))) : mode.value === "ok" ? Effect.void : Effect.sync(() => { events.push("delivery"); }).pipe(
   Effect.andThen(Effect.never), Effect.onExit(() => Effect.sync(() => { events.push("delivery cancelled"); }))) }));
 vi.mock("../src/cleanup.ts", () => ({ sweepCleanup: () => mode.value !== "timeout" ? Effect.void : Effect.sync(() => { events.push("cleanup"); }).pipe(
   Effect.andThen(Effect.never), Effect.onExit(() => Effect.sync(() => { events.push("cleanup cancelled"); }))) }));

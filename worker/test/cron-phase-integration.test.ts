@@ -1,3 +1,4 @@
+import { MinimumLogLevel } from "effect/References";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { expect, it } from "vitest";
@@ -11,6 +12,7 @@ it("reports real cleanup's isolated storage failure without hiding later phase o
     await stage.databases.main.prepare("DROP TABLE support_cleanup").run();
     const config = { clientId: "synthetic", slug: "synthetic", privateKeyPem: "synthetic" };
     const result = await Effect.runPromise(scheduledTick({ db: stage.databases.main, mappings: [], botLogin: "synthetic" }).pipe(
+      Effect.provideService(MinimumLogLevel, "None"),
       Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
     ));
     expect(result).toEqual({ delivery: "ok", cleanup: "failed", refresh: "ok", sweep: "ok" });

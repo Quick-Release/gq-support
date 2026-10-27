@@ -117,7 +117,7 @@ export default Effect.gen(function* () {
             // do not claim terminal while its cleanup is still running.
             const draining = drainAlerts(db, ledger, alertConfig(env, slug));
             const outcome = yield* Effect.promise(() => draining).pipe(
-              Effect.onExit((exit) => Exit.isFailure(exit) ? Effect.promise(() => draining.catch(() => "failed" as const)).pipe(
+              Effect.onExit((exit) => Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause) ? Effect.promise(() => draining.catch(() => "failed" as const)).pipe(
                 Effect.flatMap((result) => observe("drain", result))) : Effect.void),
               Effect.catchCause(() => Effect.logError("Support alert drain unavailable").pipe(Effect.as("failed" as const))));
             yield* observe("drain", outcome);

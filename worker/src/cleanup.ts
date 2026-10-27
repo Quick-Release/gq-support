@@ -426,12 +426,14 @@ type Store = ReturnType<typeof cleanupStore>;
 class CleanupStorageFailed extends Error {}
 const io = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: () => new CleanupStorageFailed() });
 const log = (requestId: string, outcome: string, alert = false) =>
+  (alert ? notePhaseFailure : Effect.void).pipe(Effect.andThen(
   (alert ? Effect.logError("Support cleanup requires review") : Effect.logInfo("Support cleanup outcome")).pipe(
     Effect.annotateLogs({ request: requestId, outcome, alert }),
-  );
+  )));
 /** Runs one step so that its failure is logged and never stops the rest of the pass. */
 const isolated = <R>(step: string, effect: Effect.Effect<unknown, unknown, R>) =>
-  effect.pipe(Effect.asVoid, Effect.catchCause(() => Effect.logError("Support cleanup step failed").pipe(Effect.annotateLogs({ step, alert: true }))));
+  effect.pipe(Effect.asVoid, Effect.catchCause(() => notePhaseFailure.pipe(Effect.andThen(
+    Effect.logError("Support cleanup step failed").pipe(Effect.annotateLogs({ step, alert: true }))))));
 
 /** Where a drained request goes next. Delivered issues stay with the Client unless an erasure redacts them. */
 const afterDrain = (row: DrainedRequest, now: number): Transition => {

@@ -201,6 +201,7 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
   const store = statusStore(options.db);
   const pinned = yield* io(() => store.targets(options.mappings));
   for (const conflict of pinned.filter((target) => target.installationId === null)) {
+    yield* notePhaseFailure;
     yield* Effect.logError("Support status sweep skipped a repository").pipe(
       Effect.annotateLogs({ repository: conflict.repositoryId, reason: "ConflictingInstallations", alert: true }));
   }
@@ -260,6 +261,7 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
       }
       if (target.statusInstallationId === null) {
         pages -= 1;
+        yield* notePhaseFailure;
         yield* Effect.logError("Support status sweep skipped conflicting historical installations").pipe(
           Effect.annotateLogs({ repository: target.repositoryId, alert: true }));
         yield* io(() => store.apply(target, [], position, null, now()));
@@ -280,7 +282,8 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
         position = next;
       }
     }).pipe(Effect.withSpan("support.status.sweep.repository", { attributes: { repository: target.repositoryId } }));
-    yield* sweep.pipe(Effect.catchCause(() => Effect.logError("Support status sweep failed for a repository").pipe(
-      Effect.annotateLogs({ repository: target.repositoryId, alert: true }))));
+    yield* sweep.pipe(Effect.catchCause(() => notePhaseFailure.pipe(Effect.andThen(
+      Effect.logError("Support status sweep failed for a repository").pipe(
+        Effect.annotateLogs({ repository: target.repositoryId, alert: true }))))));
   }
 }).pipe(Effect.withSpan("support.status.sweep"));

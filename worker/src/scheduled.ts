@@ -1,6 +1,4 @@
 import { PhaseFailure } from "./phase-observation.ts";
-import * as Logger from "effect/Logger";
-import { CurrentLogAnnotations } from "effect/References";
 import * as Option from "effect/Option";
 import type { PhaseOutcome } from "./cron-progress.ts";
 import { contained } from "./maintenance.ts";
@@ -30,17 +28,11 @@ export const scheduledTick = (options: ScheduledOptions): Effect.Effect<Record<"
   };
   const phase = <E, R>(name: keyof typeof results, work: Effect.Effect<void, E, R>, milliseconds: number,
     failure: "Support delivery sweep failed" | "Support cleanup sweep failed" | "Support status refresh failed" | "Support status sweep failed") => Effect.gen(function* () {
-    // Inner passes deliberately isolate item failures. Observe their fixed
-    // failure/retry logs without copying annotations or changing those contracts.
+    // Inner passes retain their error/HTTP contracts and report only this
+    // invocation-local finite signal, independently of logging settings.
     let incomplete = false;
-    const logger = Logger.make<unknown, void>(({ logLevel, message, fiber }) => {
-      const name = Array.isArray(message) && message.length === 1 ? message[0] : message;
-      if (logLevel === "Error" || logLevel === "Warn" || logLevel === "Fatal") incomplete = true;
-      if (name === "Support delivery outcome" && !["Delivered", "Reconciled", "NotApplied", "Superseded"].includes(String(fiber.getRef(CurrentLogAnnotations).outcome))) incomplete = true;
-    });
     const admitted = work.pipe(Effect.map(() => incomplete ? "failed" as const : "ok" as const),
-      Effect.provideService(PhaseFailure, () => { incomplete = true; }),
-      Effect.provide(Logger.layer([logger], { mergeWithExisting: true })));
+      Effect.provideService(PhaseFailure, () => { incomplete = true; }));
     const outcome = yield* (options.ledger ? contained(options.db, options.ledger, admitted, "contained" as PhaseOutcome) : admitted).pipe(
       Effect.timeoutOption(milliseconds),
       Effect.flatMap((result) => Option.isNone(result)
