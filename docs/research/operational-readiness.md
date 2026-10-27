@@ -544,3 +544,36 @@ remain open; production remains disabled. #129 configured-date local validation
 (two passing cases, reviewed zero findings) is separate and unchanged; no live
 proof or runtime/CI change is added. Next safe slice is the offline separate
 Actions-read purpose/custody handoff, binding exact private refs/identities.
+
+### Separate Actions approval/private custody CODE slice (stacked on #130)
+
+The [offline handoff contract](../../worker/tools/observer/README.md#separate-actions-private-custody-handoff-stacked-on-130)
+adds the proposed `observer_actions_reads` purpose and exact digest-only command
+`approve-observer-actions-read sha256:<64 lowercase hexadecimal manifest digest>`.
+A future vvaz OR gmarques must explicitly approve those exact private bytes,
+purpose and session. This task grants no approval. Worker-only approval and credential
+delivery remain exclusive. Review authentication and dedicated minimum Actions:read
+source credentials are separately delivered and fixed to GitHub-only GET routes.
+No Actions write, deploy, retry, rerun, cancel or notification authority follows.
+
+The actual #130 adapter/evaluator follows consumed private files and permanent
+session claim/fsync barriers before any GitHub request. Fresh exact #20 record,
+independent numeric actor/current identity/repository permission verification occurs
+initially, before each source GET and finally; terminal wrapper failures withhold
+acceptance. Total <=100 verification plus <=23 source GETs, <=3,801,088 streamed
+bytes and one ten-second network window clipped to approval expiry, with no retry.
+The 23-source cap never included verifier calls. Unknown/partial cannot recover
+incidents; valid disabled/deleted metadata retains historical attempts.
+
+Journal entries retain both purposes in the unchanged 256 permanent session slots.
+Collisions/exhaustion/corruption/storage uncertainty block; no force-clear or cleanup.
+Old code refuses new-purpose entries on rollback: preserve evidence and stop.
+This is finite read-claim custody, not durable notification/send/receipt ownership
+or continuous failure carry. Persistent storage/all-runner exclusion, real private
+delivery, independent identities/refs/repository/scopes and genuine approval remain
+LIVE duties. Parent fallback, capacity/rollback policy and safe custody remain
+pending. Receipt/human acknowledgment/Test F/drills are unverified; #20/#29 remain
+open and nothing is enabled. #129 configured-date local proof remains separate,
+valid local evidence, not live performance/API entitlement/custody/Cloudflare
+ownership proof. Next safe slice is parent review of the proposed purpose and
+custody frontier, before independently established prerequisites or enabled use.
