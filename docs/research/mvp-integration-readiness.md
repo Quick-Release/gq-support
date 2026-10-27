@@ -382,3 +382,15 @@ recorded in the observer design and are not final proof. Hosted checks/reviews
 remain uninspected. This establishes CODE behavior only; all LIVE gates above,
 external read authority, activation/coverage and the parent's fallback choice
 remain pending. #20/#29 remain open.
+
+### Cron producer review correction
+
+Independent review found no Standards issues and one P2 Spec defect: cleanup's
+failed due-selection query fell back to an empty list without signalling phase
+failure. The fallback now emits the invocation-local finite failure signal and
+still returns an empty list. It preserves typed-error continuation and cancellation
+semantics while preventing false cleanup success. A real scheduler/workerd D1
+regression rejects only that query; it reproduced cleanup `ok` before the fix and
+now proves cleanup `failed` with delivery/refresh/sweep still `ok`. All 48 focused
+cleanup/scheduler/callback tests, Worker typecheck, affected lint, secret and
+whitespace checks passed. No LIVE or DDEV operations were used.

@@ -588,7 +588,7 @@ export const sweepCleanup = (options: CleanupOptions): Effect.Effect<void, never
   }));
   // A few rounds, so a scan continuation or a found issue's redaction need not wait a minute.
   for (let round = 0; round < 3 && now() < deadline; round++) {
-    const due = yield* io(() => store.due(now())).pipe(Effect.orElseSucceed(() => []));
+    const due = yield* io(() => store.due(now())).pipe(Effect.catch(() => notePhaseFailure.pipe(Effect.as([]))));
     if (due.length === 0) break;
     for (const record of due) {
       if (now() >= deadline) break;
