@@ -161,6 +161,8 @@ it("edits the incident's message as it is claimed and resolved, and announces a 
   await operator("unsuspend", "shop/production", "operator-7", "verified-private");
   advance(1_000);
   expect((await staff("POST", `/v1/operations/incidents/${id}/resolve`, "alex", JSON.stringify({ resolution: "recovered" }))).status).toBe(200);
+  // A scheduler outage must not leave the known Discord message claimed forever.
+  advance(2 * 86_400_000);
   await tick();
   await tick();
   expect(discord.messages(INCIDENTS)).toEqual([expect.objectContaining({ edits: 1 })]);
@@ -235,10 +237,25 @@ it("honors Discord rate limits per destination without spending retry attempts",
     attempts: 0, error_code: "rate_limited", next_attempt_at: new Date(now + 90_500).toISOString() })]);
   advance(60_000);
   await tick();
-  expect(discord.messages(REQUESTS)).toHaveLength(2);
+  expect(discord.messages(REQUESTS)).toHaveLength(0);
   advance(31_000);
   await tick();
   expect(discord.messages(REQUESTS)).toHaveLength(3);
+});
+
+it("persists global Discord rate limits across ticks and newly queued notifications", async () => {
+  discord.fail(REQUESTS, { status: 429, body: { retry_after: 90.5, global: true } });
+  await shopIncident();
+  await tick();
+  expect(discord.requests).toHaveLength(1);
+  advance(60_000);
+  await accept(globex);
+  await tick();
+  expect(discord.requests).toHaveLength(1);
+  advance(31_000);
+  await tick();
+  expect(discord.messages(REQUESTS)).toHaveLength(2);
+  expect(discord.messages(INCIDENTS)).toHaveLength(1);
 });
 
 it("fails closed when a destination is unset, malformed or shared by both channels", async () => {

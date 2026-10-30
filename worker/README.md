@@ -452,7 +452,8 @@ never loses or delays a report or an incident.
 - **Operational incidents** channel: one message per open incident, edited
   when it is claimed and resolved. An incident claimed before its first send is
   announced once, already claimed. Nothing reminds about or escalates an
-  unclaimed incident.
+  unclaimed incident. A resolved incident updates its existing notice even
+  after a multi-day scheduler outage, while the incident is still retained.
 - Messages hold only the state, Slot, category, opaque request or incident ID,
   claimant, and trusted links built by the service: the runbook in this
   repository and, when the [repository mapping](#suspended-mappings) records its
@@ -469,7 +470,8 @@ never loses or delays a report or an incident.
   hour) for 8 attempts per transition, then become `failed` and log
   `Discord notification failed` with `alert: true`. A 429 waits Discord's
   `retry_after` and defers that destination (all, if global) without spending an
-  attempt. Error codes are bounded: `outcome_unknown`, `rate_limited`,
+  attempt. The cooldown persists across ticks and newly queued sources.
+  Error codes are bounded: `outcome_unknown`, `rate_limited`,
   `provider_unavailable`, `destination_rejected`, `request_rejected`, `message_missing`.
 - Rows hold no content and never outlive their source: request rows go when the
   request is erased or purged, or 7 days after acceptance; incident rows go with

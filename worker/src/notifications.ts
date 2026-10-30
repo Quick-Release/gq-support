@@ -54,7 +54,6 @@ const REQUEST_TIMEOUT_MS = 2_500;
 /** Support requests accepted this recently are announced; later transitions edit them for this long. */
 const REQUEST_ANNOUNCE_MS = 86_400_000;
 export const REQUEST_NOTIFICATION_RETENTION_MS = 7 * 86_400_000;
-const RESOLVED_INCIDENT_UPDATE_MS = 86_400_000;
 const DOCS = "https://github.com/Quick-Release/gq-support/blob/main/";
 const USER_AGENT = "DiscordBot (https://github.com/Quick-Release/gq-support, 1)";
 
@@ -68,15 +67,15 @@ const enqueue = async (db: QueryDatabase, destinations: DiscordDestinations, now
     error_code = NULL, changed_at = excluded.changed_at WHERE excluded.transition_rank > notification.transition_rank`;
   const statements = [];
   if (destinations.operational_incidents) {
-    // Open incidents whatever their age, so none stays unannounced; a recently resolved one only updates its message.
+    // Open incidents whatever their age; retained resolved ones update existing notices even after a long outage.
     statements.push(db.prepare(`INSERT INTO notification (source_kind, source_id, destination, transition, transition_rank,
       state, next_attempt_at, source_at, changed_at)
       SELECT 'incident', i.id, 'operational_incidents',
         CASE WHEN i.state = 'resolved' THEN 'resolved' WHEN i.claimant IS NOT NULL THEN 'claimed' ELSE 'opened' END,
         CASE WHEN i.state = 'resolved' THEN 2 WHEN i.claimant IS NOT NULL THEN 1 ELSE 0 END, 'pending', ?, i.first_observed_at, ?
-      FROM incident i WHERE i.state = 'open' OR (i.resolved_at > ? AND EXISTS (SELECT 1 FROM notification n
+      FROM incident i WHERE i.state = 'open' OR (i.state = 'resolved' AND EXISTS (SELECT 1 FROM notification n
         WHERE n.source_kind = 'incident' AND n.source_id = i.id AND n.destination = 'operational_incidents')) ${upsert}`)
-      .bind(now, now, now - RESOLVED_INCIDENT_UPDATE_MS));
+      .bind(now, now));
   }
   if (destinations.support_requests) {
     // The create's actual outcome: issue confirmed, needs review, or still only accepted.
@@ -186,7 +185,7 @@ const send = async (fetcher: typeof fetch, webhook: DiscordWebhook, messageId: s
   }
   if (response.status === 429) {
     const wait = seconds(body?.retry_after) ?? seconds(response.headers.get("Retry-After")) ?? 60;
-    return { error: "rate_limited", retryAfterMs: Math.min(Math.max(Math.ceil(wait * 1000), 1_000), 3_600_000),
+    return { error: "rate_limited", retryAfterMs: Math.max(Math.ceil(wait * 1000), 1_000),
       global: body?.global === true || response.headers.has("X-RateLimit-Global") };
   }
   // Unknown Message: the message was deleted, so post the current state anew.
@@ -216,8 +215,9 @@ export const sweepNotifications = async (db: QueryDatabase, { destinations, fetc
   const configured = DESTINATIONS.filter((destination) => destinations[destination]);
   await enqueue(db, destinations, now);
   const due = configured.length ? (await db.prepare(`SELECT source_kind, source_id, destination, transition, attempts, webhook_id, message_id
-    FROM notification WHERE state = 'pending' AND next_attempt_at <= ? AND destination IN (SELECT value FROM json_each(?))
-    ORDER BY next_attempt_at, source_at LIMIT ?`).bind(now, JSON.stringify(configured), SENDS_PER_TICK).all<Due>()).results : [];
+    FROM notification n WHERE state = 'pending' AND next_attempt_at <= ? AND destination IN (SELECT value FROM json_each(?))
+    AND NOT EXISTS (SELECT 1 FROM notification_cooldown c WHERE c.destination = n.destination AND c.retry_at > ?)
+    ORDER BY next_attempt_at, source_at LIMIT ?`).bind(now, JSON.stringify(configured), now, SENDS_PER_TICK).all<Due>()).results : [];
   const deferred = new Set<Destination>();
   for (const item of due) {
     if (signal?.aborted) break;
@@ -247,6 +247,10 @@ export const sweepNotifications = async (db: QueryDatabase, { destinations, fetc
     }
     const { error } = outcome;
     if (error === "rate_limited") {
+      await db.batch((outcome.global ? DESTINATIONS : [item.destination]).map((destination) =>
+        db.prepare(`INSERT INTO notification_cooldown (destination, retry_at) VALUES (?, ?)
+          ON CONFLICT (destination) DO UPDATE SET retry_at = MAX(retry_at, excluded.retry_at)`)
+          .bind(destination, now + outcome.retryAfterMs!)));
       // Discord's wait, not a failed attempt.
       await db.prepare(`UPDATE notification SET attempts = ?, error_code = 'rate_limited', next_attempt_at = ?
         WHERE source_kind = ? AND source_id = ? AND destination = ? AND attempts = ?`)
