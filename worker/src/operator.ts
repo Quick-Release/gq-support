@@ -6,6 +6,8 @@ import { unsuspendRepository } from "./repository-suspension.ts";
 import { sha256 } from "./signature.ts";
 import { runStatusOperation } from "./status-operations.ts";
 import { runIncidentOperator } from "./incident-operator.ts";
+import { runInventoryOperator } from "./inventory-operator.ts";
+import type { StageInventory } from "./inventory.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
 import type { QueryDatabase } from "./storage.ts";
 
@@ -15,6 +17,8 @@ export interface OperatorOptions {
   readonly recordRevocation: (keyId: string, revokedAt: number) => Promise<void>;
   readonly mappings: readonly RepositoryMapping[];
   readonly now?: number;
+  /** The target stage's reviewed inventory references (src/inventory.ts). */
+  readonly inventory?: StageInventory;
   /** The suppression ledger database (src/ledger.ts), queried like `query`. */
   readonly ledger?: OperatorOptions["query"];
 }
@@ -50,7 +54,7 @@ const enrollmentCode = (): string => {
 };
 
 /** The operator command boundary; Cloudflare authentication belongs to the CLI adapter. */
-export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now(), ledger }: OperatorOptions): Promise<string> => {
+export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now(), ledger, inventory }: OperatorOptions): Promise<string> => {
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   if (["erase", "erasure-status", "erasure-close", "restore-recorded", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
@@ -58,9 +62,10 @@ export const runOperator = async (args: readonly string[], { query, recordRevoca
   }
   if (args[0]?.startsWith("status-")) return runStatusOperation(args, { query, recordRevocation, mappings, now });
   if (["incidents", "incident", "incident-claim", "notifications", "notification-retry"].includes(args[0] ?? "")) return runIncidentOperator(args, { query, recordRevocation, mappings, now });
+  if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { query, recordRevocation, mappings, now, ...(inventory ? { inventory } : {}) });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications and notification-retry");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry and inventory-record");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

@@ -11,7 +11,14 @@ export interface RepositoryMapping {
   readonly githubInstallationId?: number;
   readonly clientOriginLabel?: string;
   readonly defaultDeveloper: string;
+  /** How the Slot's plugin is deployed, once reviewed; unset is reported as unknown. */
+  readonly deployment?: DeploymentMethod;
+  /** The reviewed team responsible for the installation; unset is reported as unknown. */
+  readonly responsibleTeam?: string;
 }
+
+/** Central site deployment tooling, the private native updater, or a manual install. */
+export type DeploymentMethod = "central" | "native" | "manual";
 
 export type DeployedStage = "staging" | "prod";
 
@@ -32,9 +39,14 @@ export const stageMappings: Readonly<Record<DeployedStage, readonly RepositoryMa
 /** Deployment pins each stage's App slug (deploy/github-app.ts). */
 const STAGE_BY_SLUG: Readonly<Record<string, DeployedStage>> = { "getquick-support-staging": "staging", "getquick-support": "prod" };
 
+/** The deployed stage a pinned App slug belongs to; any other slug, including none, has none. */
+export const stageForSlug = (slug: string): DeployedStage | null => Object.hasOwn(STAGE_BY_SLUG, slug) ? STAGE_BY_SLUG[slug]! : null;
+
 /** The mappings for the Worker's own stage. Any other slug, including none, gets no mappings. */
-export const mappingsForSlug = (slug: string): readonly RepositoryMapping[] =>
-  Object.hasOwn(STAGE_BY_SLUG, slug) ? stageMappings[STAGE_BY_SLUG[slug]!] : [];
+export const mappingsForSlug = (slug: string): readonly RepositoryMapping[] => {
+  const stage = stageForSlug(slug);
+  return stage ? stageMappings[stage] : [];
+};
 
 export const mappingFor = (mappings: readonly RepositoryMapping[], slot: string) =>
   mappings.find((mapping) => mapping.slot === slot);

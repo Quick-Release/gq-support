@@ -398,6 +398,7 @@ as Banquinha (`src/operations-api.ts`):
   `200`, or `409` `incident_not_claimed` / `recovery_not_verified` / `incident_resolved`
 - `GET /v1/operations/notifications`: [Discord notification](#discord-notifications)
   delivery health per destination and the failing notifications
+- `GET /v1/operations/inventory`: the stage's [Slot inventory](#slot-inventory)
 
 The dashboard authenticates its team member itself, then signs every request
 with its registered Ed25519 key over this canonical string, newline-separated
@@ -434,6 +435,59 @@ pnpm operator incident-claim <incident-id> <opaque-actor> --stage <stage> --acco
 claim rule, recorded with channel `operator`. The claim and its audit metadata
 are one statement, so remote CLI races leave no losing claimant's audit event.
 Resolution goes through the operations API. Neither path can write while D1 is down.
+
+## Slot inventory
+
+Operators and staff see one restricted inventory row per mapped Slot of the
+stage (#137, `src/inventory.ts`, migration 0024), through
+`GET /v1/operations/inventory` or `pnpm operator inventory <slot>`. Nothing in
+it is a health check: it reports recorded evidence and says what it does not know.
+
+- **Reviewed configuration** (changed by reviewed PR): Client, project, Slot and
+  environment, repository ID, reviewed `owner/name` and GitHub App installation
+  from the [repository mapping](#suspended-mappings); its optional `deployment`
+  (`central`, `native` or `manual`) and `responsibleTeam`; and per stage
+  (`stageInventories`, chosen by the pinned App slug like mappings) the Tipme
+  account, the Alchemy `GQSupportWorker/<stage>/<logical ID>` resource
+  references, and credential custody. Resource IDs come from Alchemy state, not
+  this file. An unset value is shown as `null`, never a default. No Slot has a
+  reviewed deployment method or team yet, and no credential owner is assigned.
+- **Versions**: `desired`, `attempted` and `observed` are separate. The
+  installation's signed enrollment records the plugin version it reports
+  (`source: enrollment`); everything else is appended by an Operator from
+  deployment or maintenance evidence. `update.outcome` is `none` without an
+  attempt, `confirmed` only when an observation of the attempted version is at
+  or after the attempt, `failed` only when a failure of that version is
+  recorded, whichever is later, and otherwise `unconfirmed`. A dispatch alone
+  is never success.
+- **Observation display rule**: an observation is `current` for 24 hours, the
+  previous-release compatibility window, and then `unknown` with reason
+  `stale`; none at all is `unknown`/`absent`. The last value and its time stay
+  visible. This is how stale evidence is labelled, not a service objective, and
+  missing traffic is never read as healthy. WordPress page rendering makes no
+  remote check to refresh it.
+- **Independent contact**: staff see only `verified` or `unverified` and the
+  verification time. The route, its evidence reference and the verifier are
+  restricted to the Operator CLI.
+- **Credentials**: staff see each credential's ID, purpose, owner, stage,
+  expiry state (`valid`, `expired`, `never` or `unknown`) and last verified
+  rotation date. Locations (secret names and stores), the revocation runbook and
+  rotation evidence are shown only by `pnpm operator inventory-credentials`.
+  Values are never recorded anywhere in the inventory.
+
+```sh
+pnpm operator inventory <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator inventory-credentials --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator inventory-record <slot> <desired|attempted|observed|failed> <version> <at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator inventory-contact <slot> '<route>' <verified-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+```
+
+`at` and `verified-at` are ISO UTC times of the evidence, never later than now;
+`evidence-ref` is a link or reference without spaces (for example a CI run URL),
+never a credential. Each record is one appended row carrying its actor and
+recording time, so it is its own audit entry and is never edited; correct a
+mistake by recording newer evidence. Inventory rows are not purged by
+offboarding yet.
 
 ## Discord notifications
 

@@ -45,6 +45,8 @@ export const readBody = async (request: Request, limit: number): Promise<string 
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 };
 
+const PLUGIN_VERSION = /^[0-9][A-Za-z0-9.+_-]{0,63}$/;
+
 const enroll = async (request: Request, body: string, db: CredentialDatabase, mappings: readonly RepositoryMapping[], now: number,
   ledger: QueryDatabase | null): Promise<Response> => {
   let data: Record<string, unknown>;
@@ -77,6 +79,11 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
     db.prepare(`INSERT INTO installation_key (key_id, slot, installation_id, origin, public_key, enrolled_at)
       SELECT ?, slot, ?, ?, ?, ? FROM enrollment_code WHERE code_hash = ? AND consumed_key_id = ?`)
       .bind(keyId, installationId, origin, publicKey, now, hash, keyId),
+    // The version the installation reports, signed with its new key: inventory evidence, never authority.
+    ...(typeof data.plugin_version === "string" && PLUGIN_VERSION.test(data.plugin_version) ? [db.prepare(`INSERT INTO slot_version_evidence
+      (slot, kind, version, observed_at, source, recorded_by, recorded_at)
+      SELECT slot, 'observed', ?, ?, 'enrollment', ?, ? FROM enrollment_code WHERE code_hash = ? AND consumed_key_id = ?`)
+      .bind(data.plugin_version, now, keyId, now, hash, keyId)] : []),
   ]);
   if (ledger) {
     // The keys this enrollment replaced. A lost write here is caught by the next cleanup pass's mirror.

@@ -6,6 +6,7 @@ import { handleRequest, type InstallationApiOptions } from "./installation-api.t
 import type { CredentialDatabase } from "./operator.ts";
 import { handleOperationsRequest, NO_OPERATIONS_ACCESS, type OperationsAccess } from "./operations-api.ts";
 import type { Destination } from "./notifications.ts";
+import type { StageInventory } from "./inventory.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
 
 /** HTTP entry shared by the Alchemy adapter and request-boundary tests. */
@@ -13,6 +14,7 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
   database: Effect.Effect<CredentialDatabase, never, R>, mappings: readonly RepositoryMapping[], webhook: GitHubWebhookReceiver,
   waitUntil: (task: Promise<void>) => void, status?: StatusWebhookConfig, installation: InstallationApiOptions = {},
   operations: OperationsAccess = NO_OPERATIONS_ACCESS, notifications: readonly Destination[] = [],
+  inventory: StageInventory | null = null,
 ) => Effect.gen(function* () {
   const web = HttpServerRequest.toWebResult(request);
   if (Result.isFailure(web)) return new Response(null, { status: 400 });
@@ -24,7 +26,8 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
   const db = yield* database;
   // Staff dashboards only; the installation API never answers here.
   if (url.pathname === "/v1/operations" || url.pathname.startsWith("/v1/operations/")) {
-    return yield* Effect.promise(() => handleOperationsRequest(web.success, db, operations, Date.now(), notifications));
+    return yield* Effect.promise(() => handleOperationsRequest(web.success, db, operations, Date.now(), notifications,
+      { mappings, inventory }));
   }
   const response = yield* Effect.promise(() => handleRequest(web.success, db, mappings, installation));
   // Only the service's successful mutation receipt enters telemetry. Never use

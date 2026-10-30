@@ -47,10 +47,10 @@ export const harness = (db: D1Database, mappings: readonly RepositoryMapping[], 
     query: async (sql, parameters) => (await db.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings, now,
   });
-  const enroll = async (slot: string, installationId: string): Promise<Installation> => {
+  const enroll = async (slot: string, installationId: string, extra: Record<string, string> = {}): Promise<Installation> => {
     const pair = await keyPair();
     const body = JSON.stringify({ code: await operator("enroll", slot), installation_id: installationId,
-      origin: "https://shop.example", public_key: await publicKeyOf(pair) });
+      origin: "https://shop.example", public_key: await publicKeyOf(pair), ...extra });
     const response = await send(await signed(pair, "POST", "/v1/enroll", body, "", installationId));
     if (response.status !== 200) throw new Error(`Enrollment failed: ${response.status}`);
     const { key_id: keyId } = await response.json() as { key_id: string };

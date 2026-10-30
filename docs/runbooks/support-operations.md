@@ -153,6 +153,23 @@ and rehearsed before this procedure is considered executable production recovery
   and privacy/security checks. Recover uncertain receipts/reports before any
   manual replacement. Lost browser memory is not evidence of failed acceptance.
 
+## Inventory and credential custody
+
+Use the [Slot inventory](../../worker/README.md#slot-inventory) to find a Slot's
+Client, repository/App mapping, resources, deployment method and team, and to
+record evidence:
+
+1. After a deployment or update maintenance, record `attempted` and then the
+   `observed` version from a trusted source (central deployment output, the
+   installation's admin, or its signed enrollment). Record `failed` only for a
+   confirmed failure. Never record an observation you did not see.
+2. Treat `unknown` (`stale` or `absent`) as unknown: check the installation
+   through hosting/admin access, not by adding remote checks to page rendering.
+3. Verify each Client's independent contact from a separate device, then record
+   it with `inventory-contact`; keep the route out of Discord, issues and metrics.
+4. After rotating a credential, update its `rotated` date and evidence (and
+   `expires`) in `worker/src/inventory.ts` by reviewed PR. Assign owners there.
+
 ## Offboarding
 
 Use the [operations inventory/offboarding checklist](../support-operations-design.md#inventory-custody-and-offboarding)

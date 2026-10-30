@@ -257,6 +257,9 @@ and verification evidence. Store contact details only in the restricted inventor
 not metric labels or Discord. Record credential purpose, owner, stage, location
 reference, expiry/rotation evidence and revocation procedure, never its value.
 Follow the existing [App-key custody runbook](runbooks/github-app-key-custody.md).
+The [Slot inventory](../worker/README.md#slot-inventory) (#137) implements this
+record. Its observations display as stale/unknown 24 hours after observation, the
+previous-release compatibility window; that is a display rule, not an objective.
 
 Offboarding is an explicit Operator action: verify Client/Slot scope, suppress new
 dispatch, revoke the Slot using the existing Operator workflow, revoke narrow

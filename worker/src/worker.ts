@@ -21,6 +21,7 @@ import { digestKey } from "./cleanup.ts";
 import { restoreGate } from "./ledger.ts";
 import { operationsAccess } from "./operations-api.ts";
 import { DESTINATIONS, discordDestinations } from "./notifications.ts";
+import { inventoryForSlug } from "./inventory.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
@@ -126,7 +127,8 @@ export default Cloudflare.Worker(
               })));
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
-          }, { digestKey: key, ledger }, operations, DESTINATIONS.filter((destination) => destinationsOf(env)[destination]));
+          }, { digestKey: key, ledger }, operations, DESTINATIONS.filter((destination) => destinationsOf(env)[destination]),
+          inventoryForSlug(slug));
         // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
         if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
           response.status === 202) {
