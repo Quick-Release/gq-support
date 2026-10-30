@@ -110,27 +110,26 @@ export const findIncident = async (db: QueryDatabase, id: string, now: number): 
 
 /** Each actor's incident history, for the restricted Operator view only. */
 export const incidentAudit = async (db: QueryDatabase, id: string) =>
-  (await db.prepare(`SELECT actor, via, action, previous_state, new_state, occurred_at FROM incident_audit
-    WHERE incident_id = ? ORDER BY occurred_at, rowid`).bind(id).all<Record<string, unknown>>()).results;
+  (await db.prepare(`SELECT * FROM (SELECT actor, via, action, previous_state, new_state, occurred_at FROM incident_audit
+    WHERE incident_id = ? AND action <> 'claim'
+    UNION ALL SELECT claimant AS actor, claim_via AS via, 'claim' AS action, 'open' AS previous_state,
+      'claimed' AS new_state, claimed_at AS occurred_at FROM incident WHERE id = ? AND claimant IS NOT NULL)
+    ORDER BY occurred_at, CASE action WHEN 'open' THEN 0 WHEN 'claim' THEN 1 ELSE 2 END`)
+    .bind(id, id).all<Record<string, unknown>>()).results;
 
 export type ClaimOutcome = "claimed" | "not_found" | "claimed_by_other" | "resolved";
 export type ResolveOutcome = "resolved" | "not_found" | "not_claimant" | "already_resolved" | "recovery_not_verified";
 export interface Mutation<Outcome> { readonly outcome: Outcome; readonly incident: IncidentProjection | null }
 
 /**
- * Self-claim: the first claim wins, and the audit row and the claim depend on
- * each other in one batch. Repeating your own claim succeeds without a new audit.
+ * Self-claim: the immutable actor/channel/time and claim identity form its audit
+ * in the same conditional write, also atomic through the remote Operator's
+ * single-statement transport. Repeating your own claim adds no audit event.
  */
 export const claimIncident = async (db: QueryDatabase, id: string, actor: string, via: Via, now: number): Promise<Mutation<ClaimOutcome>> => {
   const audit = crypto.randomUUID();
-  await db.batch([
-    db.prepare(`INSERT INTO incident_audit (id, incident_id, actor, via, action, previous_state, new_state, occurred_at)
-      SELECT ?, id, ?, ?, 'claim', 'open', 'claimed', ? FROM incident WHERE id = ? AND state = 'open' AND claimant IS NULL`)
-      .bind(audit, actor, via, now, id),
-    db.prepare(`UPDATE incident SET claimant = ?, claimed_at = ?, claim_audit_id = ?
-      WHERE id = ? AND state = 'open' AND claimant IS NULL AND EXISTS (SELECT 1 FROM incident_audit WHERE id = ?)`)
-      .bind(actor, now, audit, id, audit),
-  ]);
+  await db.prepare(`UPDATE incident SET claimant = ?, claimed_at = ?, claim_audit_id = ?, claim_via = ?
+    WHERE id = ? AND state = 'open' AND claimant IS NULL`).bind(actor, now, audit, via, id).run();
   const found = await row(db, id, now);
   if (!found) return { outcome: "not_found", incident: null };
   const outcome = found.state === "resolved" ? "resolved" : found.claimant === actor ? "claimed" : "claimed_by_other";

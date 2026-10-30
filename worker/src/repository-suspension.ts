@@ -35,7 +35,7 @@ export const unsafeReason = (error: { readonly _tag: string; readonly reason?: s
  * Suspends the repository and alerts the Operator. Idempotent: an existing
  * suspension keeps its first cause and time, and alerts only once. Each unsafe
  * observation also records the repository's Operational incident, listing every
- * Slot mapped to it, in the same batch.
+ * Slot mapped to it. Observability failure must not roll back the safety write.
  */
 export const suspendRepository = (db: QueryDatabase, repositoryId: number, reason: SuspensionReason, now: number,
   slots: readonly string[]) => Effect.gen(function* () {
@@ -49,7 +49,6 @@ export const suspendRepository = (db: QueryDatabase, repositoryId: number, reaso
         // including when the first suspension's cause and time are retained.
         db.prepare(`UPDATE repository_state SET verified_safe_at = NULL, unsafe_observed_at = MAX(COALESCE(unsafe_observed_at, 0), ?)
           WHERE repository_id = ?`).bind(now, repositoryId),
-        ...observeIncident(db, { category: "repository_suspended", subject: String(repositoryId), slots, now }),
       ]);
       return changed!.results.length > 0;
     },
@@ -58,6 +57,10 @@ export const suspendRepository = (db: QueryDatabase, repositoryId: number, reaso
   if (suspended) {
     yield* Effect.logError("Repository mapping suspended").pipe(Effect.annotateLogs({ repository: repositoryId, reason, alert: true }));
   }
+  yield* Effect.tryPromise(() => db.batch(observeIncident(db, {
+    category: "repository_suspended", subject: String(repositoryId), slots, now,
+  }))).pipe(Effect.catchCause(() => Effect.logError("Operational incident observation failed").pipe(
+    Effect.annotateLogs({ category: "repository_suspended", alert: true }))));
   return suspended;
 });
 

@@ -13,6 +13,7 @@ import { CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 import { harness, signed, type Installation } from "./installation-client.ts";
 import { localStage } from "./local-d1.ts";
 import { operationsClient, type OperationsClient } from "./operations-client.ts";
+import type { QueryDatabase } from "../src/storage.ts";
 
 // Repository 42 serves a production and a staging Slot; globex keeps its own repository 77.
 const START = Date.parse("2026-10-17T10:00:00Z");
@@ -54,9 +55,9 @@ const accept = async (installation: Installation) => {
     reporter_subject: subject, scope: "mine", summary: "Checkout fails", description: "Private report text" }));
   expect(response.status).toBe(202);
 };
-const deliver = async () => {
+const deliver = async (db: QueryDatabase = stage.databases.shared) => {
   advance(10_000);
-  await Effect.runPromise(sweepDelivery({ db: stage.databases.shared, mappings, botLogin: `${SLUG}[bot]`, now: () => now, random: () => 0 })
+  await Effect.runPromise(sweepDelivery({ db, mappings, botLogin: `${SLUG}[bot]`, now: () => now, random: () => 0 })
     .pipe(Effect.provide(GitHubGateway.layer({ clientId: CLIENT_ID, slug: SLUG, privateKeyPem: github.privateKeyPem })
       .pipe(Layer.provide(github.layer)))));
 };
@@ -75,8 +76,15 @@ const shopIncident = async () => {
   const [incident] = await incidents();
   return incident!.id as string;
 };
-const audit = async () => (await stage.databases.shared.prepare(
-  "SELECT actor, via, action, previous_state, new_state FROM incident_audit ORDER BY occurred_at, rowid").all()).results;
+const audit = async () => {
+  const list = JSON.parse(await operator("incidents")) as { incidents: { id: string }[] };
+  const histories = await Promise.all(list.incidents.map(async ({ id }) =>
+    (JSON.parse(await operator("incident", id)) as { audit: Record<string, unknown>[] }).audit));
+  const order = { open: 0, claim: 1, resolve: 2 };
+  return histories.flat().sort((a, b) => Number(a.occurred_at) - Number(b.occurred_at) ||
+    order[a.action as keyof typeof order] - order[b.action as keyof typeof order])
+    .map(({ occurred_at: _time, ...entry }) => entry);
+};
 /** Sends through the Worker's HTTP entry, as the deployed adapter does. */
 const send = (request: Request, config = access) => Effect.runPromise(handleWorkerRequest(HttpServerRequest.fromWeb(request),
   Effect.succeed(stage.databases.shared), mappings, () => Effect.die("Not a webhook"), () => {}, undefined, {}, config));
@@ -111,6 +119,18 @@ it("groups a shared repository failure into one incident listing every affected 
   expect(other).toMatchObject({ category: "repository_suspended", affected_slots: ["globex/production"] });
   expect(shop!.affected_slots).toEqual(["shop/production", "shop/staging"]);
   expect(other!.id).not.toBe(shop!.id);
+});
+
+it("keeps a repository suspended even when incident storage fails", async () => {
+  github.update(42, { private: false });
+  await accept(production);
+  const db = stage.databases.shared;
+  await deliver({
+    prepare: (sql) => db.prepare(sql.includes("INSERT INTO incident (") ? "SELECT * FROM unavailable_incident_store" : sql),
+    batch: (statements) => db.batch(statements),
+  });
+  expect(JSON.parse(await operator("status", "shop/production"))).toMatchObject({ suspension: { reason: "public" } });
+  expect(await incidents()).toEqual([]);
 });
 
 it("admits only a registered dashboard key naming a rostered team member, never an installation or Discord identity", async () => {
@@ -223,6 +243,18 @@ it("gives Operators an audited CLI fallback to inspect and claim incidents when 
   });
   expect(await (await staff("GET", `/v1/operations/incidents/${id}`)).json()).not.toHaveProperty("audit");
   await expect(operator("incident", crypto.randomUUID())).rejects.toThrow("Unknown incident");
+});
+
+it("audits only the winning remote CLI claim when two Operators race", async () => {
+  const id = await shopIncident();
+  const claims = await Promise.allSettled(["operator-7", "operator-8"].map((actor) => operator("incident-claim", id, actor)));
+  expect(claims.filter((claim) => claim.status === "fulfilled")).toHaveLength(1);
+  const detail = JSON.parse(await operator("incident", id)) as {
+    incident: { claimant: string }; audit: { actor: string; action: string }[];
+  };
+  expect(detail.audit.filter((entry) => entry.action === "claim")).toEqual([
+    expect.objectContaining({ actor: detail.incident.claimant }),
+  ]);
 });
 
 it("keeps an unclaimed incident visible without reminders or escalation, and expires resolved ones after 90 days", async () => {

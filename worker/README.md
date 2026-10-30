@@ -370,14 +370,16 @@ signals are routed by later #134 tickets.
 
 - Incidents stay unassigned until someone claims one. There are no designated
   responders, claim timeouts, reminders or automatic escalation.
-- A claim is atomic: its audit row and the claim depend on each other in one
-  batch, so exactly one concurrent claimant wins. Repeating your own claim succeeds.
+- A claim atomically records its immutable actor, channel, time and audit identity
+  in one conditional write, so exactly one concurrent claimant wins, including
+  through remote CLI queries. Repeating your own claim succeeds.
 - Only the claimant can resolve (`recovered`), and only once trusted records show
   the cause recovered, checked in the same conditional write. For a suspension
   that means the Operator's audited `unsuspend` has lifted it. A recurrence after
   resolution opens a new incident.
-- `incident_audit` records the opaque actor, channel (`service`, `api` or
-  `operator`), action, previous/new state and time. Incidents hold no Submitted
+- The audit combines open/resolve events with the incident's immutable claim
+  fields, recording actor, channel (`service`, `api` or `operator`), action,
+  previous/new state and time. Incidents hold no Submitted
   text, Reporter identity, credential, URL or payload; projections omit the cause
   subject and the audit trail.
 - Unresolved incidents are kept. A resolved incident disappears from every
@@ -427,9 +429,8 @@ pnpm operator incident-claim <incident-id> <opaque-actor> --stage <stage> --acco
 ```
 
 `incident` adds the restricted audit trail. `incident-claim` follows the API's
-claim rule, recorded with channel `operator`. Over Wrangler the CLI runs each
-statement separately, so a claim that loses a race can leave an audit row its
-incident does not reference; the incident's claimant is authoritative.
+claim rule, recorded with channel `operator`. The claim and its audit metadata
+are one statement, so remote CLI races leave no losing claimant's audit event.
 Resolution goes through the operations API. Neither path can write while D1 is down.
 
 ## Support status refresh
