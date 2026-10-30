@@ -2,11 +2,14 @@
 
 Design/runbook for [#20](https://github.com/Quick-Release/gq-support/issues/20),
 subject to the [operations design](../support-operations-design.md) and its
-production readiness gates. This document does not authorize deployment. Notification
-routing and update adapters are planned capabilities until their implementation
+production readiness gates. This document does not authorize deployment. Signal
+routing rules and update adapters are planned capabilities until their implementation
 evidence is recorded; do not infer a runnable command from a procedural instruction
 below. Incident claim/resolve and the incident CLI are implemented (#135), as
 described in the [Worker README](../../worker/README.md#operational-incidents).
+Discord notifications of accepted Support requests and incidents are implemented
+(#136, [Worker README](../../worker/README.md#discord-notifications)), but no
+stage has approved destinations configured until the setup below is evidenced.
 
 ## Common procedure
 
@@ -158,6 +161,41 @@ credential/update access revocation, stopped central deployments, privacy purge
 scheduling and preservation of uncertain remote-outcome review state. Never
 destroy shared stage resources to remove a Client. Local disable/uninstall is not
 offboarding and must not silently delete accepted work.
+
+## Discord notification setup
+
+Destinations are collected per stage through the implementation workflow, never
+from this repository or a chat. Staging first; production only after staging
+evidence and readiness sign-off. Do not point a stage at a Client channel or
+reuse one channel for both views.
+
+1. A GETQUICK Discord administrator creates, or names, two internal channels for
+   the stage: Support requests and Operational incidents. Record the stage,
+   server and channel IDs (not secret) and who approved them.
+2. In each channel create a channel webhook (Integrations → Webhooks) named
+   for the stage, e.g. `GQ Support staging`. Copy each webhook URL directly into
+   the stage GitHub Environment secret: `SUPPORT_DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL`
+   and `SUPPORT_DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL`. Store the recoverable
+   copy in the GQ Support project of the approved secret manager for that stage.
+   Never paste a URL into an issue, log, variable or command line.
+3. Run the authorized Worker deployment for that stage. The preflight refuses a
+   malformed or shared webhook; the apply uploads both Worker secrets.
+4. Verify with a synthetic report on a synthetic staging Slot: the Support
+   requests channel shows it accepted and later delivered,
+   `GET /v1/operations/notifications` shows both destinations `configured`, and
+   it or `pnpm operator notifications` shows a recent `last_sent_at` with no problems. Use the suspension
+   drill (#57) for an incident message, then claim and resolve it and confirm the
+   same message is edited.
+5. Drill an outage: rotate (delete) one staging webhook, observe
+   `destination_rejected` retries and the incident still visible through the
+   operations API/CLI, restore a new webhook through steps 2–3, run
+   `notification-retry` if it reached `failed`, and confirm a single incident.
+
+Record the evidence: stage, Worker version, channel IDs, webhook names (never
+URLs), secret locations and owner, rotation procedure (delete the webhook in
+Discord, then replace the secret and redeploy), timestamps, opaque incident and
+request IDs, observed messages, and human sign-off. A configured secret is not
+evidence that a channel is connected until step 4 is observed.
 
 ## Drill and evidence checklist
 

@@ -396,6 +396,8 @@ as Banquinha (`src/operations-api.ts`):
   `incident_claimed` / `incident_resolved`
 - `POST /v1/operations/incidents/{id}/resolve` with `{"resolution":"recovered"}`:
   `200`, or `409` `incident_not_claimed` / `recovery_not_verified` / `incident_resolved`
+- `GET /v1/operations/notifications`: [Discord notification](#discord-notifications)
+  delivery health per destination and the failing notifications
 
 The dashboard authenticates its team member itself, then signs every request
 with its registered Ed25519 key over this canonical string, newline-separated
@@ -432,6 +434,77 @@ pnpm operator incident-claim <incident-id> <opaque-actor> --stage <stage> --acco
 claim rule, recorded with channel `operator`. The claim and its audit metadata
 are one statement, so remote CLI races leave no losing claimant's audit event.
 Resolution goes through the operations API. Neither path can write while D1 is down.
+
+## Discord notifications
+
+Accepted Support requests and Operational incidents are announced in two
+separate Discord channels through channel webhooks (#136, `src/notifications.ts`,
+migration 0022). The minute tick derives notifications from durable state after
+delivery, cleanup and incident expiry, within a 4-second phase bound. Intake and
+incident writes never wait for Discord, so a Discord outage or misconfiguration
+never loses or delays a report or an incident.
+
+- **Support requests** channel: one message per request accepted in the last
+  24 hours, showing its actual delivery outcome. "Accepted; pending GitHub
+  delivery (no issue confirmed yet)" is edited to "Delivered: GitHub issue
+  created" only once the issue number is recorded, or to a needs-Operator-review
+  state when the create failed or its outcome is unknown.
+- **Operational incidents** channel: one message per open incident, edited
+  when it is claimed and resolved. An incident claimed before its first send is
+  announced once, already claimed. Nothing reminds about or escalates an
+  unclaimed incident.
+- Messages hold only the state, Slot, category, opaque request or incident ID,
+  claimant, and trusted links built by the service: the runbook in this
+  repository and, when the [repository mapping](#suspended-mappings) records its
+  reviewed `repository` (`owner/name`), the confirmed GitHub issue. Without one
+  the issue is named by number and repository ID. Never Submitted text, Reporter
+  identity, credentials, payloads or URLs from requests. Mentions are disabled.
+- Delivery state is one row per source and destination, separate from the
+  source. A source, destination and transition is sent once Discord confirms it;
+  a later transition edits the known message, and a deleted message is reposted.
+- Each attempt is recorded as `outcome_unknown` before the request. A lost
+  response is therefore retried, and Discord may show that notice twice:
+  exactly-once Discord delivery is not promised, and a retry never creates an
+  incident. Failures retry with exponential backoff (1 minute doubling to 1
+  hour) for 8 attempts per transition, then become `failed` and log
+  `Discord notification failed` with `alert: true`. A 429 waits Discord's
+  `retry_after` and defers that destination (all, if global) without spending an
+  attempt. Error codes are bounded: `outcome_unknown`, `rate_limited`,
+  `provider_unavailable`, `destination_rejected`, `request_rejected`, `message_missing`.
+- Rows hold no content and never outlive their source: request rows go when the
+  request is erased or purged, or 7 days after acceptance; incident rows go with
+  the incident's expiry. Discord's own copies contain only the metadata above.
+
+Inspect and recover with the operations API or the Operator CLI:
+
+```sh
+pnpm operator notifications --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator notification-retry <support_requests|operational_incidents> --stage <stage> --account-id <account-id> --database-id <database-id>
+```
+
+`notifications` lists per-destination pending/failed counts, oldest pending
+change and last confirmed send, plus failing notifications with their bounded
+codes. After fixing the cause, `notification-retry` re-arms that destination's
+failed notifications; they are rendered from current state, so a resolved
+incident is announced as resolved.
+
+### Discord configuration
+
+Each stage's destinations are the Worker secrets
+`DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL` and `DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL`,
+deployed from the stage GitHub Environment secrets
+`SUPPORT_DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL` and
+`SUPPORT_DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL`. A webhook URL embeds its
+token, so it is a credential: keep it out of variables, issues, logs and
+command arguments. The deployment preflight rejects a value that is not
+`https://discord.com/api/webhooks/{id}/{token}` or one webhook used for both
+channels, and every apply uploads set values and deletes unset ones. An unset
+destination is closed: nothing is queued for it, and enabling it later
+announces open incidents and requests from the last 24 hours only.
+
+No destination is configured for any stage yet. See the
+[support operations runbook](../docs/runbooks/support-operations.md#discord-notification-setup)
+for setup and evidence.
 
 ## Support status refresh
 

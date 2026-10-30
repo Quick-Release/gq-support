@@ -20,10 +20,15 @@ import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
 import { restoreGate } from "./ledger.ts";
 import { operationsAccess } from "./operations-api.ts";
+import { DESTINATIONS, discordDestinations } from "./notifications.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
 let titleDigestKey: Promise<CryptoKey | null> | undefined;
+// The Discord webhook secrets (src/notifications.ts). Unset or malformed sends nothing to that channel.
+const destinationsOf = (env: Record<string, unknown>) => discordDestinations(
+  typeof env.DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL === "string" ? env.DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL : "",
+  typeof env.DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL === "string" ? env.DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL : "");
 // Per isolate: nothing serves or sweeps until a recorded restore has been replayed (src/ledger.ts).
 const restored = restoreGate();
 
@@ -81,7 +86,8 @@ export default Cloudflare.Worker(
       if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) return yield* Effect.logError("Support restore replay pending");
       const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
       const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
-      yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
+      yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key,
+        notifications: { destinations: destinationsOf(env) } }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
       );
     }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));
@@ -120,7 +126,7 @@ export default Cloudflare.Worker(
               })));
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
-          }, { digestKey: key, ledger }, operations);
+          }, { digestKey: key, ledger }, operations, DESTINATIONS.filter((destination) => destinationsOf(env)[destination]));
         // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
         if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
           response.status === 202) {

@@ -1,12 +1,14 @@
 import { readBody } from "./installation-api.ts";
 import { claimIncident, findIncident, isResolution, listIncidents, resolveIncident } from "./incidents.ts";
+import { notificationStatus, type Destination } from "./notifications.ts";
 import { OPERATIONS_SIGNATURE, verifySignature } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
 
 /**
  * The authenticated operations API (docs/support-operations-design.md): the one
  * service boundary through which a staff dashboard, such as Banquinha, views,
- * claims and resolves Operational incidents. The dashboard signs each request
+ * claims and resolves Operational incidents, and sees Discord notification
+ * delivery health. The dashboard signs each request
  * with a key registered here and names the GETQUICK team member it has
  * authenticated; this Worker then checks that member against its own staff
  * roster. An Installation credential, a Discord identity or a dashboard key
@@ -50,13 +52,14 @@ const INCIDENT = /^\/v1\/operations\/incidents\/([0-9a-f-]{36})(\/claim|\/resolv
 
 /** The operations HTTP boundary, shared by the Worker adapter and local D1 integration tests. */
 export const handleOperationsRequest = async (request: Request, db: QueryDatabase, access: OperationsAccess,
-  now = Date.now()): Promise<Response> => {
+  now = Date.now(), notifications: readonly Destination[] = []): Promise<Response> => {
   try {
     const url = new URL(request.url);
     const list = request.method === "GET" && url.pathname === "/v1/operations/incidents";
+    const delivery = request.method === "GET" && url.pathname === "/v1/operations/notifications";
     const match = INCIDENT.exec(url.pathname);
     const action = match?.[2]?.slice(1);
-    if (url.search || !(list || (match && request.method === (action ? "POST" : "GET")))) return notFound();
+    if (url.search || !(list || delivery || (match && request.method === (action ? "POST" : "GET")))) return notFound();
     if (url.protocol !== "https:") return unauthorized();
     const body = await readBody(request, BODY_BYTES);
     if (body === null) return json({ code: "request_too_large" }, 413);
@@ -74,6 +77,7 @@ export const handleOperationsRequest = async (request: Request, db: QueryDatabas
     if (nonce!.meta.changes !== 1) return unauthorized();
 
     if (list) return json({ incidents: await listIncidents(db, now) });
+    if (delivery) return json(await notificationStatus(db, notifications));
     const id = match![1]!;
     if (!action) {
       const incident = await findIncident(db, id, now);

@@ -1,5 +1,6 @@
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
 import { claimIncident, findIncident, incidentAudit, listIncidents } from "./incidents.ts";
+import { DESTINATIONS, notificationStatus, retryNotifications, type Destination } from "./notifications.ts";
 
 const ACTOR = /^[A-Za-z0-9_-]{1,64}$/;
 const ID = /^[0-9a-f-]{36}$/;
@@ -11,6 +12,9 @@ const ID = /^[0-9a-f-]{36}$/;
  * - `incidents` lists the team view;
  * - `incident <id>` adds the restricted audit trail;
  * - `incident-claim <id> <opaque-actor>` self-claims, with the same atomic rule and audit as the API.
+ *
+ * - `notifications` shows Discord delivery health and failing notifications;
+ * - `notification-retry <destination>` re-arms a destination's failed notifications once its cause is fixed.
  *
  * Resolution stays with the claimant through the operations API.
  */
@@ -30,5 +34,9 @@ export const runIncidentOperator = async (args: readonly string[], { query, now 
     if (outcome === "claimed_by_other") throw new Error(`Incident already claimed by ${incident!.claimant}`);
     return JSON.stringify({ incident });
   }
-  throw new Error("Usage: operator incidents | incident <id> | incident-claim <id> <opaque-actor>");
+  if (command === "notifications" && args.length === 1) return JSON.stringify(await notificationStatus(db));
+  if (command === "notification-retry" && args.length === 2 && DESTINATIONS.includes(id as Destination)) {
+    return JSON.stringify({ destination: id, retried: await retryNotifications(db, id as Destination, now) });
+  }
+  throw new Error(`Usage: operator incidents | incident <id> | incident-claim <id> <opaque-actor> | notifications | notification-retry <${DESTINATIONS.join("|")}>`);
 };

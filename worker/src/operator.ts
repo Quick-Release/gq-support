@@ -57,10 +57,10 @@ export const runOperator = async (args: readonly string[], { query, recordRevoca
     return runCleanupOperator(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   }
   if (args[0]?.startsWith("status-")) return runStatusOperation(args, { query, recordRevocation, mappings, now });
-  if (["incidents", "incident", "incident-claim"].includes(args[0] ?? "")) return runIncidentOperator(args, { query, recordRevocation, mappings, now });
+  if (["incidents", "incident", "incident-claim", "notifications", "notification-retry"].includes(args[0] ?? "")) return runIncidentOperator(args, { query, recordRevocation, mappings, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident and incident-claim");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications and notification-retry");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

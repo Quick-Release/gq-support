@@ -8,6 +8,7 @@ import { appConfig, verifyApp } from "./deploy/github-app.ts";
 import { SupportDB, SupportLedger } from "./src/support-db.ts";
 import Worker from "./src/worker.ts";
 import { validateWebhookSecrets } from "./deploy/github-webhook-secrets.ts";
+import { validateDiscordSecrets } from "./deploy/discord-secrets.ts";
 
 export default Alchemy.Stack(
   "GQSupportWorker",
@@ -24,8 +25,9 @@ export default Alchemy.Stack(
         try: async () => {
           const app = await verifyApp(appConfig(stack.stage, process.env), process.env.GITHUB_APP_PRIVATE_KEY ?? "");
           validateWebhookSecrets(process.env, app.appId);
+          validateDiscordSecrets(process.env);
         },
-        catch: () => new Error("GitHub App preflight failed; see the key custody runbook"),
+        catch: () => new Error("GitHub App or Discord notification preflight failed; see the key custody and support operations runbooks"),
       }).pipe(Effect.orDie);
     }
     const database = yield* SupportDB;

@@ -5,6 +5,8 @@ export interface RepositoryMapping {
   readonly project: string;
   readonly environment: string;
   readonly repositoryId: number;
+  /** The repository's reviewed `owner/name`, for trusted issue links in notifications only; never authority. */
+  readonly repository?: string;
   /** Required to deliver; omit only while a Slot is not approved for delivery. */
   readonly githubInstallationId?: number;
   readonly clientOriginLabel?: string;
@@ -22,7 +24,7 @@ export const stageMappings: Readonly<Record<DeployedStage, readonly RepositoryMa
   staging: [
     // Synthetic content only (#57): the suspension drill makes the sandbox public for a few minutes.
     { slot: "gq-support-sandbox/staging", client: "getquick", project: "gq-support-sandbox", environment: "staging",
-      repositoryId: 1424354303, githubInstallationId: 172696674, clientOriginLabel: "client-support", defaultDeveloper: "vvaz" },
+      repositoryId: 1424354303, repository: "Quick-Release/gq-support-sandbox", githubInstallationId: 172696674, clientOriginLabel: "client-support", defaultDeveloper: "vvaz" },
   ],
   prod: [],
 };
