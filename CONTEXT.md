@@ -101,6 +101,10 @@ _Avoid_: Tenant ID, API key, pairing token
 **Operational record**:
 The durable mapping between a Support request, its Client, Slot, verified Reporter, and GitHub issue identity, plus delivery and reconciliation information. It supports authorization and operations without replacing GitHub as the issue record.
 
+**Operational incident**:
+A service failure tracked for the GETQUICK team to claim, investigate and resolve; one shared failure can affect multiple installations. It is separate from a Reporter's Support request.
+_Avoid_: Ticket, when the distinction from a Support request matters
+
 **Visibility scope**:
 An explicit authorization boundary defining which Support requests a Reporter may see. By default, a Reporter sees only requests they submitted; an explicitly granted Support manager scope may cover approved installations. It is independent of WordPress role names and GitHub labels.
 
