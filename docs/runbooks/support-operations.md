@@ -2,10 +2,11 @@
 
 Design/runbook for [#20](https://github.com/Quick-Release/gq-support/issues/20),
 subject to the [operations design](../support-operations-design.md) and its
-production readiness gates. This document does not authorize deployment. Incident
-commands, notification routing and update adapters are planned capabilities until
-their implementation evidence is recorded; do not infer a runnable command from
-a procedural instruction below.
+production readiness gates. This document does not authorize deployment. Notification
+routing and update adapters are planned capabilities until their implementation
+evidence is recorded; do not infer a runnable command from a procedural instruction
+below. Incident claim/resolve and the incident CLI are implemented (#135), as
+described in the [Worker README](../../worker/README.md#operational-incidents).
 
 ## Common procedure
 
@@ -13,8 +14,8 @@ Any authenticated GETQUICK team member can claim an incident. Recovery mutations
 require separately authorized Operator credentials and an audit. Unclaimed
 incidents stay visible with no automatic escalation or claim-time reminder.
 
-1. Claim the durable incident in Banquinha, or use its audited CLI fallback when
-   implemented. Identify affected component, stage and Slots from trusted records.
+1. Claim the durable incident in Banquinha, or use its audited CLI fallback
+   (`pnpm operator incident-claim`). Identify affected component, stage and Slots from trusted records.
    If storage itself is unavailable, preserve minimal independent evidence and
    reconcile ownership/history when it returns; neither CLI nor dashboard can
    promise writes through a database outage.

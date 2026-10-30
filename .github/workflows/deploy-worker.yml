@@ -54,6 +54,9 @@ jobs:
           GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
           GITHUB_WEBHOOK_PREVIOUS_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET }}
           GITHUB_WEBHOOK_DIAGNOSTICS: ${{ inputs.stage == 'staging' && vars.SUPPORT_GITHUB_WEBHOOK_DIAGNOSTICS == 'true' && 'true' || 'false' }}
+          # Public dashboard keys and opaque staff IDs; unset leaves the operations API closed.
+          OPERATIONS_API_KEYS: ${{ vars.SUPPORT_OPERATIONS_API_KEYS }}
+          OPERATIONS_STAFF: ${{ vars.SUPPORT_OPERATIONS_STAFF }}
         run: |
           set -euo pipefail
           node scripts/verify-github-app.ts "$DEPLOY_STAGE"

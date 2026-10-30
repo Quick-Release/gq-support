@@ -2,7 +2,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubReader, type GitHubIssue, type VerifyRepositoryError } from "./github-gateway.ts";
-import type { RepositoryMapping } from "./repository-mappings.ts";
+import { slotsOf, type RepositoryMapping } from "./repository-mappings.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
 import type { QueryDatabase } from "./storage.ts";
 
@@ -229,7 +229,8 @@ export const sweepStatus = (options: StatusSweepOptions): Effect.Effect<void, Sw
     const incomplete = (error: VerifyRepositoryError, installationId = target.installationId) => Effect.gen(function* () {
       const reason = unsafeReason(error);
       // Historical access loss does not prove the current approved mapping unsafe.
-      if (reason && installationId === target.installationId) yield* suspendRepository(options.db, target.repositoryId, reason, now());
+      if (reason && installationId === target.installationId) yield* suspendRepository(options.db, target.repositoryId, reason, now(),
+        slotsOf(options.mappings, target.repositoryId));
       if (error._tag === "RateLimited") {
         cooling.add(installationId);
         yield* io(() => store.cooldown(installationId, error.until));

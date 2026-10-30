@@ -19,6 +19,7 @@ import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Wo
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
 import { restoreGate } from "./ledger.ts";
+import { operationsAccess } from "./operations-api.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
@@ -44,6 +45,10 @@ export default Cloudflare.Worker(
     // Only this stage's reviewed mappings: the slug is pinned per stage at deployment.
     const repositoryMappings = mappingsForSlug(slug);
     const webhookDiagnostics = yield* Config.Boolean("GITHUB_WEBHOOK_DIAGNOSTICS").pipe(Config.withDefault(false));
+    // The operations API's dashboard keys and staff roster (src/operations-api.ts). Unset or malformed closes it.
+    const operations = operationsAccess(
+      yield* Config.String("OPERATIONS_API_KEYS").pipe(Config.withDefault("")),
+      yield* Config.String("OPERATIONS_STAFF").pipe(Config.withDefault("")));
     // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
     const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
       Config.map(Option.filter((value) => value >= minimum)));
@@ -115,7 +120,7 @@ export default Cloudflare.Worker(
               })));
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
-          }, { digestKey: key, ledger });
+          }, { digestKey: key, ledger }, operations);
         // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
         if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
           response.status === 202) {

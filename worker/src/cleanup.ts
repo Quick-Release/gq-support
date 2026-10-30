@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubTarget } from "./github-gateway.ts";
 import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress } from "./support-issues.ts";
-import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
+import { mappingFor, slotsOf, type RepositoryMapping } from "./repository-mappings.ts";
 import { imageOf, ledgerStore, mirrorToLedger, removal, type LedgerEntry } from "./ledger.ts";
 import { DAY, MUTATION_INTERVAL_MS } from "./delivery-store.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
@@ -492,7 +492,7 @@ const redactRecord = (record: CleanupRecord, target: GitHubTarget, options: Clea
   const error = result.failure;
   const reason = unsafeReason(error);
   if (reason) {
-    yield* suspendRepository(options.db, target.repositoryId, reason, now()).pipe(Effect.ignore);
+    yield* suspendRepository(options.db, target.repositoryId, reason, now(), slotsOf(options.mappings, target.repositoryId)).pipe(Effect.ignore);
     return { state: "unresolved", next: null, error: error._tag } satisfies Transition;
   }
   // A redaction can be repeated; an unauthorized one was never sent.

@@ -357,6 +357,81 @@ The delivery load test runs 24 Slots, including a busy Slot, across three provid
 installations against real local D1 with four competing sweeps and fake GitHub. It checks fairness beyond the frontier
 bound and shared pacing. Local results do not measure production provider latency.
 
+## Operational incidents
+
+Operational incidents (#135, `src/incidents.ts`, migration 0020) are durable
+service records the GETQUICK team views, claims and resolves. One open incident
+per category and cause groups every observation of a shared failure and lists
+each affected Slot; a different cause is a separate incident. The first producer
+is the [suspended mapping](#suspended-mappings) path: every unsafe repository
+observation records the `repository_suspended` incident for that repository,
+listing every Slot mapped to it, in the same D1 batch as the suspension. Further
+signals are routed by later #134 tickets.
+
+- Incidents stay unassigned until someone claims one. There are no designated
+  responders, claim timeouts, reminders or automatic escalation.
+- A claim is atomic: its audit row and the claim depend on each other in one
+  batch, so exactly one concurrent claimant wins. Repeating your own claim succeeds.
+- Only the claimant can resolve (`recovered`), and only once trusted records show
+  the cause recovered, checked in the same conditional write. For a suspension
+  that means the Operator's audited `unsuspend` has lifted it. A recurrence after
+  resolution opens a new incident.
+- `incident_audit` records the opaque actor, channel (`service`, `api` or
+  `operator`), action, previous/new state and time. Incidents hold no Submitted
+  text, Reporter identity, credential, URL or payload; projections omit the cause
+  subject and the audit trail.
+- Unresolved incidents are kept. A resolved incident disappears from every
+  projection 90 days after resolution; the minute tick then deletes it with its
+  Slots and audit, in bounded batches.
+
+### Operations API
+
+`/v1/operations/*` is the one authenticated boundary for a staff dashboard such
+as Banquinha (`src/operations-api.ts`):
+
+- `GET /v1/operations/incidents` and `GET /v1/operations/incidents/{id}`
+- `POST /v1/operations/incidents/{id}/claim` (empty body): `200`, or `409`
+  `incident_claimed` / `incident_resolved`
+- `POST /v1/operations/incidents/{id}/resolve` with `{"resolution":"recovered"}`:
+  `200`, or `409` `incident_not_claimed` / `recovery_not_verified` / `incident_resolved`
+
+The dashboard authenticates its team member itself, then signs every request
+with its registered Ed25519 key over this canonical string, newline-separated
+without a trailing newline: `gq-support-operations-v1`, method, path/query,
+`GQ-Operations-Key-Id`, `GQ-Operations-Actor`, `GQ-Operations-Timestamp` (epoch
+seconds, 5 minutes of skew), `GQ-Operations-Request-Id` (16–128 of
+`[A-Za-z0-9-]`) and the RFC 9530 SHA-256 `Content-Digest`. The signature goes in
+`GQ-Operations-Signature`. Request IDs are single-use for 10 minutes. The Worker
+then requires the signed actor in its own staff roster. A bad or unknown
+signature is `401 operations_unauthorized`; a valid signature for an actor
+outside the roster is `403 operations_forbidden`. Installation credentials,
+Discord identities and Discord membership are never accepted. No route performs
+recovery: that remains the independently authorized Operator CLI.
+
+The stage's access is explicit deployment configuration, from the GitHub
+Actions variables `SUPPORT_OPERATIONS_API_KEYS` (a JSON object of key ID to
+base64 raw public key) and `SUPPORT_OPERATIONS_STAFF` (comma-separated opaque
+actor IDs, `[A-Za-z0-9_-]{1,64}`). Neither is secret. Unset or malformed
+values close the API. No Banquinha key or staff roster is registered yet; the
+roster changes only by redeploying.
+
+### Incident CLI fallback
+
+When the dashboard is unavailable but D1 is healthy, an Operator can inspect
+and claim incidents with the usual account and database flags:
+
+```sh
+pnpm operator incidents --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator incident <incident-id> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator incident-claim <incident-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+```
+
+`incident` adds the restricted audit trail. `incident-claim` follows the API's
+claim rule, recorded with channel `operator`. Over Wrangler the CLI runs each
+statement separately, so a claim that loses a race can leave an audit row its
+incident does not reference; the incident's claimant is authoritative.
+Resolution goes through the operations API. Neither path can write while D1 is down.
+
 ## Support status refresh
 
 The minute tick runs delivery/reconciliation first, then status refreshes, then

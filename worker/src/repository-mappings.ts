@@ -36,3 +36,7 @@ export const mappingsForSlug = (slug: string): readonly RepositoryMapping[] =>
 
 export const mappingFor = (mappings: readonly RepositoryMapping[], slot: string) =>
   mappings.find((mapping) => mapping.slot === slot);
+
+/** Every Slot mapped to the repository, which a repository failure affects together. */
+export const slotsOf = (mappings: readonly RepositoryMapping[], repositoryId: number) =>
+  mappings.filter((mapping) => mapping.repositoryId === repositoryId).map((mapping) => mapping.slot);

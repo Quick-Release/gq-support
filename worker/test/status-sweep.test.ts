@@ -458,7 +458,7 @@ it("refuses an Operator lift if renewed unsafe evidence arrives during the passi
   github.next(() => undefined);
   github.next(async () => {
     // Another sweep observes loss of access while this one reads a stale healthy response.
-    await Effect.runPromise(suspendRepository(stage.databases.shared, 42, "no_access", now));
+    await Effect.runPromise(suspendRepository(stage.databases.shared, 42, "no_access", now, []));
     return Response.json({ id: 42, full_name: "Quick-Release/repo-42", private: true, archived: false });
   });
   await tick();

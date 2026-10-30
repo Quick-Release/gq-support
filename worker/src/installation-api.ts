@@ -27,7 +27,7 @@ const binding = (key: InstallationKey, mapping: RepositoryMapping) => ({
 });
 
 // Streaming limit also bounds bodies without Content-Length.
-const readBody = async (request: Request, limit: number): Promise<string | null> => {
+export const readBody = async (request: Request, limit: number): Promise<string | null> => {
   if (!request.body) return "";
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];

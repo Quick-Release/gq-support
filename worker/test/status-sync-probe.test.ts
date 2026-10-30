@@ -132,7 +132,7 @@ it("reports when the Reporter's installation first sees a suspended mapping", as
   const sleep = probe.sleep;
   let polls = 0;
   const result = await runProbe("watch-suspension", { timeoutMinutes: 5 }, { ...probe, sleep: async (milliseconds) => {
-    if (++polls === 3) await Effect.runPromise(suspendRepository(stage.databases.shared, SANDBOX, "public", now).pipe(Effect.provide(Logger.layer([]))));
+    if (++polls === 3) await Effect.runPromise(suspendRepository(stage.databases.shared, SANDBOX, "public", now, []).pipe(Effect.provide(Logger.layer([]))));
     await sleep(milliseconds);
   } });
   expect(result).toEqual({ suspended: true, afterMs: 30_000, createRefused: true });

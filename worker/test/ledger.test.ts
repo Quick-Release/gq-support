@@ -96,7 +96,7 @@ it("a recorded restore replays erasures and suspensions and makes restored work 
   advance(10_000);
   await cleanup();
   expect(github.issues[0]!.body).not.toContain("Private report text");
-  await Effect.runPromise(suspendRepository(main(), 42, "public", now));
+  await Effect.runPromise(suspendRepository(main(), 42, "public", now, []));
   await cleanup(); // mirrors the suspension
   await restore(main(), image);
   const gate = restoreGate();
@@ -159,7 +159,7 @@ it("Operator erasure and offboarding refuse to run without the ledger", async ()
 });
 
 it("an Operator's lift is recorded, so a later replay does not suspend the repository again", async () => {
-  await Effect.runPromise(suspendRepository(main(), 42, "public", now));
+  await Effect.runPromise(suspendRepository(main(), 42, "public", now, []));
   await cleanup();
   expect((await entry("suspension", "42"))!.payload).toContain("public");
   advance(1000);

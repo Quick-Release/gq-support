@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubIssue } from "./github-gateway.ts";
 import { reporterReference, supportIssues, type ReconciliationProgress, type SupportIssueIntent } from "./support-issues.ts";
-import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
+import { mappingFor, slotsOf, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256 } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { DAY, DRAIN_MS, EXECUTION_MS, deliveryStore, type DeliveryRow } from "./delivery-store.ts";
@@ -52,7 +52,7 @@ const approved = (row: DeliveryRow, mappings: readonly RepositoryMapping[]) => {
 /** Before the attempt is recorded, so a storage failure cannot skip it. A failed write alerts; the next unsafe check retries it. */
 const suspendIfUnsafe = (options: DeliveryOptions, row: DeliveryRow, error: { readonly _tag: string; readonly reason?: string }, now: number) => {
   const reason = unsafeReason(error);
-  return reason ? suspendRepository(options.db, row.repository_id, reason, now).pipe(Effect.asVoid,
+  return reason ? suspendRepository(options.db, row.repository_id, reason, now, slotsOf(options.mappings, row.repository_id)).pipe(Effect.asVoid,
     Effect.catch(() => Effect.logError("Repository suspension not recorded").pipe(
       Effect.annotateLogs({ repository: row.repository_id, reason, alert: true })))) : Effect.void;
 };

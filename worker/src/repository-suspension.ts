@@ -4,6 +4,7 @@ import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
 import { ledgerStore, removal } from "./ledger.ts";
 import { mappingFor } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
+import { observeIncident } from "./incidents.ts";
 
 /**
  * Suspended mappings (CONTEXT.md). A suspension is per repository, so every
@@ -32,9 +33,12 @@ export const unsafeReason = (error: { readonly _tag: string; readonly reason?: s
 
 /**
  * Suspends the repository and alerts the Operator. Idempotent: an existing
- * suspension keeps its first cause and time, and alerts only once.
+ * suspension keeps its first cause and time, and alerts only once. Each unsafe
+ * observation also records the repository's Operational incident, listing every
+ * Slot mapped to it, in the same batch.
  */
-export const suspendRepository = (db: QueryDatabase, repositoryId: number, reason: SuspensionReason, now: number) => Effect.gen(function* () {
+export const suspendRepository = (db: QueryDatabase, repositoryId: number, reason: SuspensionReason, now: number,
+  slots: readonly string[]) => Effect.gen(function* () {
   const suspended = yield* Effect.tryPromise({
     try: async () => {
       const [changed] = await db.batch([
@@ -45,6 +49,7 @@ export const suspendRepository = (db: QueryDatabase, repositoryId: number, reaso
         // including when the first suspension's cause and time are retained.
         db.prepare(`UPDATE repository_state SET verified_safe_at = NULL, unsafe_observed_at = MAX(COALESCE(unsafe_observed_at, 0), ?)
           WHERE repository_id = ?`).bind(now, repositoryId),
+        ...observeIncident(db, { category: "repository_suspended", subject: String(repositoryId), slots, now }),
       ]);
       return changed!.results.length > 0;
     },
