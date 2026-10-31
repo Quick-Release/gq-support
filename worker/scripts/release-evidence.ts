@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { REPOSITORY, type ReleaseEvidence, type WorkflowRun } from "../src/release-gates.ts";
+import type { ReadinessReads } from "../src/readiness.ts";
 
 /** Runs `gh` with arguments, never a shell; null when it fails, times out or answers too much. */
 export type Gh = (args: readonly string[]) => string | null;
@@ -58,5 +59,32 @@ export const githubEvidence = (gh: Gh = ghCommand(), scratch = tmpdir()): Releas
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  },
+});
+
+const WORKFLOW = /^\.github\/workflows\/([a-z0-9-]{1,64}\.yml)$/;
+
+/** GitHub reads for the readiness check, beyond the release-gate run and artifact records. */
+export const githubReadiness = (gh: Gh = ghCommand()): ReadinessReads => ({
+  ...githubEvidence(gh),
+  async runs(workflow) {
+    const file = WORKFLOW.exec(workflow)?.[1];
+    if (!file) return null;
+    const listed = parse(gh(["api", `repos/${REPOSITORY}/actions/workflows/${file}/runs?status=completed&per_page=100`])) as { workflow_runs?: unknown } | null;
+    if (!Array.isArray(listed?.workflow_runs)) return null;
+    return (listed.workflow_runs as Record<string, unknown>[]).map((run) => ({ id: Number(run.id), name: String(run.display_title ?? ""),
+      event: String(run.event ?? ""), conclusion: typeof run.conclusion === "string" ? run.conclusion : null, created_at: String(run.created_at ?? "") }));
+  },
+  async issue(number) {
+    const issue = parse(gh(["api", `repos/${REPOSITORY}/issues/${number}`])) as Record<string, unknown> | null;
+    return issue && typeof issue.state === "string" ? { state: issue.state, state_reason: typeof issue.state_reason === "string" ? issue.state_reason : null } : null;
+  },
+  async comment(id) {
+    if (!/^[1-9][0-9]{0,19}$/.test(id)) return null;
+    const comment = parse(gh(["api", `repos/${REPOSITORY}/issues/comments/${id}`])) as Record<string, unknown> | null;
+    const user = comment?.user as { login?: unknown; type?: unknown } | undefined;
+    if (!comment || typeof user?.login !== "string" || typeof comment.body !== "string") return null;
+    return { repository: REPOSITORY, author: user.login, author_type: String(user.type ?? ""), via_app: comment.performed_via_github_app != null,
+      body: comment.body, created_at: String(comment.created_at ?? "") };
   },
 });

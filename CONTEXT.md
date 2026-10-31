@@ -125,6 +125,14 @@ _Avoid_: Latest version, when an unapproved newer candidate exists
 The package, compatibility, security, privacy, performance and staging checks a Release candidate must pass, read from GitHub's own workflow run records at its exact release and Worker commits, never typed in. Infrastructure and recovery are checked again at launch.
 _Avoid_: Sign-off, when only a person's statement is meant
 
+**Production readiness**:
+The state, checked for one exact commit, the prod stage and the Tipme account, in which every operations gate has fresh live evidence and a named reviewer has signed off that evidence before a Client is onboarded to production. Local or synthetic results, plans and checklists never establish it.
+_Avoid_: Ready, launched, when only tests or a deployment passed
+
+**Readiness sign-off**:
+A named, reviewed human's own GitHub comment quoting the digest of the exact readiness evidence they reviewed. It is never a typed field, a plan digest or a record made by an agent.
+_Avoid_: Approval, when a Release candidate's approval is meant
+
 **Fleet launch**:
 The single dispatch of an Approved release to every eligible Slot together, recorded at its actual start once its gates, the compatible Worker's gated deployment, the live migration state and a compatible recovery package check out. It starts the Compatibility window; it is not any installation's update.
 _Avoid_: Rollout complete, deployment, when completion is meant

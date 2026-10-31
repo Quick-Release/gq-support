@@ -224,6 +224,11 @@ jobs:
           pnpm deploy-gate > deploy-gate.out 2>&1 || status=$?
           cat deploy-gate.out
           [ "$status" = 2 ] && grep -q '^Usage: deploy-gate' deploy-gate.out
+          # The readiness check loads the same way and refuses a bare invocation, reading nothing.
+          status=0
+          pnpm readiness > readiness.out 2>&1 || status=$?
+          cat readiness.out
+          [ "$status" = 1 ] && grep -q '^Usage: pnpm readiness' readiness.out
       - run: pnpm typecheck
       - run: pnpm test
 

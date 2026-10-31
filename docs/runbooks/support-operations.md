@@ -17,7 +17,8 @@ privacy/ledger failures open grouped incidents from durable records, and
 baseline or tuned threshold yet. The independent checker is implemented (#139, [below](#independent-outage-checks)),
 but no stage has it enabled until its setup is evidenced.
 Staging/prod deployments go through the [deployment plan gate](#deployment-plan-gate) (#140);
-no credentialed production plan has been recorded yet.
+no credentialed production plan has been recorded yet. Production onboarding is
+gated by the [production readiness check](production-readiness.md) (#148).
 
 ## Common procedure
 
@@ -626,6 +627,10 @@ an evidence report: each drill's local result, and its staging rehearsal as
 not a sign-off; the report says so (`staging_evidence: false`, `signed_off: false`).
 `--stage staging` runs nothing and exits 2: no staging fault injection, Time
 Travel restore or live provider change is authorized or configured from it.
+`pnpm readiness --drill-report <report.json>` reports that local result
+separately and requires each drill below, plus the broken-webhook, Worker/D1,
+bad-update, release-window, local fail-safe, Discord and Banquinha drills, as
+staging evidence at the same commit ([production readiness](production-readiness.md#gates-and-evidence-catalog)).
 
 | Drill | Required proof |
 |---|---|

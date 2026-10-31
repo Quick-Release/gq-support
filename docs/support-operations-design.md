@@ -338,6 +338,12 @@ this design and closed planning tickets are not evidence of implementation.
 - All drills in the [operations runbook](runbooks/support-operations.md), including
   the broken-webhook notification and independent contact drill for each Client.
 
+The [production readiness check](runbooks/production-readiness.md) (#148,
+`pnpm readiness`) evaluates these rows for an exact commit, stage and account and
+names every blocker; only its `--trusted` mode is authoritative, and it is not
+ready without a named reviewer's sign-off of the evidence digest. As of
+2026-10-31 it reports not ready: none of the evidence above exists yet.
+
 Banquinha is a separate repository integration and requires a dedicated session
 and worktree before work there. Exact channel IDs, hosting/deployment adapters,
 independent runner location and credentials are implementation inputs to collect

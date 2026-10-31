@@ -50,7 +50,7 @@ const RUN_ID = /^[1-9][0-9]{0,19}$/;
 const COMMIT = /^[a-f0-9]{40}$/;
 
 /** A gate's required run shape: its workflow and the jobs that must all have passed. */
-interface RunRule { readonly workflow: string; readonly jobs: readonly RegExp[]; readonly branch?: string; readonly event?: string }
+export interface RunRule { readonly workflow: string; readonly jobs: readonly RegExp[]; readonly branch?: string; readonly event?: string }
 const RELEASE_RUN = ".github/workflows/release-plugin.yml";
 const CI_RUN = ".github/workflows/ci.yml";
 const DEPLOY_RUN = ".github/workflows/deploy-worker.yml";
@@ -68,7 +68,7 @@ const INFRASTRUCTURE: RunRule = { workflow: DEPLOY_RUN, branch: "main", event: "
 export interface RunEvidence { readonly run: number; readonly workflow: string; readonly commit: string; readonly url: string; readonly jobs: readonly string[] }
 
 /** Why a run does not satisfy a rule, or its evidence. */
-const checkRun = (run: WorkflowRun | null, rule: RunRule, commit: string): RunEvidence | string => {
+export const checkRun = (run: WorkflowRun | null, rule: RunRule, commit: string): RunEvidence | string => {
   if (!run) return "no such workflow run";
   if (run.repository !== REPOSITORY || run.path !== rule.workflow) return `not a ${rule.workflow} run of ${REPOSITORY}`;
   if (run.head_sha !== commit) return `ran at ${run.head_sha}, not ${commit}`;

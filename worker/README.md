@@ -156,6 +156,17 @@ Deployment order: apply ledger migration 0004 and main migration 0031 before a
 Worker or Operator checkout of this version runs; the inventory, cleanup pass and
 `offboard` read their new columns and tables.
 
+### Production readiness
+
+`pnpm readiness --stage prod [--evidence <file>] [--drill-report <file>] [--trusted] [--out <file>]`
+(`src/readiness.ts`) checks the evidence each operations gate needs before any
+Client production onboarding and exits `0` only when ready, `2` otherwise. It
+reads this checkout's reviewed configuration and the named files; `--trusted`
+also reads GitHub's own run, artifact, issue and comment records read-only with
+the Operator's `gh` login, and only that mode is authoritative. Evidence format,
+gates and the human sign-off are in the
+[production readiness runbook](../docs/runbooks/production-readiness.md).
+
 ### Maintenance boundary and restores
 
 The maintenance boundary (`src/maintenance.ts`, ledger migration 0003) is held in
