@@ -1,6 +1,12 @@
 name: Rebuild Composer registry
 
 on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Existing published Composer package tag (for example, v0.1.11)"
+        required: true
+        type: string
   push:
     tags:
       - "v*"
@@ -19,17 +25,20 @@ permissions: {}
 jobs:
   dispatch:
     name: Notify private Composer registry
-    if: github.event_name == 'push' && github.ref_type == 'tag' && !github.event.deleted
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_type == 'tag' && !github.event.deleted)
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch plugin_updated
         env:
           GH_TOKEN: ${{ secrets.REGISTRY_DISPATCH_TOKEN }}
           RELEASE_TAG: ${{ inputs.ref || github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           : "${GH_TOKEN:?REGISTRY_DISPATCH_TOKEN is required}"
           [[ "$RELEASE_TAG" == v* ]] || { echo "Expected a v* package tag" >&2; exit 1; }
+          # A rebuild promotes no new package: it only announces an already published release.
+          [ "$(gh release view "$RELEASE_TAG" --repo "$REPOSITORY" --json isDraft --jq .isDraft)" = false ]
 
           gh api --method POST repos/Quick-Release/getquick-registry/dispatches \
             -H "Accept: application/vnd.github+json" \
