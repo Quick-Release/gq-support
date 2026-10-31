@@ -586,6 +586,34 @@ incident records the outage, and this phase's `webhook_failed` incident, opened
 once storage returns, records the deliveries it missed and the status repair
 they need. Each is one grouped incident, never one per tick.
 
+### Phase bounds and a distant D1
+
+Every roundtrip a Worker makes to D1 costs wall time inside its phase's bound
+(cleanup 5 s, signals 2 s). On the one-Slot staging stage, one UTC hour
+(10:00 on 2026-10-31) measured 38 signal timeouts against 17 completions, and 8
+cleanup timeouts against 47. The minute tick against real local D1, with a fixed
+cost per roundtrip, reproduces both deterministically (`test/scheduler.test.ts`).
+At 130 ms per roundtrip, with GitHub at 300 ms, the signal phase's 15 sequential
+reads ran past 2 s, so the last three rules started after the bound. At 170 ms,
+a cleanup pass of 24 sequential roundtrips, or 30 with the daily full mirror,
+ran past 5 s.
+
+Reads that do not depend on each other therefore go to D1 together: the eleven
+rules' reads and the retention expiry, each kind's mirror reads, and the paired
+reads inside retention, unmapped-Slot and compaction steps. Writes keep their
+order. Incident writes go one at a time, one cause of each rule before any
+rule's next. Cleanup steps keep their privacy order, compaction records the
+ledger before it deletes from the main database, and the mirror marks itself done
+only after recording everything it read. Cleanup and signal work cut off at their
+bounds start no further D1 statement or batch, so a cut-off mirror runs again in full next
+minute. D1 cannot withdraw a statement or batch already submitted, so that one
+still completes after the bound. Each step stays safe to stop and repeat.
+
+That the staging timeouts come from the Worker running far from its D1 is an
+inference. No live per-roundtrip timing has been measured. After deployment,
+confirm in `pnpm operator health` that `scheduler` shows `signals_timed_out` and
+`cleanup_timed_out` stopping.
+
 The 15-minute ledger rule is provisional, like any numerical rule not inherited
 from the [delivery design](../docs/support-delivery-design.md): tune it from
 measured baselines. A write failure in this phase never rolls back a suspension,

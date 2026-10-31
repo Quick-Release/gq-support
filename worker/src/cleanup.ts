@@ -260,10 +260,10 @@ const cleanupStore = (db: QueryDatabase) => {
      */
     async unmapped(now: number, mapped: readonly string[]) {
       // One read per table: D1 bounds the terms of a compound SELECT.
-      const offboarded = (await db.prepare("SELECT slot FROM offboarding").bind().all<{ slot: string }>()).results.map((row) => row.slot);
-      const found = [...new Set((await Promise.all([...OFFBOARDED_SLOT_ROWS, "central_deployment"].map(async (table) =>
-        (await db.prepare(`SELECT DISTINCT slot FROM ${table}`).bind().all<{ slot: string }>()).results.map((row) => row.slot)))).flat())]
-        .filter((slot) => !mapped.includes(slot) && !offboarded.includes(slot));
+      const slots = async (sql: string) => (await db.prepare(sql).bind().all<{ slot: string }>()).results.map((row) => row.slot);
+      const [offboarded, present] = await Promise.all([slots("SELECT slot FROM offboarding"),
+        Promise.all([...OFFBOARDED_SLOT_ROWS, "central_deployment"].map((table) => slots(`SELECT DISTINCT slot FROM ${table}`)))]);
+      const found = [...new Set(present.flat())].filter((slot) => !mapped.includes(slot) && !offboarded.includes(slot));
       const due = `slot IN (SELECT slot FROM slot_unmapped WHERE first_seen_at <= ?)`;
       await run([
         ["DELETE FROM slot_unmapped WHERE slot NOT IN (SELECT value FROM json_each(?))", [JSON.stringify(found)]],
@@ -284,8 +284,11 @@ const cleanupStore = (db: QueryDatabase) => {
         WHERE ${age} AND ${delivered} AND r.erased_at IS NULL AND (i.owner IS NULL OR i.lease_expires_at <= ?2)
           AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.request_id = r.id) LIMIT 100`)
         .bind(now - RETENTION_MS, now).all<{ id: string; slot: string }>();
-      await queue("retention", (await expired("r.created_at <= ?1", "i.state != 'delivered'")).results, now);
-      await queue("retention", (await expired("r.status = 'closed' AND r.status_observed_at <= ?1", "i.state = 'delivered'")).results, now);
+      // Disjoint by delivery state, so both reads go together.
+      const [undelivered, delivered] = await Promise.all([expired("r.created_at <= ?1", "i.state != 'delivered'"),
+        expired("r.status = 'closed' AND r.status_observed_at <= ?1", "i.state = 'delivered'")]);
+      await queue("retention", undelivered.results, now);
+      await queue("retention", delivered.results, now);
     },
     /** Queued requests whose last authorized execution has drained. Suppression comes first, except for retention. */
     async drained(now: number) {
@@ -382,9 +385,9 @@ const cleanupStore = (db: QueryDatabase) => {
         AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.erasure_id = erasure.id AND NOT (${expiredAs("c")}))`;
       if (ledger) {
         // Removals are recorded first: a lost main delete is mirrored back in, a lost ledger write is not.
-        const records = (await db.prepare(`SELECT request_id, purpose FROM support_cleanup WHERE ${expired}`).bind(cutoff)
-          .all<{ request_id: string; purpose: string }>()).results;
-        const erasures = (await db.prepare(`SELECT id FROM erasure WHERE ${finished}`).bind(cutoff).all<{ id: string }>()).results;
+        const [{ results: records }, { results: erasures }] = await Promise.all([
+          db.prepare(`SELECT request_id, purpose FROM support_cleanup WHERE ${expired}`).bind(cutoff).all<{ request_id: string; purpose: string }>(),
+          db.prepare(`SELECT id FROM erasure WHERE ${finished}`).bind(cutoff).all<{ id: string }>()]);
         await ledgerStore(ledger).record([
           ...records.map((record) => removal("cleanup", record.request_id)),
           ...records.filter((record) => record.purpose === "erasure").map((record) => removal("suppression", `request:${record.request_id}`)),
