@@ -401,7 +401,7 @@ const cleanupStore = (db: QueryDatabase) => {
           ...records.filter((record) => record.purpose === "erasure").map((record) => removal("suppression", `request:${record.request_id}`)),
           ...erasures.map((erasure) => removal("erasure", erasure.id)),
         ], now);
-        // Only what was recorded may go; a record expiring since goes next pass, after its removal is recorded.
+        // No eligible rows were observed; skip the empty delete batch and recheck next pass.
         if (records.length === 0 && erasures.length === 0) return;
       }
       await run([
