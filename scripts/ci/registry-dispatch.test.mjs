@@ -35,12 +35,12 @@ test('the dispatch shell refuses missing or draft releases before any registry w
   const dir = mkdtempSync(join(tmpdir(), 'registry-dispatch-'));
   try {
     const marker = join(dir, 'dispatched');
-    writeFileSync(join(dir, 'gh'), '#!/bin/sh\nif [ "$1" = release ]; then\n  printf "%s" "$DRAFT"\n  exit "$LOOKUP_EXIT"\nfi\n: > "$MARKER"\n');
+    writeFileSync(join(dir, 'gh'), '#!/bin/sh\nif [ "$1" = release ]; then\n  [ "$GH_TOKEN" = synthetic-source ] || exit 88\n  printf "%s" "$DRAFT"\n  exit "$LOOKUP_EXIT"\nfi\n[ "$GH_TOKEN" = synthetic-registry ] || exit 89\n: > "$MARKER"\n');
     chmodSync(join(dir, 'gh'), 0o755);
     const script = registry.match(/ {8}run: \|\n([\s\S]*)/)[1].replace(/^ {10}/gm, '');
     for (const [draft, lookupExit, expected] of [['true', '0', false], ['', '1', false], ['false', '0', true]]) {
       const result = spawnSync('/bin/bash', ['-c', script], { env: {
-        PATH: `${dir}:/usr/bin:/bin`, GH_TOKEN: 'synthetic', RELEASE_TAG: 'v0.1.11',
+        PATH: `${dir}:/usr/bin:/bin`, GH_TOKEN: 'synthetic-registry', PUBLISH_READ_TOKEN: 'synthetic-source', RELEASE_TAG: 'v0.1.11',
         REPOSITORY: 'fixture/support', DRAFT: draft, LOOKUP_EXIT: lookupExit, MARKER: marker,
       } });
       assert.equal(result.status === 0, expected);
