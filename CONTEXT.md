@@ -109,6 +109,17 @@ _Avoid_: Ticket, when the distinction from a Support request matters
 A scheduled check that runs outside the support service and observes its Worker, databases, GitHub, Discord and dashboard separately, so a failed component need not report its own outage. Its observations become Operational incidents only once the service can record them; it has no staff, Operator or installation authority.
 _Avoid_: Monitor, health check, when the service's own measured health is meant
 
+**Release candidate**:
+A published plugin package recorded from its verified release artifacts: version, package hash and provenance. It is not supported merely by existing.
+_Avoid_: Release, when approval has not been recorded
+
+**Approved release**:
+The one plugin release an Operator explicitly approved for production, as an immutable record with its package, Worker commit, contract and schema range, previous approved release and recorded fleet dispatch. A verified earlier package re-approved after a bad release is a temporary recovery release.
+_Avoid_: Latest version, when an unapproved newer candidate exists
+
+**Compatibility window**:
+The up to 24 hours from an approved release's recorded fleet dispatch during which the previous approved release may still start new Support requests. It never affects work the service already accepted.
+
 **Visibility scope**:
 An explicit authorization boundary defining which Support requests a Reporter may see. By default, a Reporter sees only requests they submitted; an explicitly granted Support manager scope may cover approved installations. It is independent of WordPress role names and GitHub labels.
 

@@ -46,9 +46,8 @@ final class GQ_Support_Service_Client {
 			array(
 				'method'              => $method,
 				'headers'             => array(
-					'Accept'                    => 'application/json',
-					'Content-Type'              => 'application/json',
-					'GQ-Support-Plugin-Version' => GQ_SUPPORT_VERSION,
+					'Accept'       => 'application/json',
+					'Content-Type' => 'application/json',
 				) + $signer->headers( $method, $path, $body ),
 				'body'                => '' === $body ? null : $body,
 				'timeout'             => $timeout,

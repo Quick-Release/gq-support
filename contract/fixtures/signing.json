@@ -15,7 +15,8 @@
             },
             "content_digest": "sha-256=:nQ7bZ72jCWo4G6+O2CuT9Gnds/8zG/3Jv0AG2Xwx3GQ=:",
             "canonical": "gq-support-v1\nPOST\n/v1/enroll\n\nf2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\n1790000000\na1b2c3d4-0000-4000-8000-000000000001\nsha-256=:nQ7bZ72jCWo4G6+O2CuT9Gnds/8zG/3Jv0AG2Xwx3GQ=:",
-            "signature": "PjyIjl9EzDxsDzvNWBSf3vIM3t2mLEdoBPV01oMAZdkRpPUV9Ee7PP6S/fFAkqPRGrpNGjv198lzexomEf/kBQ=="
+            "signature": "PjyIjl9EzDxsDzvNWBSf3vIM3t2mLEdoBPV01oMAZdkRpPUV9Ee7PP6S/fFAkqPRGrpNGjv198lzexomEf/kBQ==",
+            "scheme": "gq-support-v1"
         },
         {
             "name": "installation status has an empty body",
@@ -30,7 +31,8 @@
             },
             "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
             "canonical": "gq-support-v1\nGET\n/v1/installation\n0d7a4c1e-2b3f-4a5d-9e8c-7b6a5f4e3d2c\nf2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\n1790000001\na1b2c3d4-0000-4000-8000-000000000002\nsha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
-            "signature": "S/CnmQijQJ64gzRCspKGQVlZsWo5b2619naYjEqHyBLrfTOjugWU2K/IJYk635SzcAj138U8rElKBeHYbnfrBA=="
+            "signature": "S/CnmQijQJ64gzRCspKGQVlZsWo5b2619naYjEqHyBLrfTOjugWU2K/IJYk635SzcAj138U8rElKBeHYbnfrBA==",
+            "scheme": "gq-support-v1"
         },
         {
             "name": "site list signs the whole query string",
@@ -45,7 +47,8 @@
             },
             "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
             "canonical": "gq-support-v1\nGET\n/v1/requests?reporter_subject=9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d&scope=site&per_page=20&cursor=eyJ0IjoxfQ\n0d7a4c1e-2b3f-4a5d-9e8c-7b6a5f4e3d2c\nf2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\n1790000002\na1b2c3d4-0000-4000-8000-000000000003\nsha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
-            "signature": "69GBAMutS2MI2Ad8oP42QEDAT3Ylg26i57tdsHjUjczvDHHfYYCjBhYBbja/7NmYiK/+kDKxApUu0m5o4aX3CA=="
+            "signature": "69GBAMutS2MI2Ad8oP42QEDAT3Ylg26i57tdsHjUjczvDHHfYYCjBhYBbja/7NmYiK/+kDKxApUu0m5o4aX3CA==",
+            "scheme": "gq-support-v1"
         },
         {
             "name": "create signs the exact escaped body",
@@ -60,7 +63,59 @@
             },
             "content_digest": "sha-256=:U+rer/P7/ovU54GDja0FK7ghCgPqwF8e1B7VTtU34as=:",
             "canonical": "gq-support-v1\nPOST\n/v1/requests\n0d7a4c1e-2b3f-4a5d-9e8c-7b6a5f4e3d2c\nf2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\n1790000003\na1b2c3d4-0000-4000-8000-000000000004\nsha-256=:U+rer/P7/ovU54GDja0FK7ghCgPqwF8e1B7VTtU34as=:",
-            "signature": "zXAtH8hb/W6gQlsnn6RoKtRyYVZOi13VfSC9OcHr6RSbEC8kmFEAJad3VJZ/A1FTnTWXSdcu8Inv8+6+V0CzCw=="
+            "signature": "zXAtH8hb/W6gQlsnn6RoKtRyYVZOi13VfSC9OcHr6RSbEC8kmFEAJad3VJZ/A1FTnTWXSdcu8Inv8+6+V0CzCw==",
+            "scheme": "gq-support-v1"
+        },
+        {
+            "name": "enrollment proves possession without a key ID, signing its plugin version",
+            "scheme": "gq-support-v2",
+            "method": "POST",
+            "path": "/v1/enroll",
+            "body": "{\"code\":\"AAAABBBBCCCCDDDDEEEEFFFFGG\",\"installation_id\":\"f2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\",\"origin\":\"https://shop.example\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"wp_environment_type\":\"production\",\"plugin_version\":\"0.1.8\"}",
+            "headers": {
+                "GQ-Support-Key-Id": "",
+                "GQ-Support-Installation-Id": "f2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                "GQ-Support-Plugin-Version": "0.2.0",
+                "GQ-Support-Timestamp": "1790000100",
+                "GQ-Support-Request-Id": "a1b2c3d4-0000-4000-8000-000000000100"
+            },
+            "content_digest": "sha-256=:nQ7bZ72jCWo4G6+O2CuT9Gnds/8zG/3Jv0AG2Xwx3GQ=:",
+            "canonical": "gq-support-v2\nPOST\n/v1/enroll\n\nf2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\n0.2.0\n1790000100\na1b2c3d4-0000-4000-8000-000000000100\nsha-256=:nQ7bZ72jCWo4G6+O2CuT9Gnds/8zG/3Jv0AG2Xwx3GQ=:",
+            "signature": "QUjRjG74NBe+cGylhdEWVORs1+ro/l3Loltp+O2Y8ZQHQsNgkW0ohpEWNor4ZoOl14b94GkEbtIILWpHbSuICg=="
+        },
+        {
+            "name": "installation status has an empty body, signing its plugin version",
+            "scheme": "gq-support-v2",
+            "method": "GET",
+            "path": "/v1/installation",
+            "body": "",
+            "headers": {
+                "GQ-Support-Key-Id": "0d7a4c1e-2b3f-4a5d-9e8c-7b6a5f4e3d2c",
+                "GQ-Support-Installation-Id": "f2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                "GQ-Support-Plugin-Version": "0.2.0",
+                "GQ-Support-Timestamp": "1790000101",
+                "GQ-Support-Request-Id": "a1b2c3d4-0000-4000-8000-000000000101"
+            },
+            "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "canonical": "gq-support-v2\nGET\n/v1/installation\n0d7a4c1e-2b3f-4a5d-9e8c-7b6a5f4e3d2c\nf2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\n0.2.0\n1790000101\na1b2c3d4-0000-4000-8000-000000000101\nsha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "signature": "weu2jehKDJ1N6RVIBZMrex7uxV8sXlVMYgY/QUJI0SjHB17NlP8cOgNP194Oer2ihXqDYr6SB3ymPBck0MljAQ=="
+        },
+        {
+            "name": "create signs the exact escaped body, signing its plugin version",
+            "scheme": "gq-support-v2",
+            "method": "POST",
+            "path": "/v1/requests",
+            "body": "{\"submission_id\":\"3f0c2a4e-6b1d-4c1e-9a55-0d8e3f2b7c11\",\"summary\":\"Caf\\u00e9 checkout\",\"description\":\"Line one\\nLine two \\/ \\ud83d\\ude00\",\"reporter_subject\":\"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d\",\"scope\":\"mine\"}",
+            "headers": {
+                "GQ-Support-Key-Id": "0d7a4c1e-2b3f-4a5d-9e8c-7b6a5f4e3d2c",
+                "GQ-Support-Installation-Id": "f2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                "GQ-Support-Plugin-Version": "0.2.0",
+                "GQ-Support-Timestamp": "1790000102",
+                "GQ-Support-Request-Id": "a1b2c3d4-0000-4000-8000-000000000102"
+            },
+            "content_digest": "sha-256=:U+rer/P7/ovU54GDja0FK7ghCgPqwF8e1B7VTtU34as=:",
+            "canonical": "gq-support-v2\nPOST\n/v1/requests\n0d7a4c1e-2b3f-4a5d-9e8c-7b6a5f4e3d2c\nf2b1c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d\n0.2.0\n1790000102\na1b2c3d4-0000-4000-8000-000000000102\nsha-256=:U+rer/P7/ovU54GDja0FK7ghCgPqwF8e1B7VTtU34as=:",
+            "signature": "p3kXmJbUzQ0g4n3dOpX7m91aIMMn3P9EXuLyy75H1lN6w9WKx2lPOJIB0tRVz6Dt+LlnTnCFUgWRdeZAvXHsCg=="
         }
     ]
 }

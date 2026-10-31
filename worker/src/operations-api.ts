@@ -1,6 +1,7 @@
 import { readBody } from "./installation-api.ts";
 import { claimIncident, findIncident, isResolution, listIncidents, resolveIncident } from "./incidents.ts";
 import { slotInventory, type StageInventory } from "./inventory.ts";
+import type { ReleaseEnforcement } from "./release-policy.ts";
 import { notificationStatus, type Destination } from "./notifications.ts";
 import { operationsHealth } from "./operations-health.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
@@ -56,7 +57,8 @@ const INCIDENT = /^\/v1\/operations\/incidents\/([0-9a-f-]{36})(\/claim|\/resolv
 /** The operations HTTP boundary, shared by the Worker adapter and local D1 integration tests. */
 export const handleOperationsRequest = async (request: Request, db: QueryDatabase, access: OperationsAccess,
   now = Date.now(), notifications: readonly Destination[] = [],
-  { mappings = [], inventory = null }: { mappings?: readonly RepositoryMapping[]; inventory?: StageInventory | null } = {}): Promise<Response> => {
+  { mappings = [], inventory = null, release = null }: { mappings?: readonly RepositoryMapping[]; inventory?: StageInventory | null;
+    release?: ReleaseEnforcement | null } = {}): Promise<Response> => {
   try {
     const url = new URL(request.url);
     const list = request.method === "GET" && url.pathname === "/v1/operations/incidents";
@@ -84,7 +86,7 @@ export const handleOperationsRequest = async (request: Request, db: QueryDatabas
 
     if (list) return json({ incidents: await listIncidents(db, now) });
     if (delivery) return json(await notificationStatus(db, notifications));
-    if (slots) return json(await slotInventory(db, mappings, inventory, now));
+    if (slots) return json(await slotInventory(db, mappings, inventory, now, { release }));
     if (health) return json(await operationsHealth(db, mappings, now));
     const id = match![1]!;
     if (!action) {

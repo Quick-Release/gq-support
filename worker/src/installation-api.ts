@@ -2,12 +2,13 @@ import revocations from "../revocations.json";
 import type { CredentialDatabase } from "./operator.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { readBody } from "./request-body.ts";
-import { sha256, verifySignature } from "./signature.ts";
+import { PLUGIN_VERSION, sha256, verifyInstallation } from "./signature.ts";
 import { createStorageFor, type QueryDatabase } from "./storage.ts";
 import { CREATE_BODY_BYTES, handleExport, handleSupportRequests } from "./support-requests.ts";
 import { handleErasures } from "./erasure-api.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
 import type { AuthRejection } from "./operational-metrics.ts";
+import { releasePolicy, type ReleaseEnforcement, type ReleasePolicy } from "./release-policy.ts";
 
 interface InstallationKey {
   key_id: string;
@@ -30,8 +31,6 @@ const binding = (key: InstallationKey, mapping: RepositoryMapping) => ({
   key_id: key.key_id, environment: mapping.environment, connected_at: new Date(key.enrolled_at).toISOString(),
 });
 
-const PLUGIN_VERSION = /^[0-9][A-Za-z0-9.+_-]{0,63}$/;
-
 const enroll = async (request: Request, body: string, db: CredentialDatabase, mappings: readonly RepositoryMapping[], now: number,
   ledger: QueryDatabase | null): Promise<Response> => {
   let data: Record<string, unknown>;
@@ -47,7 +46,7 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
   } catch { return invalidCode(); }
   const normalized = code.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
   if (!/^[A-Z2-7]{26}$/.test(normalized)) return invalidCode();
-  if (!await verifySignature(request, body, publicKey, now)) return invalidCode();
+  if (!await verifyInstallation(request, body, publicKey, now)) return invalidCode();
   const hash = await sha256(normalized);
   const enrollment = await db.prepare("SELECT slot FROM enrollment_code WHERE code_hash = ?").bind(hash).first<{ slot: string }>();
   const mapping = enrollment && mappingFor(mappings, enrollment.slot);
@@ -92,7 +91,18 @@ export interface InstallationApiOptions {
   readonly digestKey?: CryptoKey | null;
   /** The suppression ledger (src/ledger.ts); erasures are recorded there first. */
   readonly ledger?: QueryDatabase | null;
+  /** The stage's release enforcement (src/release-policy.ts). Unset or null refuses all new intake. */
+  readonly release?: ReleaseEnforcement | null;
 }
+
+/**
+ * New intake the release policy refuses: 426 with the policy WordPress caches
+ * for an unsupported or expired version; 503 when the service's own policy is
+ * missing or malformed, which no plugin update can fix.
+ */
+const refusal = (policy: ReleasePolicy) => () => policy.reason === "unavailable"
+  ? json({ code: "gq_support_not_accepted" }, 503)
+  : json({ code: "gq_support_plugin_outdated", release: policy }, 426);
 
 /** Public HTTP boundary, shared by the Alchemy adapter and local D1 integration tests. */
 export const handleRequest = async (request: Request, db: CredentialDatabase, mappings: readonly RepositoryMapping[],
@@ -142,8 +152,9 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     const key = await db.prepare("SELECT * FROM installation_key WHERE key_id = ? AND revoked_at IS NULL")
       .bind(keyId ?? "").first<InstallationKey>();
     const mapping = key && mappingFor(mappings, key.slot);
-    if (!key || !mapping || recordedRevocation(key.key_id) || request.headers.get("GQ-Support-Installation-Id") !== key.installation_id ||
-      !await verifySignature(request, body, key.public_key, now)) {
+    const verified = key && mapping && !recordedRevocation(key.key_id) && request.headers.get("GQ-Support-Installation-Id") === key.installation_id
+      ? await verifyInstallation(request, body, key.public_key, now) : null;
+    if (!key || !mapping || !verified) {
       options.observe?.({ rejected: "installation_rejected" });
       return rejected();
     }
@@ -171,6 +182,14 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     }
     options.observe?.({ slot: key.slot });
     if (request.method === "DELETE") return json({ revoked: true });
+    const { pluginVersion } = verified;
+    if (pluginVersion !== null) {
+      // Inventory evidence of what the installation signed, at most hourly per version; never authority, never blocking.
+      await db.prepare(`INSERT INTO slot_signed_version (slot, version, observed_at) VALUES (?, ?, ?)
+        ON CONFLICT (slot) DO UPDATE SET version = excluded.version, observed_at = excluded.observed_at
+        WHERE version != excluded.version OR observed_at <= excluded.observed_at - 3600000`).bind(key.slot, pluginVersion, now).run()
+        .catch(() => undefined);
+    }
     const suspended = Boolean(results[1].results[0].suspended_reason);
     // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.
     const storageFor = createStorageFor({ slots: new Map(mappings.map((m) => [m.slot, { client: m.client }])), shared: db, dedicated: {} });
@@ -181,13 +200,18 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     }
     if (exported) return await handleExport(storageFor(key.slot), url, body, now);
     if (requests) {
+      // Only new intake is gated, and only after its accepted-work lookup (src/support-requests.ts).
+      const policy = request.method === "POST" ? await releasePolicy(db, options.release, pluginVersion, now) : null;
       return await handleSupportRequests(request, url, body, storageFor(key.slot),
         { slot: key.slot, installationId: key.installation_id, repositoryId: mapping.repositoryId, suspended,
+          ...(policy?.intake === "closed" ? { refused: refusal(policy) } : {}),
           ...(mapping.githubInstallationId && mapping.clientOriginLabel ? { delivery: { githubInstallationId: mapping.githubInstallationId,
             environment: mapping.environment, clientOriginLabel: mapping.clientOriginLabel, defaultDeveloper: mapping.defaultDeveloper } } : {}),
         }, now);
     }
-    return json({ ...binding(key, mapping), mapping_state: suspended ? "suspended" : "active" });
+    // The policy WordPress caches for its local controls; unknown (null) while storage cannot say.
+    const release = await releasePolicy(db, options.release, pluginVersion, now).catch(() => null);
+    return json({ ...binding(key, mapping), mapping_state: suspended ? "suspended" : "active", release });
   } catch {
     // Neither SQL errors nor request data (including Enrollment codes) enter logs/responses.
     return json({ code: "service_unavailable", message: "Service unavailable." }, 503);

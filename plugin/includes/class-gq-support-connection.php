@@ -108,6 +108,8 @@ final class GQ_Support_Connection {
 		} elseif ( 200 === $result['status'] ) {
 			$outcome = 'suspended' === ( $result['body']['mapping_state'] ?? '' ) ? 'suspended' : 'ok';
 			$fields  = array( 'connection' => 'connected' );
+			// The release policy for this plugin, cached for local controls; never fetched while a page renders.
+			GQ_Support_Release::learn( $result['body']['release'] ?? null );
 			if ( isset( $result['body']['environment'] ) ) {
 				$fields['environment'] = (string) $result['body']['environment'];
 			}

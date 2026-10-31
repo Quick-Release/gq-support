@@ -56,7 +56,7 @@ const deps = (): ProbeDeps => ({
     const request = new Request(input, init);
     expect(new URL(request.url).origin).toBe(STAGING_ORIGIN);
     request.headers.set("CF-Connecting-IP", "192.0.2.1");
-    return handleRequest(request, stage.databases.shared, mappings);
+    return handleRequest(request, stage.databases.shared, mappings, { release: "staged" });
   },
   gh: (args, stdin) => {
     const path = args.find((arg) => arg.startsWith("repos/"))!;

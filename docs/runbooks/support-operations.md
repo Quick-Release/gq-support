@@ -181,6 +181,33 @@ and rehearsed before this procedure is considered executable production recovery
   and privacy/security checks. Recover uncertain receipts/reports before any
   manual replacement. Lost browser memory is not evidence of failed acceptance.
 
+## Approved releases and intake enforcement
+
+Commands are in the [Worker README](../../worker/README.md#approved-releases).
+Record only what reviewed artifacts and run evidence show.
+
+1. Download the release workflow run's `gq-support.zip`, manifest and
+   `provenance.json`. Record the candidate with the commit of the Worker deployed
+   with it, the contract version and schema migration range its checks covered,
+   and `signed` (or `unsigned-legacy` for a package before #141).
+2. After the release gates pass, approve it as `production`, naming the approved
+   release from `release-status`. Deploy the backward-compatible Worker first.
+3. When the fleet dispatch actually happens, record it with its time and evidence.
+   The previous release keeps new intake for 24 hours from that time, then gets
+   426 at the service, and WordPress closes new reports itself once its cached
+   policy says so. Unreachable sites stay `unknown` in the inventory.
+4. For a bad release, approve the earlier verified compatible package as
+   `recovery`, then record its dispatch. Accepted work, revocations and
+   suppressions are untouched.
+5. A stage starts `staged`. Switch it to `enforced` in `stageReleaseEnforcement`
+   by reviewed PR only after its first approval and dispatch are recorded and
+   `release-status` and the inventory show them. Production stays not ready
+   while it is `staged`.
+
+Accepted Submission IDs and Change IDs always replay their receipt, so an
+expired window never turns a retry into a false failure. If new intake answers
+503 under enforcement, check `release-status` for a missing or malformed record.
+
 ## Inventory and credential custody
 
 Use the [Slot inventory](../../worker/README.md#slot-inventory) to find a Slot's
@@ -393,6 +420,7 @@ signal/notification, recovery action, invariant checks, result and human sign-of
 | Worker/D1 outage | Independent detection works; website requests remain independent; accepted work and incident state reconcile into one `component_unavailable` incident. Not yet run: the [independent checker](#independent-outage-checks) is not set up for any stage |
 | D1 restore | Suppressions/revocations survive; erased text not served; stale delivered work never blindly replayed; unsafe resume refused |
 | Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused |
+| Release window | Previous release accepted until exactly 24 hours after recorded dispatch, then 426 at the service; WordPress closes new reports from its cached policy; accepted retries replay; production `enforced` |
 | Discord/Banquinha outage | Incidents survive; CLI works when storage is healthy; notifications recover without duplicate incidents |
 | Local fail-safe and Client contact | Disable/re-enable through hosting/admin access; separate-device independent contact verified |
 | Retention/privacy failure | Failed cleanup detected, expiry enforced, unresolved erasure remains explicitly incomplete |

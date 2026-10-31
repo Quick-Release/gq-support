@@ -187,6 +187,8 @@ final class GQ_Support_REST {
 		$payload  = null;
 		// The key an uncertain write is checked again with.
 		$retry_key = array();
+		// Whether the cached release policy closed new intake for this plugin (GQ_Support_Release).
+		$locally_closed = $create && 'closed' === GQ_Support_Release::local_intake( time() );
 		if ( $change ) {
 			$body = self::validate_change( $request );
 			if ( is_wp_error( $body ) ) {
@@ -212,6 +214,11 @@ final class GQ_Support_REST {
 					// An expired review still reconciles an accepted intent, but never authorizes a new one.
 					$payload['reconcile_only'] = true;
 				}
+			}
+			// This plugin may no longer start new intake: the service only returns an intent
+			// it already accepted, so a retry is never falsely failed.
+			if ( $locally_closed ) {
+				$payload['reconcile_only'] = true;
 			}
 			$payload  += $identity;
 			$retry_key = array( 'submission_id' => $payload['submission_id'] );
@@ -241,6 +248,14 @@ final class GQ_Support_REST {
 		}
 		if ( 404 === $result['status'] ) {
 			return self::error( 'gq_support_not_found', 404 );
+		}
+		if ( 426 === $result['status'] ) {
+			// The service refused this version new intake: later executions stop it locally too.
+			GQ_Support_Release::learn( $result['body']['release'] ?? null );
+		}
+		if ( $create && $locally_closed && 412 === $result['status'] ) {
+			// Nothing was accepted under this Submission ID, and this plugin may not start it.
+			return self::error( 'gq_support_plugin_outdated', 426 );
 		}
 		if ( ! in_array( $result['status'], $create ? array( 201, 202 ) : ( $change ? array( 200, 202 ) : array( 200 ) ), true ) ) {
 			$codes = array(

@@ -7,8 +7,9 @@ import { parseArgs } from "node:util";
 import { runOperator } from "../src/operator.ts";
 import { stageInventories } from "../src/inventory.ts";
 import { stageMappings } from "../src/repository-mappings.ts";
+import { stageReleaseEnforcement } from "../src/release-policy.ts";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|release-status|release-candidate|release-approve|release-dispatch> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
@@ -49,6 +50,10 @@ try {
     // Only the target stage's reviewed mappings; the database IDs must belong to the same stage.
     mappings: stageMappings[stage],
     inventory: stageInventories[stage],
+    release: stageReleaseEnforcement[stage],
+    // A downloaded release workflow artifact: the exact ZIP and the manifest and provenance recorded with it.
+    readArtifact: async (artifact) => ({ zip: readFileSync(join(artifact, "gq-support.zip")),
+      manifest: readFileSync(join(artifact, "gq-support.manifest.json"), "utf8"), provenance: readFileSync(join(artifact, "provenance.json"), "utf8") }),
     query: d1("SupportDB"),
     ...(ledgerId ? { ledger: d1("SupportLedger") } : {}),
     recordRevocation: async (keyId, revokedAt) => {

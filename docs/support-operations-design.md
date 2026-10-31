@@ -315,6 +315,13 @@ before onboarding, not values established by this interview.
   untrusted requests. No baseline, objective or additional threshold has been
   recorded, and the staging broken-webhook drill has not run: its Discord
   destinations are not configured.
+- The release policy (#141) records candidates, explicit approvals (including
+  recovery) and recorded dispatches as audited append-only rows, signs the plugin
+  version (`gq-support-v2`) and enforces the 24-hour window at service intake and
+  in WordPress from a cached policy ([Worker README](../worker/README.md#approved-releases)).
+  Both stages are `staged`: enforcement, an approved release and a recorded
+  dispatch are production readiness gates not yet met. Fleet dispatch, update
+  attempts and withdrawal belong to later issues.
 - Independent outage detection (#139) runs on GitHub Actions, outside Cloudflare,
   and reconciles what it saw into `component_unavailable` incidents once storage
   returns ([Worker README](../worker/README.md#independent-outage-checks)). Its

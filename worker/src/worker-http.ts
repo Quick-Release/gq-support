@@ -41,7 +41,7 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
   // Staff dashboards only; the installation API never answers here.
   if (url.pathname === "/v1/operations" || url.pathname.startsWith("/v1/operations/")) {
     return yield* Effect.promise(() => handleOperationsRequest(web.success, db, operations, Date.now(), notifications,
-      { mappings, inventory }));
+      { mappings, inventory, release: installation.release ?? null }));
   }
   let observed: Observation | undefined;
   const started = Date.now();

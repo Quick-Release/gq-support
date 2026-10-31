@@ -7,6 +7,8 @@ import { sha256 } from "./signature.ts";
 import { runStatusOperation } from "./status-operations.ts";
 import { runIncidentOperator } from "./incident-operator.ts";
 import { runInventoryOperator } from "./inventory-operator.ts";
+import { runReleaseOperator, type ReleaseArtifact } from "./release-operator.ts";
+import type { ReleaseEnforcement } from "./release-policy.ts";
 import type { StageInventory } from "./inventory.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
 import type { QueryDatabase } from "./storage.ts";
@@ -21,6 +23,10 @@ export interface OperatorOptions {
   readonly inventory?: StageInventory;
   /** The suppression ledger database (src/ledger.ts), queried like `query`. */
   readonly ledger?: OperatorOptions["query"];
+  /** Reads a release workflow's artifact directory (src/release-operator.ts). */
+  readonly readArtifact?: (directory: string) => Promise<ReleaseArtifact>;
+  /** The target stage's reviewed release enforcement (src/release-policy.ts), for display. */
+  readonly release?: ReleaseEnforcement;
 }
 
 /** A one-statement-at-a-time D1 view of an Operator query function, for shared store code. */
@@ -54,7 +60,9 @@ const enrollmentCode = (): string => {
 };
 
 /** The operator command boundary; Cloudflare authentication belongs to the CLI adapter. */
-export const runOperator = async (args: readonly string[], { query, recordRevocation, mappings, now = Date.now(), ledger, inventory }: OperatorOptions): Promise<string> => {
+export const runOperator = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
+  const { query, recordRevocation, mappings, now = Date.now(), ledger } = options;
+  if (args[0]?.startsWith("release-")) return runReleaseOperator(args, { ...options, now });
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   if (["erase", "erasure-status", "erasure-close", "restore-recorded", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
@@ -62,10 +70,10 @@ export const runOperator = async (args: readonly string[], { query, recordRevoca
   }
   if (args[0]?.startsWith("status-")) return runStatusOperation(args, { query, recordRevocation, mappings, now });
   if (["incidents", "incident", "incident-claim", "notifications", "notification-retry", "health", "drill-verify"].includes(args[0] ?? "")) return runIncidentOperator(args, { query, recordRevocation, mappings, now });
-  if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { query, recordRevocation, mappings, now, ...(inventory ? { inventory } : {}) });
+  if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { ...options, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify and inventory-record");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record and release-<status|candidate|approve|dispatch>");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

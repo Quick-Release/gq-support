@@ -15,11 +15,15 @@ export const keyPair = async (): Promise<CryptoKeyPair> => {
 export const publicKeyOf = async (pair: CryptoKeyPair) => base64(await crypto.subtle.exportKey("raw", pair.publicKey) as ArrayBuffer);
 
 // Independently spells the PHP signer's wire format, rather than importing the verifier.
-export const signed = async (pair: CryptoKeyPair, method: string, path: string, body = "", keyId = "", installationId = "installation-a", now = Date.now()) => {
+// With a plugin version it signs as gq-support-v2, which covers that version; otherwise as a legacy v1 plugin.
+export const signed = async (pair: CryptoKeyPair, method: string, path: string, body = "", keyId = "", installationId = "installation-a",
+  now = Date.now(), pluginVersion: string | null = null) => {
   const digest = `sha-256=:${base64(await crypto.subtle.digest("SHA-256", encoder.encode(body)))}:`;
   const timestamp = String(Math.floor(now / 1000));
   const requestId = crypto.randomUUID();
-  const canonical = ["gq-support-v1", method, path, keyId, installationId, timestamp, requestId, digest].join("\n");
+  const canonical = (pluginVersion === null
+    ? ["gq-support-v1", method, path, keyId, installationId, timestamp, requestId, digest]
+    : ["gq-support-v2", method, path, keyId, installationId, pluginVersion, timestamp, requestId, digest]).join("\n");
   const signature = await crypto.subtle.sign("Ed25519", pair.privateKey, encoder.encode(canonical));
   return new Request(`https://support.example${path}`, {
     method, body: body || undefined,
@@ -28,6 +32,7 @@ export const signed = async (pair: CryptoKeyPair, method: string, path: string, 
       "GQ-Support-Timestamp": timestamp, "GQ-Support-Request-Id": requestId,
       "Content-Digest": digest, "GQ-Support-Signature": base64(signature),
       "CF-Connecting-IP": "192.0.2.1",
+      ...(pluginVersion === null ? {} : { "GQ-Support-Plugin-Version": pluginVersion }),
     },
   });
 };
@@ -38,30 +43,38 @@ export interface Installation {
   readonly installationId: string;
   /** Signs and sends one request as this installation. */
   send(method: string, path: string, body?: string, headers?: Record<string, string>): Promise<Response>;
+  /** The same installation running another plugin version: a signed one, or `null` for a legacy v1 plugin. */
+  running(pluginVersion: string | null): Installation;
 }
 
-/** An enrolled-installation harness over the public HTTP boundary and the operator CLI seam. */
+/**
+ * An enrolled-installation harness over the public HTTP boundary and the operator CLI seam.
+ * Unless a test configures release enforcement, the stage's policy is explicitly staged (src/release-policy.ts).
+ */
 export const harness = (db: D1Database, mappings: readonly RepositoryMapping[], options: InstallationApiOptions = {}) => {
-  const send = (request: Request, config = mappings) => handleRequest(request, db, config, options);
+  const send = (request: Request, config = mappings) => handleRequest(request, db, config, { release: "staged", ...options });
   const operator = (command: string, slot: string, now?: number) => runOperator([command, slot], {
     query: async (sql, parameters) => (await db.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings, now,
   });
-  const enroll = async (slot: string, installationId: string, extra: Record<string, string> = {}): Promise<Installation> => {
+  const enroll = async (slot: string, installationId: string, extra: Record<string, string> = {},
+    pluginVersion: string | null = null): Promise<Installation> => {
     const pair = await keyPair();
     const body = JSON.stringify({ code: await operator("enroll", slot), installation_id: installationId,
       origin: "https://shop.example", public_key: await publicKeyOf(pair), ...extra });
-    const response = await send(await signed(pair, "POST", "/v1/enroll", body, "", installationId));
+    const response = await send(await signed(pair, "POST", "/v1/enroll", body, "", installationId, Date.now(), pluginVersion));
     if (response.status !== 200) throw new Error(`Enrollment failed: ${response.status}`);
     const { key_id: keyId } = await response.json() as { key_id: string };
-    return {
+    const installation = (version: string | null): Installation => ({
       pair, keyId, installationId,
       send: async (method, path, body = "", headers = {}) => {
-        const request = await signed(pair, method, path, body, keyId, installationId);
+        const request = await signed(pair, method, path, body, keyId, installationId, Date.now(), version);
         for (const [name, value] of Object.entries(headers)) request.headers.set(name, value);
         return send(request);
       },
-    };
+      running: installation,
+    });
+    return installation(pluginVersion);
   };
   return { send, operator, enroll };
 };

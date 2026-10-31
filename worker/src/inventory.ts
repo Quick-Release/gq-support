@@ -1,5 +1,6 @@
 import { stageForSlug, type DeployedStage, type RepositoryMapping } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
+import { releaseSummary, type ReleaseEnforcement } from "./release-policy.ts";
 
 /**
  * Reviewed, non-secret references for one deployed stage: the Cloudflare account
@@ -143,10 +144,19 @@ interface Contact { slot: string; route: string; evidence: string; verified_at: 
  * shows the contact route and its evidence.
  */
 export const slotInventory = async (db: QueryDatabase, mappings: readonly RepositoryMapping[], inventory: StageInventory | null,
-  now: number, { restricted = false } = {}) => {
-  const latest = (await db.prepare(`SELECT slot, kind, version, observed_at, source FROM (SELECT *, ROW_NUMBER()
+  now: number, { restricted = false, release }: { restricted?: boolean; release?: ReleaseEnforcement | null } = {}) => {
+  const recorded = (await db.prepare(`SELECT slot, kind, version, observed_at, source FROM (SELECT *, ROW_NUMBER()
     OVER (PARTITION BY slot, kind ORDER BY observed_at DESC, rowid DESC) AS position FROM slot_version_evidence) WHERE position = 1`)
     .bind().all<Evidence>()).results;
+  // What installations signed (src/installation-api.ts) is observed evidence too; the newest observation wins.
+  const signed = (await db.prepare("SELECT slot, 'observed' AS kind, version, observed_at, 'signed-request' AS source FROM slot_signed_version")
+    .bind().all<Evidence>()).results;
+  const releases = await releaseSummary(db, release);
+  const latest = [...recorded, ...signed];
+  // The approved release is every Slot's desired version, unless a later Slot-specific record says otherwise.
+  // Its dispatch is policy intent: never an attempt or observation of any one installation.
+  const approved = releases.approved && { kind: "desired", version: releases.approved.package_version,
+    observed_at: Date.parse(releases.approved.approved_at!), source: "release" };
   const contacts = (await db.prepare(`SELECT slot, route, evidence, verified_at, verified_by FROM (SELECT *, ROW_NUMBER()
     OVER (PARTITION BY slot ORDER BY verified_at DESC, rowid DESC) AS position FROM slot_contact_verification) WHERE position = 1`)
     .bind().all<Contact>()).results;
@@ -156,9 +166,12 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
     const shown = { state: "verified", verified_at: new Date(verified.verified_at).toISOString() };
     return restricted ? { ...shown, route: verified.route, evidence: verified.evidence, verified_by: verified.verified_by } : shown;
   };
-  const find = (slot: string, kind: string) => latest.find((row) => row.slot === slot && row.kind === kind);
+  const find = (slot: string, kind: string) => latest.filter((row) => row.slot === slot && row.kind === kind)
+    .concat(kind === "desired" && approved ? [{ slot, ...approved }] : [])
+    .reduce<Evidence | undefined>((newest, row) => !newest || row.observed_at > newest.observed_at ? row : newest, undefined);
   return {
     stage: inventory && { name: inventory.stage, account: inventory.account, resources: inventory.resources },
+    release: releases,
     slots: mappings.map((mapping) => ({
       slot: mapping.slot, client: mapping.client, project: mapping.project, environment: mapping.environment,
       repository: { id: mapping.repositoryId, name: mapping.repository ?? null, app_installation_id: mapping.githubInstallationId ?? null },

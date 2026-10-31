@@ -90,7 +90,7 @@ const incidents = async () => (JSON.parse(await operator("incidents")) as { inci
 const access = () => operationsAccess(JSON.stringify({ [banquinha.keyId]: banquinha.publicKey }), "alex");
 const send = (request: Request, waitUntil: (task: Promise<void>) => void = () => {}) => Effect.runPromise(handleWorkerRequest(
   HttpServerRequest.fromWeb(request), Effect.succeed(stage.databases.shared), mappings, () => Effect.die("Not a webhook"), waitUntil,
-  undefined, {}, access()));
+  undefined, { release: "staged" }, access()));
 const staff = async (method: string, path: string, body = "") => send(await banquinha.request(method, path, "alex", body));
 /** GitHub accepts the create, but its response is lost: the outcome is unknown and the issue does not exist. */
 const loseCreate = () => {

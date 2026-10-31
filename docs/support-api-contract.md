@@ -144,7 +144,7 @@ Every error is a `WP_Error` whose `data` is `{ status, correlation_id, retryable
 | 409 | `gq_support_change_not_allowed` | Status change: the create is not delivered, or its issue was lost | "This request's status can't be changed yet." |
 | 409 | `gq_support_change_pending` | Status change: an earlier change is unresolved | "An earlier status change … is still being delivered." |
 | 412 | `gq_support_context_expired` | Create: the review envelope expired and the service holds no intent for this Submission ID | The panel reviews the context again for the same Submission ID; if an earlier send is uncertain, "Check My requests" |
-| 426 | `gq_support_plugin_outdated` | Worker no longer supports this plugin version | "Support needs a plugin update" |
+| 426 | `gq_support_plugin_outdated` | Create or status change: the release policy refuses this plugin version new intake (#141), or WordPress's cached policy already did. An accepted intent or change still replays first | "Support needs a plugin update" |
 | 429 | `gq_support_rate_limited` + `Retry-After` | Per-subject or per-installation limit | "Too many requests, try again later" |
 | 503 | `gq_support_not_configured` | No connection, or the Worker rejected the installation credential | "Support is unavailable"; operator sees detail on the setup page |
 | 503 | `gq_support_disabled` | `GQ_SUPPORT_DISABLED` is set in `wp-config.php`; checked after authorization, before any service call | "Support is temporarily disabled" + independent contact; `retryable: false` |
@@ -174,12 +174,22 @@ Every `gq-support/v1` response sends `Cache-Control: private, no-store` explicit
 | Timeouts | 8 s for create and status changes, 5 s for reads. The browser's `apiFetch` timeout is about 15 s. |
 | Response size | `limit_response_size` 64 KB. An oversized or unparseable response is ambiguous. |
 | Worker path | `/v1/...`. The path version changes only on a breaking change, and `/v2` then runs alongside `/v1` until the fleet has migrated. |
-| Version header | `GQ-Support-Plugin-Version`. Within v1 the Worker makes only additive changes and accepts every supported plugin version. Older plugins get 426. |
-| Signing headers | `GQ-Support-Key-Id`, `GQ-Support-Installation-Id`, `GQ-Support-Timestamp`, `GQ-Support-Request-Id`, `Content-Digest` (RFC 9530, sha-256), `GQ-Support-Signature`. The signer is an injected dependency. Ed25519 over the canonical string, a five-minute clock window and single-use request IDs, as implemented in the [security design](support-security-design.md#implemented-installation-authentication-32). |
+| Version header | `GQ-Support-Plugin-Version`, signed (below). Within v1 the Worker makes only additive changes. New intake follows the [release policy](#release-policy): other versions get 426. |
+| Signing headers | `GQ-Support-Key-Id`, `GQ-Support-Installation-Id`, `GQ-Support-Plugin-Version`, `GQ-Support-Timestamp`, `GQ-Support-Request-Id`, `Content-Digest` (RFC 9530, sha-256), `GQ-Support-Signature`. The signer is an injected dependency. Ed25519 over the `gq-support-v2` canonical string, which includes the plugin version after the installation ID; a five-minute clock window and single-use request IDs, as implemented in the [security design](support-security-design.md#implemented-installation-authentication-32). The Worker still verifies legacy `gq-support-v1` signatures, whose version header is unsigned and therefore ignored: the version is unknown. |
 | Forwarded identity | The attested Reporter subject and, for `scope=site`, a freshly attested view-site grant. There is no WordPress nonce, cookie, email, username, or numeric user ID, and no browser-supplied installation, Client, or repository. |
 | When calls happen | Only inside a `gq-support/v1` route callback. Never during page rendering, activation, or cron. |
 
 WordPress → Worker payloads carry the same field names and limits as the browser contract, plus the attested identity, as compact unescaped JSON. Report context travels without its review envelope; an expired envelope adds `reconcile_only: true`, which only returns an already accepted intent (or 412) and never accepts one. The service caps a create carrying context at 32 KB.
+
+## Release policy
+
+Implements [ADR 0021](adr/0021-automatic-fleet-updates-with-latest-version-support.md) for #141 (`worker/src/release-policy.ts`, `plugin/includes/class-gq-support-release.php`).
+
+- The service accepts a new create or status change only from the approved release's signed version, or from the previous approved release until 24 hours after the approved release's recorded fleet dispatch (until its dispatch is recorded, without limit). A legacy `gq-support-v1` request counts only as an approved release recorded as an unsigned legacy package. An approved release outside the Worker's supported contract versions takes no intake.
+- The check runs after the same-key lookup: a retry of an accepted Submission ID or Change ID returns its receipt, never 426. Reads, lists, export, erasures, self-revocation and `GET /v1/installation` are never gated.
+- A refused version gets `426 {"code": "gq_support_plugin_outdated", "release": {…}}`. When enforcement is unconfigured, nothing is approved or a record is malformed, new intake gets `503 gq_support_not_accepted` instead: a service fault no plugin update fixes.
+- `GET /v1/installation` adds `release`: `{enforcement: "enforced"|"staged"|"unconfigured", intake: "open"|"closed", reason: "current"|"previous"|"unsupported"|"expired"|"unavailable", plugin_version, approved_version, compatible_until}`, or `null` when storage could not say. `compatible_until` is set only while an enforced previous release's window runs. A `staged` stage reports the evaluation but keeps intake open.
+- WordPress caches a well-formed `release` for its own version from the setup page's connection test and from a 426. With no remote call it closes new reports when the cached policy is `unsupported` or `expired`, or once `compatible_until` passes; it is `unknown` before the first answer and after the plugin itself is updated. A locally closed create is forwarded with `reconcile_only: true`: an accepted intent is returned, otherwise WordPress answers 426. Status changes, reads and `GQ_SUPPORT_DISABLED` behave as before; the service gates status changes.
 
 ## Contract tests
 
@@ -188,7 +198,7 @@ Shared JSON fixtures in `contract/fixtures/` are the drift guard. There is no ge
 - Valid and invalid create payloads, covering each limit boundary, unknown fields, a missing or malformed `submission_id`, and multi-line summaries.
 - Valid and invalid Report context, with its canonical serialization (`context.json`).
 - Resource and list responses for each `delivery`/`status` combination.
-- Version mismatch (old plugin → 426) and every error code in the catalogue.
+- Signed and legacy signing strings (`signing.json`), version mismatch (426) and every error code in the catalogue.
 
 The adapter is tested with `pre_http_request` stubs for 2xx, each Worker error, timeout, 3xx, oversized body, malformed JSON, and TLS failure. Each case checks the mapped browser error and that no secret or report content reaches the logs.
 

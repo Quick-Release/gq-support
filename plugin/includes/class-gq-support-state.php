@@ -22,7 +22,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  *     environment: string|null,
  *     connected_at: string|null,
  *     last_test: array{result: string, at: int}|null,
- *     administrator_grants: array<int, string>
+ *     administrator_grants: array<int, string>,
+ *     release: array{plugin_version: string, enforcement: string, intake: string, reason: string, compatible_until: int|null}|null
  * }
  */
 final class GQ_Support_State {
@@ -109,6 +110,8 @@ final class GQ_Support_State {
 			'environment'  => null,
 			'connected_at' => null,
 			'last_test'    => null,
+			// The release policy belongs to the service this site was connected to (GQ_Support_Release).
+			'release'      => null,
 		);
 	}
 
@@ -129,6 +132,7 @@ final class GQ_Support_State {
 			'connected_at'         => null,
 			'last_test'            => null,
 			'administrator_grants' => array(),
+			'release'              => null,
 		);
 	}
 }

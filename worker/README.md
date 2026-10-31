@@ -141,9 +141,11 @@ under cleanup lose their text, suspensions and key revocations are reapplied
   proof verification. The edge's `CF-Connecting-IP` is hashed; raw IPs are not
   stored. A missing edge IP is denied and counter failure returns 503. Requests
   are bounded to 8 KiB (creates to 128 KiB), including bodies without Content-Length.
-- The existing PHP canonical string is preserved: `gq-support-v1`, method,
-  path/query, key ID, installation ID, epoch-second timestamp, request ID,
-  RFC 9530 SHA-256 Content-Digest, separated by newlines without a trailing newline.
+- The PHP canonical string is `gq-support-v2`, method, path/query, key ID,
+  installation ID, plugin version (`GQ-Support-Plugin-Version`), epoch-second
+  timestamp, request ID, RFC 9530 SHA-256 Content-Digest, separated by newlines
+  without a trailing newline. The legacy `gq-support-v1` string, without the
+  version, still verifies; its unsigned version header is ignored (#141).
   Timestamps allow 5 minutes of skew; signed installation requests consume a
   nonce retained for 10 minutes, with bounded indexed cleanup.
   `contract/fixtures/signing.json` pins this string for PHP and the Worker.
@@ -631,8 +633,12 @@ it is a health check: it reports recorded evidence and says what it does not kno
   reviewed deployment method or team yet, and no credential owner is assigned.
 - **Versions**: `desired`, `attempted` and `observed` are separate. The
   installation's signed enrollment records the plugin version it reports
-  (`source: enrollment`); everything else is appended by an Operator from
-  deployment or maintenance evidence. `update.outcome` is `none` without an
+  (`source: enrollment`), and every later `gq-support-v2` request the version
+  it signs (`source: signed-request`, at most hourly per version). The
+  [approved release](#approved-releases) is every Slot's `desired` version
+  (`source: release`) unless a later Slot record says otherwise; its fleet
+  dispatch is never recorded as an attempt or observation. Everything else is
+  appended by an Operator from deployment or maintenance evidence. `update.outcome` is `none` without an
   attempt, `confirmed` only when an observation of the attempted version is at
   or after the attempt, `failed` only when a failure of that version is
   recorded, whichever is later, and otherwise `unconfirmed`. A dispatch alone
@@ -665,6 +671,55 @@ never a credential. Each record is one appended row carrying its actor and
 recording time, so it is its own audit entry and is never edited; correct a
 mistake by recording newer evidence. Inventory rows are not purged by
 offboarding yet.
+
+## Approved releases
+
+The release policy (#141, ADR 0021, `src/release-policy.ts`, migration 0027)
+decides which plugin versions may start new Support requests and status changes.
+The [API contract](../docs/support-api-contract.md#release-policy) describes what
+installations see; the [runbook](../docs/runbooks/support-operations.md#approved-releases-and-intake-enforcement)
+the procedure.
+
+- A **candidate** is recorded only from a release workflow's artifacts: the
+  version and SHA-256 come from the ZIP's actual bytes, which the manifest and
+  `provenance.json` must both match, and the provenance names the run and source
+  commit. The Operator adds the Worker commit, contract version and schema
+  migration range it was verified with, and whether the package signs its
+  version (`signed`) or is a pre-#141 `unsigned-legacy` package. A candidate is
+  never approved by being recorded.
+- An **approval** names the approved release the Operator expects (`none` for
+  the first), so a concurrent approval loses. `production` needs a version never
+  approved and, after the first, the approved release's recorded dispatch;
+  `recovery` re-approves an earlier approved package as the temporary approved
+  release. The Worker must serve its contract version. The previous approved
+  release is the one it replaced.
+- A **dispatch** is recorded once for the approved release, from its dispatch
+  evidence and actual time (no later than now, not before approval). The
+  previous release's 24-hour window runs from it; before it, the previous release
+  is still accepted. Nothing infers a dispatch.
+- Every record is one append in a single statement, carrying its actor, time and
+  evidence: its own audit row, never edited. No report content, Reporter ID or
+  secret is stored. Release decisions touch no key, suppression or intent, so a
+  recovery never revives revoked access or erased work.
+- **Enforcement** is reviewed per stage in `stageReleaseEnforcement`. `enforced`
+  refuses other versions and fails closed without a well-formed approved release;
+  `staged` evaluates and reports but keeps intake open, only so this Worker can
+  deploy before any release is approved; an unknown stage fails closed. Both
+  stages are `staged` now: production enforcement is a readiness gate, not active.
+  Staff see the enforcement, approved and previous release in
+  `GET /v1/operations/inventory`; only the Operator CLI records them.
+
+```sh
+pnpm operator release-status --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator release-candidate <artifact-directory> <worker-commit> <contract-version> <schema-from>-<schema-to> <signed|unsigned-legacy> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator release-approve <package-version> <production|recovery> <expected-current-release-id|none> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator release-dispatch <release-id> <dispatched-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+```
+
+`artifact-directory` holds the downloaded `gq-support.zip`,
+`gq-support.manifest.json` and `provenance.json` of the release workflow run.
+After a lost response, check `release-status` before retrying an approval: a
+committed one makes the retry's expectation stale.
 
 ## Discord notifications
 

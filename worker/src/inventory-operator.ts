@@ -22,7 +22,7 @@ const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{3})?)?Z$/;
  * - `inventory <slot>` shows the Slot's inventory with its restricted contact details.
  * - `inventory-credentials` shows the stage's credential custody, with locations and evidence.
  */
-export const runInventoryOperator = async (args: readonly string[], { query, mappings, now = Date.now(), inventory }: OperatorOptions): Promise<string> => {
+export const runInventoryOperator = async (args: readonly string[], { query, mappings, now = Date.now(), inventory, release }: OperatorOptions): Promise<string> => {
   const db = asQueryDatabase(query);
   const [command, slot, kind, version, time, evidence, actor] = args;
   const timeOf = (value: string) => {
@@ -33,8 +33,8 @@ export const runInventoryOperator = async (args: readonly string[], { query, map
   if (command === "inventory" && args.length === 2) {
     const mapping = mappingFor(mappings, slot!);
     if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");
-    const { slots: [inventory] } = await slotInventory(db, [mapping], null, now, { restricted: true });
-    return JSON.stringify(inventory);
+    const { slots: [inventory], release: releases } = await slotInventory(db, [mapping], null, now, { restricted: true, release });
+    return JSON.stringify({ ...inventory, release: releases });
   }
   if (command === "inventory-credentials" && args.length === 1) {
     if (!inventory) throw new Error("No reviewed inventory for this stage");
