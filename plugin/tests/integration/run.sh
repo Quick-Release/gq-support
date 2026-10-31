@@ -110,6 +110,14 @@ wp eval-file plugin/tests/integration/privacy.php
 wp eval-file plugin/tests/integration/fail-safe.php
 ddev exec --dir /var/www/html/plugin composer install --quiet
 wp eval-file plugin/tests/contract/run.php
+# Exercise the upgrade probe on every runtime cell, including checkout-only CI.
+(
+  probe=.test-site/wp-content/mu-plugins/package-test-http-probe.php
+  mkdir -p "$(dirname "$probe")"
+  trap 'rm -f "$probe"' EXIT
+  cp plugin/tests/integration/package-http-probe.php "$probe"
+  wp eval-file plugin/tests/integration/package.php probe-boundary
+)
 # Verify actual public and admin HTTP responses, not hook registrations.
 page_id=$(wp post create --post_type=page --post_title='Lifecycle page' --post_status=publish --post_content='Lifecycle body' --porcelain)
 page_url=$(wp post url "$page_id")
