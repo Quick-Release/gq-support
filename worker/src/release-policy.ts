@@ -99,6 +99,17 @@ const wellFormed = (row: ReleaseRow) => integer(row.sequence) && row.sequence >=
   (row.dispatched_at === null ? row.compatibility_expires_at === null
     : integer(row.dispatched_at) && row.compatibility_expires_at === row.dispatched_at + COMPATIBILITY_WINDOW_MS);
 
+/**
+ * The release native installations are offered (src/update-access.ts): the
+ * approved release once its fleet dispatch is recorded, and only while the
+ * record is well formed. A withdrawn release is never offered again.
+ */
+export const offeredRelease = async (db: QueryDatabase): Promise<ReleaseRow | null> => {
+  const { current, previous } = await approvedReleases(db);
+  const valid = current && wellFormed(current) && (current.previous_sequence === null || (previous && wellFormed(previous)));
+  return valid && current.dispatched_at !== null ? current : null;
+};
+
 /** Why new intake is open or closed for a plugin version. */
 export type IntakeReason = "current" | "previous" | "unsupported" | "expired" | "unavailable";
 

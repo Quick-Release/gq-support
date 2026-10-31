@@ -117,6 +117,13 @@ _Avoid_: Release, when approval has not been recorded
 The one plugin release an Operator explicitly approved for production, as an immutable record with its package, Worker commit, contract and schema range, previous approved release and recorded fleet dispatch. A verified earlier package re-approved after a bad release is a temporary recovery release.
 _Avoid_: Latest version, when an unapproved newer candidate exists
 
+**Update grant**:
+An Operator's grant of one native installation's update key to its Slot, until an expiry, letting it read only the Approved release's metadata and package bytes through WordPress's own updater. It is separate from the Installation credential, so disabling submissions or revoking that credential leaves updates working; it never authorizes reports, another Slot or an Operator. A newer grant supersedes the Slot's older key; revocation is permanent.
+_Avoid_: Licence key, API key, update token
+
+**Download grant**:
+Short-lived (15-minute) access to the bytes of one Approved release, issued only in answer to an authenticated update metadata request and renewed only by asking again; never part of a URL.
+
 **Compatibility window**:
 The up to 24 hours from an approved release's recorded fleet dispatch during which the previous approved release may still start new Support requests. It never affects work the service already accepted.
 

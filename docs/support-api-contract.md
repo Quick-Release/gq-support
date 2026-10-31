@@ -191,6 +191,16 @@ Implements [ADR 0021](adr/0021-automatic-fleet-updates-with-latest-version-suppo
 - `GET /v1/installation` adds `release`: `{enforcement: "enforced"|"staged"|"unconfigured", intake: "open"|"closed", reason: "current"|"previous"|"unsupported"|"expired"|"unavailable", plugin_version, approved_version, compatible_until}`, or `null` when storage could not say. `compatible_until` is set only while an enforced previous release's window runs. A `staged` stage reports the evaluation but keeps intake open.
 - WordPress caches a well-formed `release` for its own version from the setup page's connection test and from a 426. With no remote call it closes new reports when the cached policy is `unsupported` or `expired`, or once `compatible_until` passes; it is `unknown` before the first answer and after the plugin itself is updated. A locally closed create is forwarded with `reconcile_only: true`: an accepted intent is returned, otherwise WordPress answers 426. Status changes, reads and `GQ_SUPPORT_DISABLED` behave as before; the service gates status changes.
 
+## Native updates
+
+For installations updated through WordPress's own updater (#142, `worker/src/update-access.ts`, `plugin/includes/class-gq-support-updater.php`). These routes answer only an update key granted to a reviewed `native` Slot; they never read or change support records, and the Installation credential cannot call them.
+
+- Every request is a `GET` with an empty body, signed `gq-support-update-v1`: the canonical string is the label, method, path with query, `GQ-Update-Key-Id` (hex SHA-256 of the raw public key), `GQ-Update-Installed-Version`, `GQ-Update-Grant` (empty for metadata), `GQ-Update-Timestamp`, `GQ-Update-Request-Id` and `Content-Digest`, newline-joined (`update-signing.json`). Five-minute clock window; a reused Request ID is refused.
+- `GET /v1/updates/gq-support` returns `{plugin: "gq-support", release: {release_id, version, package_sha256, package_path} | null, grant: {token, expires_at} | null, auto_update}` (`update.json`). `release` is the approved release once its dispatch is recorded; `package_path` is exactly `/v1/updates/gq-support/package?version=<version>&sha256=<sha256>`, and `grant` is a 15-minute download grant. The signed installed version is inventory evidence.
+- `GET /v1/updates/gq-support/package?version=…&sha256=…` with the grant in `GQ-Update-Grant` returns the exact approved ZIP (`application/zip`, `GQ-Update-Package-Sha256`, `no-store`).
+- Errors: `401 gq_support_update_unauthorized` (unknown, expired, revoked or superseded key; bad signature; replay), `401 gq_support_update_grant_expired` (ask the metadata route again), `410 gq_support_update_withdrawn` (no longer the approved release), `503 gq_support_update_unavailable` (no package source, or the stored bytes failed verification). No redirect is ever returned.
+- WordPress asks only during cron, WP-CLI or the Updates screen's "Check again", at most hourly, and caches only a valid offer. Its download handler accepts only the cached offer's exact package URL at the configured HTTPS service, sends no redirects or credentials in URLs, bounds the response to 8 MiB and installs the file only if its SHA-256 matches. An expired grant is renewed once through the metadata route.
+
 ## Contract tests
 
 Shared JSON fixtures in `contract/fixtures/` are the drift guard. There is no generated shared schema, because the two hops are different shapes and WordPress REST supports only a subset of JSON Schema. PHPUnit and the Worker test suite both run every fixture.
@@ -199,6 +209,7 @@ Shared JSON fixtures in `contract/fixtures/` are the drift guard. There is no ge
 - Valid and invalid Report context, with its canonical serialization (`context.json`).
 - Resource and list responses for each `delivery`/`status` combination.
 - Signed and legacy signing strings (`signing.json`), version mismatch (426) and every error code in the catalogue.
+- Native update signing strings and metadata bodies (`update-signing.json`, `update.json`).
 
 The adapter is tested with `pre_http_request` stubs for 2xx, each Worker error, timeout, 3xx, oversized body, malformed JSON, and TLS failure. Each case checks the mapped browser error and that no secret or report content reaches the logs.
 

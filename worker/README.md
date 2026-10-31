@@ -721,6 +721,46 @@ pnpm operator release-dispatch <release-id> <dispatched-at> <evidence-ref> <opaq
 After a lost response, check `release-status` before retrying an approval: a
 committed one makes the retry's expectation stale.
 
+## Native updates
+
+Installations whose reviewed Repository mapping has `deployment: "native"`
+update through WordPress's own updater (#142, `src/update-access.ts`, migration
+0028); the [runbook](../docs/runbooks/support-operations.md#native-wordpress-updates)
+has the procedure and the [API contract](../docs/support-api-contract.md#native-updates)
+the routes.
+
+- **Update grants.** A native installation generates its own Ed25519 update key
+  (`wp gq-support update-key`); the Operator grants its public key to one Slot
+  until an expiry of at most 400 days. The key ID is the hex SHA-256 of the raw
+  public key. The Slot's newest grant supersedes its older keys, a key is never
+  granted to a second Slot, and a revocation is never lifted. Revocations go to
+  the suppression ledger first (`--ledger-database-id` is required), so a restore
+  of the main database cannot revive a grant. Every grant and revocation is one
+  audited append. The grant is independent of the Installation credential:
+  `revoke <slot>`, `GQ_SUPPORT_DISABLED` and disconnecting leave it working.
+- **What it authorizes.** Only `GET /v1/updates/gq-support` (the approved release
+  once its dispatch is recorded, and a 15-minute download grant) and the package
+  download with that grant. Signed requests use their own `gq-support-update-v1`
+  scheme and replay table; no installation signature verifies there, and no
+  update signature verifies anywhere else.
+- **Package bytes.** The Worker reads the approved version's `gq-support.zip`
+  from the private repository's GitHub Release with the narrow
+  `UPDATE_PACKAGE_TOKEN` secret (`src/package-source.ts`): the token goes only to
+  api.github.com in a header, the one storage redirect must be an HTTPS GitHub
+  asset host and gets no credential, responses are bounded in time and size,
+  and the bytes must match the approved SHA-256 before anything is served.
+  Without the secret, native updates answer 503. The gated deploy uploads it from
+  the stage Environment's `SUPPORT_UPDATE_PACKAGE_TOKEN` and removes it when unset.
+- **Inventory.** A served package is `attempted` (source `native-update`); the
+  installed version the next signed check reports is `observed`. Staff see each
+  Slot's grant state and expiry, never a key.
+
+```sh
+pnpm operator update-access-status <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator update-access-grant <slot> <update-public-key> <expires-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator update-access-revoke <slot> <key-id|all> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+```
+
 ## Discord notifications
 
 Accepted Support requests and Operational incidents are announced in two

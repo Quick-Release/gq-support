@@ -56,6 +56,27 @@ The release artifact has the plugin file at its root, so Composer installs it
 as `gq-support/gq-support.php` rather than nesting the plugin under the source
 monorepo’s `plugin/` directory.
 
+## Native WordPress updates
+
+Installations that GETQUICK does not deploy centrally update through WordPress's
+own updater. The plugin's `Update URI` keeps it off WordPress.org; it is offered
+only GETQUICK's approved release, downloaded from the configured support service
+and installed only if its SHA-256 matches the approved package.
+
+1. Run `wp gq-support update-key` and send GETQUICK the printed public key. The
+   key stays on the site (network option `gq_support_update_key`) and is separate
+   from the support connection: disabling support with `GQ_SUPPORT_DISABLED` or
+   disconnecting the site does not stop updates.
+2. Once GETQUICK grants it, `wp gq-support update-check` shows the approved
+   release, `wp gq-support update-status` the last check, and
+   `wp plugin update gq-support` installs it. GETQUICK enables automatic updates.
+
+The plugin contacts the service only from WP-CLI, WordPress cron or the Updates
+screen's "Check again", at most hourly, never while ordinary pages render. Core
+offers the update only after its own WordPress.org update check succeeds, and
+WordPress cron cannot promise prompt installation. `wp gq-support update-key
+--rotate` replaces the key; updates resume once GETQUICK grants the new one.
+
 ## Native extensions and Site Health
 
 See [Native Support extensions](https://github.com/Quick-Release/gq-support/blob/main/docs/support-extension-hooks.md) for the

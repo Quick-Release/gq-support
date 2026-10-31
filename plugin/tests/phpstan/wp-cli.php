@@ -20,6 +20,8 @@ namespace {
 		public static function warning( string $message ): void {}
 
 		public static function success( string $message ): void {}
+
+		public static function line( string $message ): void {}
 	}
 }
 

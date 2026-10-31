@@ -44,7 +44,8 @@ const TABLES: Record<LedgerKind, { readonly table: string; readonly key: readonl
     "last_error_class", "resolved_at", "intent_id", "github_installation_id", "repository_id", "attempt_started_at", "attempt_ended_at", "issues_json"] },
   suspension: { table: "repository_state", key: ["repository_id"], columns: ["repository_id", "suspended_reason", "suspended_at"],
     present: "suspended_reason IS NOT NULL", changed: "suspended_at" },
-  // Key revocations made at runtime: never undone, so a restore cannot revive a revoked key.
+  // Key revocations made at runtime: never undone, so a restore cannot revive a revoked key. Native update key
+  // revocations are recorded here explicitly, first, under the same kind (src/update-access-operator.ts).
   revocation: { table: "installation_key", key: ["key_id"], columns: ["key_id", "revoked_at"], present: "revoked_at IS NOT NULL", changed: "revoked_at" },
 };
 /** Replay order: an erasure before its cleanup records. */
@@ -161,6 +162,10 @@ export const replayLedger = async (main: QueryDatabase, ledger: QueryDatabase, e
       if (kind === "revocation") {
         // A key enrolled after the restore point is absent, and stays unusable until it enrolls again.
         work.push(["UPDATE installation_key SET revoked_at = ? WHERE key_id = ? AND revoked_at IS NULL", [image.revoked_at ?? now, image.key_id ?? ""]]);
+        // The same image revokes a native update key (src/update-access-operator.ts); its grant may be absent too.
+        work.push([`INSERT INTO update_access_revocation (key_id, slot, evidence, revoked_by, revoked_at)
+          SELECT key_id, slot, 'ledger-replay', 'ledger', ? FROM update_access_grant WHERE key_id = ? ON CONFLICT (key_id) DO NOTHING`,
+        [image.revoked_at ?? now, image.key_id ?? ""]]);
         continue;
       }
       const updates = columns.filter((column) => !key.includes(column)).map((column) => `${column} = excluded.${column}`);

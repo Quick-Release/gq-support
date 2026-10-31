@@ -7,6 +7,7 @@
  * Requires at least:  6.5
  * Requires PHP:       8.0
  * Requires Plugins:   gq-design
+ * Update URI:         https://support.getquick.io/gq-support
  * Author:             GETQUICK
  * Author URI:         https://getquick.io
  * License:            GPL-2.0-or-later
@@ -39,6 +40,13 @@ spl_autoload_register(
 		}
 	}
 );
+
+// Native updates of approved releases (GQ_Support_Updater) are registered before the dependency
+// check and never consult GQ_SUPPORT_DISABLED, so neither strands an installation's recovery path.
+// Class-name callbacks: the class loads only when core's update check, download or auto-update runs.
+add_filter( 'update_plugins_support.getquick.io', array( GQ_Support_Updater::class, 'offer' ), 10, 3 );
+add_filter( 'upgrader_pre_download', array( GQ_Support_Updater::class, 'download' ), 10, 4 );
+add_filter( 'auto_update_plugin', array( GQ_Support_Updater::class, 'auto_update' ), 10, 2 );
 
 register_activation_hook( __FILE__, array( GQ_Support_Lifecycle::class, 'activate' ) );
 register_deactivation_hook( __FILE__, array( GQ_Support_Lifecycle::class, 'deactivate' ) );

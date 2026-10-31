@@ -9,6 +9,7 @@ import { handleErasures } from "./erasure-api.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
 import type { AuthRejection } from "./operational-metrics.ts";
 import { releasePolicy, type ReleaseEnforcement, type ReleasePolicy } from "./release-policy.ts";
+import type { PackageSource } from "./package-source.ts";
 
 interface InstallationKey {
   key_id: string;
@@ -93,6 +94,11 @@ export interface InstallationApiOptions {
   readonly ledger?: QueryDatabase | null;
   /** The stage's release enforcement (src/release-policy.ts). Unset or null refuses all new intake. */
   readonly release?: ReleaseEnforcement | null;
+  /**
+   * The stage's approved package source for native updates, which the Worker
+   * entry routes to src/update-access.ts; the installation API never reads it.
+   */
+  readonly packages?: PackageSource | null;
 }
 
 /**

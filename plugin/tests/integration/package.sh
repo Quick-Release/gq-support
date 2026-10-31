@@ -3,6 +3,10 @@
 # (a repository-relative path; its manifest from scripts/ci/release-package.mjs sits beside it):
 #   single   real uninstall of the installed copy, then the previous release upgraded to the
 #            candidate through WordPress's package installer; leaves the candidate active.
+#   native   after single: WordPress's own updater installs an approved next release from a stand-in
+#            support service (#142), refuses corrupt, wrong-origin, unauthorized and withdrawn packages,
+#            renews expired download access, keeps working disabled and without the report key, and
+#            makes no remote call while pages render; then reinstalls the candidate.
 #   network  after multisite.sh: network deactivation and uninstall stay bounded to the main site.
 # Runs on the disposable DDEV site from any directory.
 set -euo pipefail
@@ -17,7 +21,7 @@ check() { wp eval-file plugin/tests/integration/package.php "$@"; }
 # Blocks every outgoing request and records the plugin's, from before the first request that loads new code.
 probe=.test-site/wp-content/mu-plugins/package-test-http-probe.php
 
-case "${1:?usage: package.sh single|network}" in
+case "${1:?usage: package.sh single|native|network}" in
   single)
     node scripts/ci/release-package.mjs installed "$package_dir" "$plugin"
     wp plugin is-active gq-support || wp plugin activate gq-support
@@ -76,6 +80,78 @@ PHP
     echo 'Installed package uninstall passed.'
     ;;
 
+  native)
+    [[ ! -L "$plugin" ]] || { echo 'native needs the installed copy, never the plugin/ checkout' >&2; exit 1; }
+    service=.test-site/wp-content/mu-plugins/native-update-service.php
+    next_zip=native-update-next.zip
+    cookies=$(mktemp -d)
+    mkdir -p "$(dirname "$service")"
+    cp plugin/tests/integration/native-update-service.php "$service"
+    trap 'rm -rf "$service" "$cookies" ".test-site/$next_zip"' EXIT
+    native() { wp eval-file plugin/tests/integration/native-update.php "$@"; }
+
+    # The approved next release: the installed candidate's files under a higher version.
+    next_version="$version.1"
+    python3 - "$plugin" ".test-site/$next_zip" "$version" "$next_version" <<'PY'
+import pathlib, sys, zipfile
+tree, out, old, new = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted(p for p in tree.rglob("*") if p.is_file()):
+        data = path.read_bytes()
+        if path.name == "gq-support.php":
+            data = data.replace(f"Version:            {old}".encode(), f"Version:            {new}".encode())
+            data = data.replace(f"'GQ_SUPPORT_VERSION', '{old}'".encode(), f"'GQ_SUPPORT_VERSION', '{new}'".encode())
+        archive.writestr(f"gq-support/{path.relative_to(tree)}", data)
+PY
+    next_main=$(python3 -c 'import hashlib, sys, zipfile; print(hashlib.sha256(zipfile.ZipFile(sys.argv[1]).read("gq-support/gq-support.php")).hexdigest())' ".test-site/$next_zip")
+
+    native provision
+    native serve "$next_zip" "$next_version"
+
+    # Ordinary rendering, including core's update screens, never asks the service.
+    # run.sh's Administrator; a page that is not the expected admin screen fails below.
+    curl -fsSL -c "$cookies/admin" -b "$cookies/admin" -d 'log=siteadmin&pwd=siteadmin&wp-submit=Log+In&testcookie=1' "$site/wp-login.php" -o /dev/null
+    curl -fsS -o /dev/null "$site/"
+    for page in '' plugins.php update-core.php; do
+      [[ "$(curl -fsS -b "$cookies/admin" "$site/wp-admin/$page")" == *'wpadminbar'* ]]
+    done
+    native quiet
+    # The Updates screen's "Check again" is a manual check; cron is scheduled maintenance. Core's
+    # own check last ran two hours ago, so the screen checks rather than admin_init.
+    wp eval '$updates = get_site_transient( "update_plugins" ); $updates->last_checked = time() - 2 * HOUR_IN_SECONDS; set_site_transient( "update_plugins", $updates );'
+    curl -fsS -o /dev/null -b "$cookies/admin" "$site/wp-admin/update-core.php?force-check=1"
+    native checked web
+    native mode ok fresh
+    wp cron event run wp_update_plugins >/dev/null
+    native checked 'cron|cli'
+
+    # Refusals through core's real upgrader leave the installed release running.
+    native refused wrong-origin
+    wp eval 'delete_site_transient( "update_plugins" );'
+    wp gq-support update-check >/dev/null
+    for mode in corrupt unauthorized withdrawn; do
+      native mode "$mode"
+      native refused "gq_support_update_$mode"
+      native unchanged "$version"
+    done
+
+    # Support disabled and the report credential revoked: the approved update still installs,
+    # renewing its expired download access through the signed metadata request.
+    # WP-CLI's update, like the Updates screen, reactivates the plugin core deactivated to replace it.
+    native mode expired-once disabled
+    native disconnect
+    native recovering
+    wp plugin update gq-support
+    native renewed
+    native upgraded "$next_version" "$next_main"
+
+    native cleanup
+    wp plugin install "$zip" --force
+    node scripts/ci/release-package.mjs installed "$package_dir" "$plugin"
+    wp plugin is-active gq-support
+    echo 'Installed native update passed.'
+    ;;
+
   network)
     wp eval 'exit( is_multisite() ? 0 : 1 );'
     wp plugin is-active gq-support --network
@@ -86,6 +162,9 @@ PHP
     wp --url="$subsite_url" gq-support status >/dev/null
     check seed
     check --url="$subsite_url" seed
+    # One native update key for the network, whichever site's context asks.
+    key_id=$(wp gq-support update-key | sed -n 's/^Key ID: //p')
+    [[ "$(wp --url="$subsite_url" gq-support update-status --format=json | jq -r '.[0].key_id')" == "$key_id" ]]
     wp plugin deactivate gq-support --network
     wp plugin uninstall gq-support
     check uninstalled
@@ -97,7 +176,7 @@ PHP
     ;;
 
   *)
-    echo "usage: package.sh single|network" >&2
+    echo "usage: package.sh single|native|network" >&2
     exit 2
     ;;
 esac

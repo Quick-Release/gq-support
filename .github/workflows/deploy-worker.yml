@@ -137,6 +137,8 @@ jobs:
           # Discord webhook URLs are credentials, per stage environment. Unset closes that channel.
           DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL }}
           DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL }}
+          # The narrow, read-only package token for native updates (#142). Unset closes native updates.
+          UPDATE_PACKAGE_TOKEN: ${{ secrets.SUPPORT_UPDATE_PACKAGE_TOKEN }}
         run: |
           set -euo pipefail
           node scripts/verify-github-app.ts "$DEPLOY_STAGE"

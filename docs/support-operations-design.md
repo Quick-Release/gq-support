@@ -180,6 +180,17 @@ central hosting access. Explicit offboarding revokes update authorization and
 stops central automatic deployment. An update entitlement is never Operator
 authority or permission to submit/read another installation's reports.
 
+Implemented for the native path in #142 ([runbook](runbooks/support-operations.md#native-wordpress-updates)):
+an Operator-granted, expiring, per-Slot update key separate from the Installation
+credential; 15-minute download grants from authenticated metadata; the tested
+ZIP published as a durable private GitHub Release asset and read by the Worker
+with a narrow read-only token, verified against the approved SHA-256 there and
+again on the installation. Not yet established: the stage read tokens, any
+native Slot mapping or grant, a real approved and dispatched release, immutable
+releases on the repository, and a staged end-to-end drill. Offboarding's
+revocation of update access is #147; central deployment is #143 and fleet
+convergence/rollback #144.
+
 ## Operational event and metric contract
 
 These are logical fields and measurements, not a committed database migration.

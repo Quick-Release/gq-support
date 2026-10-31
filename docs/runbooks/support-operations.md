@@ -208,6 +208,54 @@ Accepted Submission IDs and Change IDs always replay their receipt, so an
 expired window never turns a retry into a false failure. If new intake answers
 503 under enforcement, check `release-status` for a missing or malformed record.
 
+## Native WordPress updates
+
+Installations whose reviewed deployment method is `native` update themselves
+through WordPress's own updater (#142); `central` ones use central deployment
+tooling and the Composer package instead. Commands are in the
+[Worker README](../../worker/README.md#native-updates).
+
+1. **Durable package.** The release workflow attaches the exact tested
+   `gq-support.zip`, manifest and provenance to the private repository's
+   `v<version>` GitHub Release and reads the asset back against the tested
+   SHA-256. Enable GitHub's immutable releases for the repository so a published
+   asset cannot be replaced. The Worker serves bytes only when they match the
+   Approved release's recorded SHA-256, so a replaced asset is refused, not served.
+2. **Read credential.** Each stage needs `SUPPORT_UPDATE_PACKAGE_TOKEN` in its
+   GitHub Environment: a token with only read-only Contents access to
+   `Quick-Release/gq-support` (a fine-grained token or a separate GitHub App's
+   installation), never the support GitHub App, whose permissions stay Issues and
+   Metadata. The gated deploy uploads it as the Worker secret `UPDATE_PACKAGE_TOKEN`
+   and removes the secret when it is unset, which closes native updates (503).
+   Record its owner, expiry and rotation in `worker/src/inventory.ts`. To rotate
+   it, create the new token, replace the Environment secret, deploy through the
+   plan gate and revoke the old token. To revoke it, revoke the token at GitHub
+   and remove the secret, then deploy; native updates stop until replaced.
+3. **Provision an installation.** Set the Slot's `deployment: "native"` in its
+   Repository mapping by reviewed PR. On the installation run
+   `wp gq-support update-key` and send GETQUICK the printed public key, never a
+   secret. Grant it with `update-access-grant` and an expiry of at most 400 days;
+   then `wp gq-support update-check` must show the approved release.
+4. **Rotate or renew.** Run `wp gq-support update-key --rotate` and grant the new
+   key: the Slot's newest grant supersedes the old key at once. Renew before
+   expiry the same way; `update-access-status` and the inventory show each Slot's
+   grant state and expiry.
+5. **Revoke.** `update-access-revoke <slot> <key-id|all>` with the ledger
+   database, which records the revocation first so no D1 restore revives it.
+   Offboarding (#147) must revoke `all` for the Slot. Revoking the report
+   Installation credential, `GQ_SUPPORT_DISABLED` or disconnecting the site does
+   not stop updates; only this does.
+
+WordPress asks the service only in cron, WP-CLI or the Updates screen's
+"Check again", at most hourly; ordinary pages never do. Core files a native offer
+only after its own WordPress.org update check succeeds, and its scheduling cannot
+promise prompt completion. Serving a package records `attempted`; the next signed
+metadata check from the new version records `observed`. Neither alone is a
+completed update. A recovery approval withdraws the bad release at once: the
+service refuses its download (410) and offers only the approved package. Core
+does not downgrade through its updater, so installations already running a newer
+withdrawn release need the recovery path in #144.
+
 ## Inventory and credential custody
 
 Use the [Slot inventory](../../worker/README.md#slot-inventory) to find a Slot's

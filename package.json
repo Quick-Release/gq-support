@@ -15,7 +15,7 @@
     "wp:ssh": "ddev ssh gq-wp-playground",
     "wp:update": "cd ../playground && ddev refresh",
     "wp": "ddev exec -p gq-wp-playground wp",
-    "wp:check": "ddev exec -p gq-wp-playground wp plugin activate plugin-check && ddev exec -p gq-wp-playground wp plugin check gq-support",
+    "wp:check": "ddev exec -p gq-wp-playground wp plugin activate plugin-check && ddev exec -p gq-wp-playground wp plugin check gq-support --exclude-checks=plugin_updater",
     "wp:test": "cd ../playground && ddev test-plugin gq-support",
     "lint:php": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcs",
     "lint:php:fix": "ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support composer install --quiet && ddev exec -p gq-wp-playground --dir /var/www/html/web/app/plugins/gq-support vendor/bin/phpcbf",

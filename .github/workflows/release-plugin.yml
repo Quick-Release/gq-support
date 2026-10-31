@@ -192,6 +192,26 @@ jobs:
           git -C "$package_repo" push --force origin HEAD:refs/heads/composer
           git -C "$package_repo" push origin "v$VERSION"
 
+      # The exact tested ZIP, with its manifest and provenance, as durable assets of this private
+      # repository's release for the tag: native updates read the approved bytes there
+      # (worker/src/package-source.ts) long after the 30-day candidate artifact expires. Publication
+      # is not approval: an Operator records and approves the candidate separately.
+      - name: Attach the tested package to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.candidate.outputs.version }}
+          SHA256: ${{ needs.candidate.outputs.sha256 }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" package-zip/gq-support.zip package-zip/gq-support.manifest.json package-zip/provenance.json \
+            --repo "$REPOSITORY" --verify-tag --title "GETQUICK Support $VERSION" \
+            --notes "Tested gq-support.zip SHA-256: $SHA256 (run $GITHUB_RUN_ID, source $GITHUB_SHA). Published, not approved."
+          # Read back what GitHub stores: the asset must be the tested bytes.
+          verify=$(mktemp -d)
+          gh release download "v$VERSION" --repo "$REPOSITORY" --pattern gq-support.zip --dir "$verify"
+          [ "$(sha256sum "$verify/gq-support.zip" | cut -d' ' -f1)" = "$SHA256" ]
+
   dispatch-registry:
     name: Rebuild Composer registry after release
     needs: publish

@@ -24,6 +24,7 @@ import { checkerAccess } from "./independent-check.ts";
 import { DESTINATIONS, discordDestinations } from "./notifications.ts";
 import { inventoryForSlug } from "./inventory.ts";
 import { releaseEnforcementForSlug } from "./release-policy.ts";
+import { githubReleasePackages } from "./package-source.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
@@ -129,7 +130,10 @@ export default Cloudflare.Worker(
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
           // The stage's reviewed release enforcement; an unknown stage has none, and new intake fails closed.
-          }, { digestKey: key, ledger, release: releaseEnforcementForSlug(slug) }, operations, DESTINATIONS.filter((destination) => destinationsOf(env)[destination]),
+          }, { digestKey: key, ledger, release: releaseEnforcementForSlug(slug),
+            // Native update packages, read with the narrow UPDATE_PACKAGE_TOKEN only; unset fails closed (src/package-source.ts).
+            packages: githubReleasePackages({ token: typeof env.UPDATE_PACKAGE_TOKEN === "string" ? env.UPDATE_PACKAGE_TOKEN : undefined }) },
+          operations, DESTINATIONS.filter((destination) => destinationsOf(env)[destination]),
           inventoryForSlug(slug), {
             checker, ledger, restored: (db, ledger) => restored(db, ledger, Date.now()),
             configuration: { github_app: !!clientId && !!slug && typeof env.GITHUB_APP_PRIVATE_KEY === "string",

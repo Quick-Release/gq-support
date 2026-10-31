@@ -61,6 +61,12 @@ const deployToken = (stage: DeployedStage): CredentialCustody => ({
   id: "cloudflare-deploy-token", purpose: "Cloudflare deployment from CI", owner: null, expires: null, rotated: null,
   revocation: "worker/README.md#cloudflare-credentials", locations: [`GitHub Environment ${stage}: CLOUDFLARE_API_TOKEN`],
 });
+/** Native update package reads (src/package-source.ts): not yet created for either stage, so unset closes native updates. */
+const updatePackageToken = (stage: DeployedStage): CredentialCustody => ({
+  id: "update-package-read-token", purpose: "Native update package reads: read-only Contents on Quick-Release/gq-support Releases, never the GitHub App",
+  owner: null, expires: null, rotated: null, revocation: "docs/runbooks/support-operations.md#native-wordpress-updates",
+  locations: [`GitHub Environment ${stage}: SUPPORT_UPDATE_PACKAGE_TOKEN`, "Worker secret UPDATE_PACKAGE_TOKEN"],
+});
 const ALCHEMY_TOKEN: CredentialCustody = {
   id: "cloudflare-alchemy-token", purpose: "Cloudflare API token GETQUICK Support Alchemy (48f5559e9daad1e3e324771d3708468f)",
   owner: null, expires: "2027-01-14", rotated: null, revocation: "worker/README.md#cloudflare-credentials",
@@ -82,7 +88,7 @@ export const stageInventories: Readonly<Record<DeployedStage, StageInventory>> =
       owner: null, expires: null, revocation: "docs/runbooks/github-webhooks.md#rotation",
       locations: ["GitHub Environment staging: SUPPORT_GITHUB_WEBHOOK_SECRET", "Worker secret GITHUB_WEBHOOK_SECRET", "GitHub App webhook settings"],
       rotated: { at: "2026-10-18", evidence: "https://github.com/Quick-Release/gq-support/actions/runs/39133270727" } },
-    discord("staging", "SUPPORT_REQUESTS"), discord("staging", "OPERATIONAL_INCIDENTS"), deployToken("staging"), ALCHEMY_TOKEN,
+    discord("staging", "SUPPORT_REQUESTS"), discord("staging", "OPERATIONAL_INCIDENTS"), deployToken("staging"), updatePackageToken("staging"), ALCHEMY_TOKEN,
   ] },
   prod: { stage: "prod", account: ACCOUNT, resources: resources("prod"), credentials: [
     { id: "github-app-private-key", purpose: "GitHub App authentication for delivery and status reads (getquick-support)",
@@ -92,7 +98,7 @@ export const stageInventories: Readonly<Record<DeployedStage, StageInventory>> =
       owner: null, expires: null, revocation: "docs/runbooks/github-webhooks.md#rotation", rotated: null,
       locations: ["GitHub Environment prod: SUPPORT_GITHUB_WEBHOOK_SECRET", "Worker secret GITHUB_WEBHOOK_SECRET", "GitHub App webhook settings",
         "Sigillo GQ Support project 01M52TXAYNKP6QGHR8PZYYDEY6, environment prod: SUPPORT_GITHUB_WEBHOOK_SECRET"] },
-    discord("prod", "SUPPORT_REQUESTS"), discord("prod", "OPERATIONAL_INCIDENTS"), deployToken("prod"), ALCHEMY_TOKEN,
+    discord("prod", "SUPPORT_REQUESTS"), discord("prod", "OPERATIONAL_INCIDENTS"), deployToken("prod"), updatePackageToken("prod"), ALCHEMY_TOKEN,
   ] },
 };
 
@@ -151,8 +157,11 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
   // What installations signed (src/installation-api.ts) is observed evidence too; the newest observation wins.
   const signed = (await db.prepare("SELECT slot, 'observed' AS kind, version, observed_at, 'signed-request' AS source FROM slot_signed_version")
     .bind().all<Evidence>()).results;
+  // A package the native updater served is an attempt (src/update-access.ts), confirmed only by a later observation.
+  const served = (await db.prepare("SELECT slot, 'attempted' AS kind, version, attempted_at AS observed_at, 'native-update' AS source FROM slot_update_attempt")
+    .bind().all<Evidence>()).results;
   const releases = await releaseSummary(db, release);
-  const latest = [...recorded, ...signed];
+  const latest = [...recorded, ...signed, ...served];
   // The approved release is every Slot's desired version, unless a later Slot-specific record says otherwise.
   // Its dispatch is policy intent: never an attempt or observation of any one installation.
   const approved = releases.approved && { kind: "desired", version: releases.approved.package_version,
@@ -165,6 +174,16 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
     if (!verified) return { state: "unverified", verified_at: null };
     const shown = { state: "verified", verified_at: new Date(verified.verified_at).toISOString() };
     return restricted ? { ...shown, route: verified.route, evidence: verified.evidence, verified_by: verified.verified_by } : shown;
+  };
+  // Each Slot's current native update grant: its key ID and expiry, never more.
+  const grants = (await db.prepare(`SELECT g.slot, g.key_id, g.expires_at, EXISTS (SELECT 1 FROM update_access_revocation r
+    WHERE r.key_id = g.key_id) AS revoked FROM update_access_grant g
+    WHERE NOT EXISTS (SELECT 1 FROM update_access_grant n WHERE n.slot = g.slot AND n.rowid > g.rowid)`).bind()
+    .all<{ slot: string; key_id: string; expires_at: number; revoked: number }>()).results;
+  const updateAccess = (slot: string) => {
+    const grant = grants.find((row) => row.slot === slot);
+    return grant ? { state: Number(grant.revoked) === 1 ? "revoked" : now >= grant.expires_at ? "expired" : "active",
+      key_id: grant.key_id, expires_at: new Date(grant.expires_at).toISOString() } : { state: "none", key_id: null, expires_at: null };
   };
   const find = (slot: string, kind: string) => latest.filter((row) => row.slot === slot && row.kind === kind)
     .concat(kind === "desired" && approved ? [{ slot, ...approved }] : [])
@@ -179,6 +198,7 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
       versions: { desired: intent(find(mapping.slot, "desired")), attempted: intent(find(mapping.slot, "attempted")),
         observed: observation(find(mapping.slot, "observed"), now) },
       update: update(find(mapping.slot, "attempted"), find(mapping.slot, "observed"), find(mapping.slot, "failed")),
+      update_access: updateAccess(mapping.slot),
       contact: contact(mapping.slot),
     })),
     credentials: credentialCustody(inventory, now, { restricted }),

@@ -8,6 +8,7 @@ import { runStatusOperation } from "./status-operations.ts";
 import { runIncidentOperator } from "./incident-operator.ts";
 import { runInventoryOperator } from "./inventory-operator.ts";
 import { runReleaseOperator, type ReleaseArtifact } from "./release-operator.ts";
+import { runUpdateAccessOperator } from "./update-access-operator.ts";
 import type { ReleaseEnforcement } from "./release-policy.ts";
 import type { StageInventory } from "./inventory.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
@@ -63,6 +64,7 @@ const enrollmentCode = (): string => {
 export const runOperator = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
   const { query, recordRevocation, mappings, now = Date.now(), ledger } = options;
   if (args[0]?.startsWith("release-")) return runReleaseOperator(args, { ...options, now });
+  if (args[0]?.startsWith("update-access")) return runUpdateAccessOperator(args, { ...options, now });
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   if (["erase", "erasure-status", "erasure-close", "restore-recorded", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
@@ -73,7 +75,7 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { ...options, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record and release-<status|candidate|approve|dispatch>");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|approve|dispatch> and update-access-<status|grant|revoke>");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

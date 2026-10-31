@@ -1,0 +1,36 @@
+{
+    "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+    "key_id": "34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e",
+    "cases": [
+        {
+            "name": "metadata asks for the approved release without a grant",
+            "method": "GET",
+            "path": "/v1/updates/gq-support",
+            "headers": {
+                "GQ-Update-Key-Id": "34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e",
+                "GQ-Update-Installed-Version": "0.1.10",
+                "GQ-Update-Grant": "",
+                "GQ-Update-Timestamp": "1790000100",
+                "GQ-Update-Request-Id": "b1c2d3e4-0000-4000-8000-000000000001"
+            },
+            "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "canonical": "gq-support-update-v1\nGET\n/v1/updates/gq-support\n34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e\n0.1.10\n\n1790000100\nb1c2d3e4-0000-4000-8000-000000000001\nsha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "signature": "oNiJ3Eif93fUIsFNRcAs0LF/BmOYH/eK6rD/0hk8TIHT+YRH6mW2N3fIn7Cu6neKtSD7jMmB1wGrfwOucZwmAQ=="
+        },
+        {
+            "name": "a package download signs the exact query and its grant",
+            "method": "GET",
+            "path": "/v1/updates/gq-support/package?version=0.2.0&sha256=37a0609135f24d429b262e9f824713497fd6f81de3118cd682ed4f46d934ec62",
+            "headers": {
+                "GQ-Update-Key-Id": "34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e",
+                "GQ-Update-Installed-Version": "0.1.10",
+                "GQ-Update-Grant": "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "GQ-Update-Timestamp": "1790000101",
+                "GQ-Update-Request-Id": "b1c2d3e4-0000-4000-8000-000000000002"
+            },
+            "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "canonical": "gq-support-update-v1\nGET\n/v1/updates/gq-support/package?version=0.2.0&sha256=37a0609135f24d429b262e9f824713497fd6f81de3118cd682ed4f46d934ec62\n34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e\n0.1.10\nfixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n1790000101\nb1c2d3e4-0000-4000-8000-000000000002\nsha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "signature": "KPKE6+XV/pYupjION/0L2WtoVrp2Zd67ZWBh1oWS4usNGzpfEIFWkO15kSqlQSWdPnKMATc60cKox5w0oUjPAw=="
+        }
+    ]
+}

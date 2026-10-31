@@ -12,6 +12,7 @@ $gq_support_suite  = new PHPUnit\Framework\TestSuite();
 $gq_support_suite->addTestFile( __DIR__ . '/SupportContractTest.php' );
 $gq_support_suite->addTestFile( __DIR__ . '/ReportContextTest.php' );
 $gq_support_suite->addTestFile( __DIR__ . '/ReleasePolicyTest.php' );
+$gq_support_suite->addTestFile( __DIR__ . '/UpdaterTest.php' );
 $gq_support_result = $gq_support_runner->run(
 	$gq_support_suite,
 	array(

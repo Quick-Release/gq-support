@@ -12,6 +12,7 @@ import type { StageInventory } from "./inventory.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { handleProbe, handleReport, PROBE_PATH, REPORT_PATH, type ServiceOptions } from "./independent-check.ts";
+import { handleUpdateRequest } from "./update-access.ts";
 
 /** HTTP entry shared by the Alchemy adapter and request-boundary tests. */
 export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequest,
@@ -38,6 +39,15 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
   }
   const db = yield* database;
   if (service && url.pathname === REPORT_PATH) return yield* Effect.promise(() => handleReport(web.success, db, service.checker, Date.now()));
+  // Native updates under their own narrow grant; never the installation API or its credentials.
+  if (url.pathname.startsWith("/v1/updates/")) {
+    let failure: string | undefined;
+    const response = yield* Effect.promise(() => handleUpdateRequest(web.success, db, mappings,
+      { packages: installation.packages ?? null, observe: (observed) => { failure = observed; } }, Date.now()));
+    // A bounded class only: never the URL, headers, grant or package source's response.
+    if (failure) yield* Effect.logError("Native update package unavailable").pipe(Effect.annotateLogs({ event: "update.package", failure }));
+    return response;
+  }
   // Staff dashboards only; the installation API never answers here.
   if (url.pathname === "/v1/operations" || url.pathname.startsWith("/v1/operations/")) {
     return yield* Effect.promise(() => handleOperationsRequest(web.success, db, operations, Date.now(), notifications,
