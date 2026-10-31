@@ -25,6 +25,7 @@ import { DESTINATIONS, discordDestinations } from "./notifications.ts";
 import { inventoryForSlug } from "./inventory.ts";
 import { releaseEnforcementForSlug } from "./release-policy.ts";
 import { githubReleasePackages } from "./package-source.ts";
+import { MIGRATED_SCHEMA_BINDING, migratedSchema } from "./migration-order.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
@@ -48,6 +49,14 @@ export default Cloudflare.Worker(
     // createStorageFor (src/storage.ts), with the binding's `raw` database as `shared`.
     const database = yield* Cloudflare.D1.QueryDatabase(yield* SupportDB);
     const ledgerDatabase = yield* Cloudflare.D1.QueryDatabase(yield* SupportLedger);
+    if (!globalThis.__ALCHEMY_RUNTIME__) {
+      // Deploy time only. Holds the script upload, and with it the new cron, until both databases
+      // have migrated in this deployment; a failed migration leaves the previous Worker serving
+      // (src/migration-order.ts). The D1 bindings above wait for nothing: their IDs are stable.
+      yield* (yield* Cloudflare.Worker).bind`${MIGRATED_SCHEMA_BINDING}`({
+        bindings: [{ type: "plain_text", name: MIGRATED_SCHEMA_BINDING, text: migratedSchema(yield* SupportDB, yield* SupportLedger) }],
+      });
+    }
     const clientId = yield* Config.String("GITHUB_APP_CLIENT_ID").pipe(Config.withDefault(""));
     const slug = yield* Config.String("GITHUB_APP_SLUG").pipe(Config.withDefault(""));
     const appId = yield* Config.String("GITHUB_APP_ID").pipe(Config.withDefault(""));
