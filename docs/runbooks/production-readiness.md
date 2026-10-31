@@ -157,8 +157,11 @@ file exists because none of its evidence exists yet:
 
 - Prod release enforcement is `staged`; no release candidate is approved,
   dispatched or launched for any stage.
-- No prod pins, credentialed prod plan or gated prod deployment; no staging
-  deployment of this commit with recorded migration order.
+- Prod and staging protected resources are pinned (deployed since 2026-10-21 and
+  2026-10-17, last at `0e6bfc92`; see the
+  [plan gate](support-operations.md#deployment-plan-gate)). No credentialed plan
+  has passed the gate and no gated deployment exists for either stage. Main
+  migrations `0020`–`0031` and ledger `0003`/`0004` are pending on both.
 - No prod Slot mapping, central target or native grant; no Client contact verified.
 - Every prod credential lacks a reviewed owner; most lack expiry and rotation evidence.
 - No Discord destination, staff roster, dashboard key, independent checker
