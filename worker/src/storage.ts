@@ -14,6 +14,17 @@ export type SlotRegistry = ReadonlyMap<string, SlotConfig>;
 /** The part of a D1 binding that storage uses. */
 export type QueryDatabase = Pick<D1Database, "prepare" | "batch">;
 
+/**
+ * The same database, refusing new work once `signal` aborts: preparing a
+ * statement or submitting a batch afterwards throws without reaching D1. What
+ * was already submitted still runs to completion, since D1 cannot withdraw a
+ * query or batch in flight, so a bound phase can only stop starting new work.
+ */
+export const untilAborted = (db: QueryDatabase, signal: AbortSignal): QueryDatabase => ({
+  prepare: (sql) => { signal.throwIfAborted(); return db.prepare(sql); },
+  batch: (statements) => { signal.throwIfAborted(); return db.batch(statements); },
+});
+
 export interface StorageConfig {
   readonly slots: SlotRegistry;
   /** The stage's shared database (ADR 0013). */

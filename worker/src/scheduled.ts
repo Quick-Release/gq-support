@@ -10,6 +10,7 @@ import { expireIncidents } from "./incidents.ts";
 import { observeSignals } from "./operational-signals.ts";
 import { sweepNotifications, type NotificationOptions } from "./notifications.ts";
 import { expireMetrics, metricStatement, type SchedulerPhase } from "./operational-metrics.ts";
+import { untilAborted } from "./storage.ts";
 
 export interface ScheduledOptions extends DeliveryOptions {
   /** The title-digest key for erasure redaction (src/cleanup.ts). */
@@ -41,16 +42,23 @@ export const scheduledTick = (options: ScheduledOptions): Effect.Effect<void, ne
     outcomes.push({ phase: name, outcome, durationMs: now() - started, at: now() });
   });
   yield* phase("delivery", sweepDelivery(options), 25_000, "Support delivery sweep failed");
-  yield* phase("cleanup", sweepCleanup({ db: options.db, botLogin: options.botLogin, mappings: options.mappings,
-    digestKey: options.digestKey ?? null, ledger: options.ledger ?? null,
-    ...(options.now ? { now: options.now } : {}) }), 5_000, "Support cleanup sweep failed");
+  // Cut off at its bound, the pass starts no further D1 work; each step is safe to stop between and runs again next minute.
+  yield* phase("cleanup", Effect.scoped(Effect.gen(function* () {
+    const signal = yield* Effect.abortSignal;
+    yield* sweepCleanup({ db: untilAborted(options.db, signal), botLogin: options.botLogin, mappings: options.mappings,
+      digestKey: options.digestKey ?? null, ledger: options.ledger ? untilAborted(options.ledger, signal) : null,
+      ...(options.now ? { now: options.now } : {}) });
+  })), 5_000, "Support cleanup sweep failed");
   // GitHub's webhook delivery log first, briefly bounded, so this tick routes what it shows.
   yield* phase("signals", scanWebhookDeliveries(options.db, now()).pipe(Effect.timeoutOption(1_000),
     Effect.catchCause(() => Effect.logError("Webhook delivery log scan failed")),
-    Effect.andThen(Effect.tryPromise(async () => {
-      await expireIncidents(options.db, now());
-      await expireMetrics(options.db, now());
-      await observeSignals(options.db, now());
+    Effect.andThen(Effect.tryPromise(async (signal) => {
+      // Retention expiry touches only resolved incidents and old aggregates, and observation only open incidents,
+      // so they overlap. Cut off at the bound, no further read or write starts.
+      const db = untilAborted(options.db, signal);
+      const settled = await Promise.allSettled([expireIncidents(db, now()), expireMetrics(db, now()), observeSignals(db, now())]);
+      const failed = settled.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
     }))), 2_000, "Operational signal phase failed");
   const notifications = options.notifications;
   if (notifications) {

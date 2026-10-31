@@ -112,32 +112,36 @@ export const ledgerStore = (ledger: QueryDatabase) => ({
 /**
  * Adds or updates the ledger image of every main row changed since the last
  * pass, and of every row once a day. Never records a removal.
+ *
+ * Each kind's reads are independent of every other kind's, so they go
+ * together: a distant database pays a few roundtrips, not two per kind. The
+ * pass records only once every read succeeded, and marks itself done only
+ * after recording, so a pass cut off or failing anywhere runs again in full.
  */
 export const mirrorToLedger = async (main: QueryDatabase, ledger: QueryDatabase, now: number) => {
   const marks = await main.prepare("SELECT mirrored_at, full_mirrored_at FROM restore_state WHERE id = 1")
     .first<{ mirrored_at: number; full_mirrored_at: number }>();
   const full = !marks || now - marks.full_mirrored_at >= FULL_MIRROR_MS;
-  const changed: LedgerEntry[] = [];
-  for (const kind of ORDER) {
+  type Recorded = { reference: string; payload: string | null };
+  /** The ledger's payloads for these references of a kind, or for the whole kind. */
+  const recordedOf = async (kind: LedgerKind, references: readonly string[] | null): Promise<Recorded[]> => {
+    if (references === null) return (await ledger.prepare("SELECT reference, payload FROM ledger_entry WHERE kind = ?").bind(kind).all<Recorded>()).results;
+    const chunks = Array.from({ length: Math.ceil(references.length / CHUNK) }, (_, index) => references.slice(index * CHUNK, (index + 1) * CHUNK));
+    return (await Promise.all(chunks.map((chunk) => ledger.prepare(`SELECT reference, payload FROM ledger_entry WHERE kind = ?
+      AND reference IN (${chunk.map(() => "?").join(", ")})`).bind(kind, ...chunk).all<Recorded>()))).flatMap(({ results }) => results);
+  };
+  const changedOf = async (kind: LedgerKind) => {
     const { table, columns, present, changed: column } = TABLES[kind];
     const filters = [...(present ? [present] : []), ...(full ? [] : [`${column} >= ?`])];
-    const rows = (await main.prepare(`SELECT ${columns.join(", ")} FROM ${table}${filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : ""}`)
-      .bind(...(full ? [] : [marks.mirrored_at - MIRROR_SKEW_MS])).all()).results;
-    const entries = rows.map((row) => imageOf(kind, row));
-    const recorded = new Map<string, string | null>();
-    if (full) {
-      for (const entry of (await ledger.prepare("SELECT reference, payload FROM ledger_entry WHERE kind = ?").bind(kind)
-        .all<{ reference: string; payload: string | null }>()).results) recorded.set(entry.reference, entry.payload);
-    } else {
-      for (let index = 0; index < entries.length; index += CHUNK) {
-        const references = entries.slice(index, index + CHUNK).map((entry) => entry.reference);
-        for (const entry of (await ledger.prepare(`SELECT reference, payload FROM ledger_entry WHERE kind = ?
-          AND reference IN (${references.map(() => "?").join(", ")})`).bind(kind, ...references)
-          .all<{ reference: string; payload: string | null }>()).results) recorded.set(entry.reference, entry.payload);
-      }
-    }
-    changed.push(...entries.filter((entry) => recorded.get(entry.reference) !== JSON.stringify(entry.payload)));
-  }
+    const images = (async () => (await main.prepare(`SELECT ${columns.join(", ")} FROM ${table}${filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : ""}`)
+      .bind(...(full ? [] : [marks.mirrored_at - MIRROR_SKEW_MS])).all()).results.map((row) => imageOf(kind, row)))();
+    // The full pass reads the kind's whole ledger alongside; an incremental one only the references it changed.
+    const [entries, recorded] = full ? await Promise.all([images, recordedOf(kind, null)])
+      : await images.then(async (entries) => [entries, await recordedOf(kind, entries.map((entry) => entry.reference))] as const);
+    const payloads = new Map(recorded.map((entry) => [entry.reference, entry.payload]));
+    return entries.filter((entry) => payloads.get(entry.reference) !== JSON.stringify(entry.payload));
+  };
+  const changed = (await Promise.all(ORDER.map(changedOf))).flat();
   await ledgerStore(ledger).record(changed, now);
   // Marked at this pass's start: writes landing during it are read again next time.
   await main.prepare(`UPDATE restore_state SET mirrored_at = ?, full_mirrored_at = CASE WHEN ? THEN ? ELSE full_mirrored_at END
