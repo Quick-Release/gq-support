@@ -50,7 +50,11 @@ export const scheduledTick = (options: ScheduledOptions): Effect.Effect<void, ne
       ...(options.now ? { now: options.now } : {}) });
   })), 5_000, "Support cleanup sweep failed");
   // GitHub's webhook delivery log first, briefly bounded, so this tick routes what it shows.
-  yield* phase("signals", scanWebhookDeliveries(options.db, now()).pipe(Effect.timeoutOption(1_000),
+  const scan = Effect.scoped(Effect.gen(function* () {
+    const signal = yield* Effect.abortSignal;
+    return yield* scanWebhookDeliveries(untilAborted(options.db, signal), now());
+  }));
+  yield* phase("signals", scan.pipe(Effect.timeoutOption(1_000),
     Effect.catchCause(() => Effect.logError("Webhook delivery log scan failed")),
     Effect.andThen(Effect.tryPromise(async (signal) => {
       // Retention expiry touches only resolved incidents and old aggregates, and observation only open incidents,

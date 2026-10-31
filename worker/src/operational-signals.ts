@@ -31,7 +31,7 @@ const causesOf = (signal: Signal, rows: readonly Row[]): Cause[] => {
  */
 export const observeSignals = async (db: QueryDatabase, now: number): Promise<void> => {
   const rules = Object.entries(SIGNALS) as [SignalCategory, Signal][];
-  const reads = await Promise.allSettled(rules.map(([, signal]) =>
+  const reads = await Promise.allSettled(rules.map(async ([, signal]) =>
     db.prepare(`SELECT subject, slot, detail FROM (${signal.affected(now)}) ORDER BY subject`).bind().all<Row>()));
   // The next tick observes again; no rule's failure hides another's.
   const observed = rules.map(([category, signal], index) => {

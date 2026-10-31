@@ -604,8 +604,8 @@ reads inside retention, unmapped-Slot and compaction steps. Writes keep their
 order. Incident writes go one at a time, one cause of each rule before any
 rule's next. Cleanup steps keep their privacy order, compaction records the
 ledger before it deletes from the main database, and the mirror marks itself done
-only after recording everything it read. A phase cut off at its bound starts no
-further D1 statement or batch, so a cut-off mirror runs again in full next
+only after recording everything it read. Cleanup and signal work cut off at their
+bounds start no further D1 statement or batch, so a cut-off mirror runs again in full next
 minute. D1 cannot withdraw a statement or batch already submitted, so that one
 still completes after the bound. Each step stays safe to stop and repeat.
 

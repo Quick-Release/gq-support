@@ -6,7 +6,9 @@ import { REFRESH_DEFAULTS, refreshEligible } from "./status-refresh.ts";
  * currently observes with their affected Slots. The minute tick turns them into
  * grouped Operational incidents (src/operational-signals.ts), which the notification phase announces. The
  * same query is the incident's recovery check, so a claimant can resolve it
- * only once the rule no longer observes the cause. Nothing here retries,
+ * only once the rule no longer observes the cause. These reads overlap expiry of
+ * resolved incidents and old metrics: rules must not depend on those expired rows.
+ * Nothing here retries,
  * recreates or force-creates delivery work.
  */
 export type SignalCategory = "delivery_unknown" | "delivery_deadline" | "delivery_rejected" | "webhook_rejected" | "webhook_failed"

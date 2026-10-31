@@ -9,7 +9,8 @@ import { discordDestinations } from "../src/notifications.ts";
 import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { scheduledTick } from "../src/scheduled.ts";
-import type { QueryDatabase } from "../src/storage.ts";
+import { SIGNALS } from "../src/signal-rules.ts";
+import { untilAborted, type QueryDatabase } from "../src/storage.ts";
 import { makeFakeDiscord, webhookUrl } from "./fake-discord.ts";
 import { CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 import { harness } from "./installation-client.ts";
@@ -151,6 +152,15 @@ it("still observes every other rule when one rule's read fails", async () => {
   expect(await incidents()).toEqual([expect.objectContaining({ category: "suppression_ledger_behind" })]);
 });
 
+it("still observes later rules when one rule cannot build its query", async () => {
+  await ledgerBehind();
+  const rule = vi.spyOn(SIGNALS.delivery_unknown, "affected").mockImplementation(() => { throw new Error("rule unavailable"); });
+  try {
+    await tick();
+    expect(await incidents()).toEqual([expect.objectContaining({ category: "suppression_ledger_behind" })]);
+  } finally { rule.mockRestore(); }
+});
+
 it("starts no signal read or incident write once the signal phase is cut off, and the next tick observes again", async () => {
   await ledgerBehind();
   // Every rule's read outlasts the phase bound.
@@ -195,3 +205,53 @@ it("starts no mirror read or write once the cleanup phase is cut off, and the ne
   await tick();
   expect(await ledgerRevocations()).toBe(1);
 }, 30_000);
+
+
+it.each(["first", "all", "run", "raw"] as const)("refuses a prepared statement's %s call after cancellation", async (method) => {
+  const controller = new AbortController();
+  const db = untilAborted(distant(stage.databases.shared), controller.signal);
+  const prepared = db.prepare("SELECT ? AS value").bind(1);
+  controller.abort();
+  expect(() => Reflect.apply(prepared[method], prepared, [])).toThrow(/aborted/i);
+  expect(started).toEqual([]);
+});
+
+it("binds and batches wrapped statements while active, and refuses binding after cancellation", async () => {
+  const controller = new AbortController();
+  const db = untilAborted(distant(stage.databases.shared), controller.signal);
+  const prepared = db.prepare("SELECT ? AS value");
+  expect((await db.batch([prepared.bind(42)]))[0]!.results).toEqual([{ value: 42 }]);
+  controller.abort();
+  expect(() => prepared.bind(1)).toThrow(/aborted/i);
+  expect(() => db.batch([prepared])).toThrow(/aborted/i);
+});
+
+it("still records a later rule when one incident write fails", async () => {
+  await ledgerBehind();
+  github.delivered(500, now);
+  let rulesStarted = false;
+  let failedWrite = false;
+  roundtrip = (sql) => {
+    if (sql.startsWith(RULE_READ)) rulesStarted = true;
+    if (sql === "BATCH" && rulesStarted && !failedWrite) {
+      failedWrite = true;
+      return new Error("incident write unavailable");
+    }
+    return 0;
+  };
+  await tick();
+  expect(failedWrite).toBe(true);
+  expect(await incidents()).toEqual([expect.objectContaining({ category: "suppression_ledger_behind" })]);
+});
+
+it("starts no webhook log write after the scan is cut off, then retries next tick", async () => {
+  github.delivered(500, now);
+  roundtrip = (sql) => sql.startsWith("SELECT delivered_through, guids FROM webhook_delivery_scan") ? 1_500 : 0;
+  await tick();
+  await quiet();
+  expect(((await operator("health")).measured as { metric: string }[]).filter((row) => row.metric === "webhook")).toEqual([]);
+  roundtrip = () => 0;
+  advance(MINUTE);
+  await tick();
+  expect(await incidents()).toEqual([expect.objectContaining({ category: "webhook_failed" })]);
+}, 15_000);
