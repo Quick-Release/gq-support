@@ -570,7 +570,8 @@ only for the same commit, stage, resources, actions and protected identities.
    is missing or duplicated; or a protected identity differs from the stage's pins
    in `worker/deploy/protected-resources.json`. A stage with no pins may only
    create all three protected resources (its first deployment); once they exist,
-   an unpinned stage is refused. Unrecognized actions or identity values are refused.
+   an unpinned stage is refused. Both staging and prod are pinned. Unrecognized
+   actions or identity values are refused.
 3. `worker/deploy-plan/plan.json` holds the verdict, reasons, commit, stage,
    account, run URL, plan time, each resource's name/type/action, the protected
    resources' D1 database ID/name/jurisdiction/account and Worker ID/name, and a
@@ -587,14 +588,35 @@ only for the same commit, stage, resources, actions and protected identities.
    Each run attempt plans afresh: re-running only a failed deploy job cannot find
    its attempt's plan and applies nothing, so re-run all jobs.
 
-Pin identities only from reviewed credentialed plan evidence: copy the observed
-`databaseId` of `SupportDB` and `SupportLedger` and the `workerName` of `Worker`
-from `plan.json` (a refused plan records them) into
+Pin identities only from reviewed credentialed evidence: the observed
+`databaseId` and `databaseName` of `SupportDB` and `SupportLedger` and the
+`workerName` of `Worker`, from a retained `plan.json` (a refused plan records them)
+or from the stack outputs of the stage's gated or historical deployment,
+cross-checked against a read-only provider listing. Record them in
 `worker/deploy/protected-resources.json` under the stage, in a reviewed commit:
 
 ```json
-{ "staging": { "SupportDB": { "databaseId": "…" }, "SupportLedger": { "databaseId": "…" }, "Worker": { "workerName": "…" } } }
+{ "staging": { "SupportDB": { "databaseId": "…", "databaseName": "…" }, "SupportLedger": { "databaseId": "…", "databaseName": "…" }, "Worker": { "workerName": "…" } } }
 ```
+
+**Migration order.** `SupportDB` and `SupportLedger` apply their pending
+migrations when Alchemy updates them. The Worker binds each database by its
+stable `databaseId`, which Alchemy resolves from prior state, so on its own the
+script upload (and with it the new cron) started alongside the migrations: in the
+0e6bfc92 deployments, `[Worker] updating` was logged before `[SupportDB] updated`.
+The Worker now also binds `SUPPORT_MIGRATED_SCHEMA` (`src/migration-order.ts`), a
+plain-text value Alchemy can resolve only after both databases finish their
+update in the same apply. Alchemy therefore uploads the Worker only after both
+migrate. If either migration fails, Alchemy never uploads the Worker, and the
+previous script and cron keep serving.
+`worker/test/migration-order.test.ts` proves this against the pinned Alchemy plan
+and apply engine and the real Worker declaration. Migrations must stay additive:
+the previous Worker runs on the migrated schema until the upload.
+
+The plan job runs the full Worker suite, so it uses the runner CI's `worker` job
+is sized for (`blacksmith-4vcpu-ubuntu-2404`). On 2-vCPU `ubuntu-latest`, six
+integration tests timed out and neither stage could be planned (runs 41187455102
+and 41187494530). `scripts/ci/workflow-policy.mjs` keeps the two runners equal.
 
 Replacing or removing a protected resource has no CI path. That needs a separate
 reviewed migration and recovery plan (ADR 0013/0016/0017), never a relaxed gate.
@@ -604,15 +626,33 @@ reviewed migration and recovery plan (ADR 0013/0016/0017), never a relaxed gate.
 upload. Destroy only personal stages, with `pnpm run destroy --stage <stage>`,
 whose guard refuses staging and prod.
 
-Evidence status: the gate and its CI policy are tested locally
-(`worker/test/plan-gate.test.ts`, `scripts/ci/workflow-policy.test.mjs`); that is
-not plan evidence. No credentialed plan has run for any stage since the gate was
-added, and neither stage has pins. The first staging plan is expected to be refused
-until its existing identities are pinned. Prod has never been deployed, so its first
-plan should create all three protected resources; pin them after that deployment,
-before the next. Production readiness needs a credentialed
-prod plan-only run, its retained `plan.json` with a `safe` verdict, the reviewed
-pins and the reviewer's sign-off.
+Evidence status (2026-10-31): both stages are deployed, and their protected
+resources are pinned.
+
+| Stage | Worker | SupportDB | SupportLedger |
+| --- | --- | --- | --- |
+| staging | `gqsupportworker-worker-staging-fzos3ewkrboeduj2` | `8e8e563c-6633-415a-b435-0a36c0debafe` (`GQSupportWorker-SupportDB-staging-zseqfzenppnbdd7a`) | `d9e31902-5d44-43ed-bdeb-c88b1a6c63af` (`GQSupportWorker-SupportLedger-staging-6ave2x67vemtxlzx`) |
+| prod | `gqsupportworker-worker-prod-mrw4r56wpb43gda6` | `c52c2ec5-f954-4d93-9099-82bcd058d34f` (`GQSupportWorker-SupportDB-prod-3smccmmkkz7shujt`) | `4e0aa172-c5f2-4341-8286-c69a6316b6c3` (`GQSupportWorker-SupportLedger-prod-ltiyaa5pdxa73biz`) |
+
+Prod was first deployed by run
+[39634753079](https://github.com/Quick-Release/gq-support/actions/runs/39634753079)
+(2026-10-21; its databases were created then). It was last deployed by
+[39963084422](https://github.com/Quick-Release/gq-support/actions/runs/39963084422)
+at `0e6bfc92` (2026-10-23), and staging by
+[39962559038](https://github.com/Quick-Release/gq-support/actions/runs/39962559038)
+at the same commit. Both runs predate the plan gate and applied Alchemy directly.
+The pins come from those runs' stack outputs and agree with a read-only Cloudflare
+D1 listing taken 2026-10-31. A prod plan that would create a protected resource is
+refused, never treated as a first deployment. Both stages' latest applied
+migrations are main `0019` and ledger `0002`: main `0020`–`0031` and ledger
+`0003`/`0004` are pending and apply with the next gated deploy.
+
+No credentialed plan has passed the gate yet. The first plan-only runs at
+`54564e0` (staging 41187455102, prod 41187494530) stopped in the test step before
+planning, and they predate the staging operations variables set on 2026-10-31.
+Plan again after this change merges. Production readiness also needs a
+credentialed prod plan-only run, its retained `plan.json` with a `safe` verdict
+whose identities equal the pins, and the reviewer's sign-off.
 
 ## Drill and evidence checklist
 

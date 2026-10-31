@@ -1,1 +1,12 @@
-{}
+{
+  "staging": {
+    "SupportDB": { "databaseId": "8e8e563c-6633-415a-b435-0a36c0debafe", "databaseName": "GQSupportWorker-SupportDB-staging-zseqfzenppnbdd7a" },
+    "SupportLedger": { "databaseId": "d9e31902-5d44-43ed-bdeb-c88b1a6c63af", "databaseName": "GQSupportWorker-SupportLedger-staging-6ave2x67vemtxlzx" },
+    "Worker": { "workerName": "gqsupportworker-worker-staging-fzos3ewkrboeduj2" }
+  },
+  "prod": {
+    "SupportDB": { "databaseId": "c52c2ec5-f954-4d93-9099-82bcd058d34f", "databaseName": "GQSupportWorker-SupportDB-prod-3smccmmkkz7shujt" },
+    "SupportLedger": { "databaseId": "4e0aa172-c5f2-4341-8286-c69a6316b6c3", "databaseName": "GQSupportWorker-SupportLedger-prod-ltiyaa5pdxa73biz" },
+    "Worker": { "workerName": "gqsupportworker-worker-prod-mrw4r56wpb43gda6" }
+  }
+}

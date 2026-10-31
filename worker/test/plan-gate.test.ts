@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planGate, type PlanGateIO, type PlannedRow, type StackPlan } from "../deploy/plan-gate.ts";
+import { planGate, type PlanGateIO, type PlannedRow, type ProtectedPins, type StackPlan } from "../deploy/plan-gate.ts";
+import reviewedPins from "../deploy/protected-resources.json" with { type: "json" };
 
 const TIPME = "8f38791a8c37b182239af2a385ab3c31";
 const COMMIT = "0ce1c6011111111111111111111111111111111a";
@@ -15,7 +16,7 @@ const d1 = (logicalId: string, databaseId: string, action = "update"): PlannedRo
   action,
   attributes: {
     databaseId,
-    databaseName: `gqsupportworker-${logicalId.toLowerCase()}-staging-abc123`,
+    databaseName: `GQSupportWorker-${logicalId}-staging-abc123`,
     jurisdiction: "eu",
     accountId: TIPME,
     migrationsHashes: { "0001_init.sql": SECRET },
@@ -130,7 +131,7 @@ describe("deploy plan gate: plan", () => {
         action: "update",
         identity: {
           databaseId: supportDb,
-          databaseName: "gqsupportworker-supportdb-staging-abc123",
+          databaseName: "GQSupportWorker-SupportDB-staging-abc123",
           jurisdiction: "eu",
           accountId: TIPME,
         },
@@ -141,7 +142,7 @@ describe("deploy plan gate: plan", () => {
         action: "update",
         identity: {
           databaseId: ledgerDb,
-          databaseName: "gqsupportworker-supportledger-staging-abc123",
+          databaseName: "GQSupportWorker-SupportLedger-staging-abc123",
           jurisdiction: "eu",
           accountId: TIPME,
         },
@@ -407,5 +408,51 @@ describe("deploy plan gate: reviewed production plans", () => {
     expect(code).toBe(1);
     expect(run.applied).toEqual([]);
     expect(run.lines.join("\n")).toMatch(/reviewed plan/);
+  });
+});
+
+describe("deploy plan gate: the reviewed pins", () => {
+  // Both durable stages exist: staging since 2026-10-17, prod since run 39634753079 (2026-10-21), last
+  // deployed by runs 39962559038 and 39963084422 at 0e6bfc92. A plan that creates any protected
+  // resource there would bring up a new, empty database or Worker beside the live one.
+  const deployed = (stage: "staging" | "prod") => {
+    const pinned = (reviewedPins as Record<string, Record<string, Record<string, string>>>)[stage]!;
+    const identity = (logicalId: string) => ({ ...pinned[logicalId], accountId: TIPME, jurisdiction: "eu" });
+    return stagingPlan({
+      stage,
+      resources: [
+        { ...d1("SupportDB", ""), attributes: identity("SupportDB") },
+        { ...d1("SupportLedger", ""), attributes: identity("SupportLedger") },
+        { ...worker(), attributes: identity("Worker") },
+        appSecret,
+      ],
+    });
+  };
+  const withPins = (ci: ReturnType<typeof job>): PlanGateIO => ({ ...ci.io, pins: reviewedPins as ProtectedPins });
+
+  it.each(["staging", "prod"] as const)("pin every protected resource of %s, and accept an update of those deployed resources", async (stage) => {
+    const ci = job([deployed(stage)]);
+    expect(await plan(withPins(ci), stage)).toBe(0);
+    expect(ci.evidence().verdict).toBe("safe");
+  });
+
+  it.each(["staging", "prod"] as const)("refuse a %s plan that would create its protected resources as a first deployment", async (stage) => {
+    const created = (row: PlannedRow) => ({ ...row, action: "create", attributes: undefined });
+    const ci = job([stagingPlan({ stage, resources: stagingPlan().resources.map(created) })]);
+    expect(await plan(withPins(ci), stage)).toBe(1);
+    expect(ci.evidence().refusals).toEqual(expect.arrayContaining([
+      "SupportDB is pinned but the plan would create it.",
+      "SupportLedger is pinned but the plan would create it.",
+      "Worker is pinned but the plan would create it.",
+    ]));
+  });
+
+  it("refuse a prod plan whose database is another one than the deployed prod database", async () => {
+    const plan0 = deployed("prod");
+    const swapped = { ...plan0, resources: plan0.resources.map((row) => row.logicalId === "SupportDB"
+      ? { ...row, attributes: { ...row.attributes, databaseId: "8e8e563c-6633-415a-b435-0a36c0debafe" } } : row) };
+    const ci = job([swapped]);
+    expect(await plan(withPins(ci), "prod")).toBe(1);
+    expect(ci.evidence().refusals).toContain("SupportDB databaseId does not match its pinned identity.");
   });
 });

@@ -9,7 +9,9 @@
 //   secret-scans them first, from an allowlisted path and with an explicit `retention-days`;
 // - Worker stages deploy only through the plan gate (worker/deploy/plan-gate.ts): no direct
 //   `alchemy` command but `--help`, no destructive Wrangler command, and `deploy-gate apply` only
-//   after `deploy-gate plan` and the upload that retains its plan.
+//   after `deploy-gate plan` and the upload that retains its plan;
+// - every job that runs the Worker suite uses the runner ci.yml's `worker` job is sized for: on a
+//   smaller runner its integration tests time out, and a deploy plan job then cannot plan the stage.
 // A line-based check: these files keep one key per line, which is all it needs.
 //   node scripts/ci/workflow-policy.mjs
 import { readdirSync, readFileSync } from 'node:fs';
@@ -150,6 +152,50 @@ function stepBlock(lines, index) {
   return block;
 }
 
+const CI = '.github/workflows/ci.yml';
+
+/** The `runs-on` of each job, keyed by job name, with its line index. */
+function runners(lines) {
+  const owner = jobNames(lines);
+  const found = new Map();
+  lines.forEach((line, index) => {
+    const runner = line.match(/^ {4}runs-on:\s*(\S+)\s*$/)?.[1];
+    if (runner) found.set(owner[index], { runner, index });
+  });
+  return found;
+}
+
+/**
+ * Jobs that run the Worker suite (`pnpm test` under `working-directory: worker`) on another runner
+ * than ci.yml's `worker` job, the runner that suite's timeouts are sized for.
+ * @param {Map<string, string>} texts Workflow text by repository path.
+ */
+export function workerSuiteRunnerProblems(texts) {
+  const ciLines = texts.get(CI)?.split('\n');
+  const expected = ciLines && runners(ciLines).get('worker')?.runner;
+  const problems = [];
+  for (const [path, text] of texts) {
+    if (!path.startsWith('.github/workflows/')) continue;
+    const lines = text.split('\n');
+    const owner = jobNames(lines);
+    const inWorker = new Set(lines.flatMap((line, index) => (/^\s+working-directory:\s*worker\s*$/.test(line) ? [owner[index]] : [])));
+    const suite = new Set(lines.flatMap((line, index) => (/^\s*(?:-\s+)?run:\s*pnpm (?:run )?test\s*$/.test(line) && inWorker.has(owner[index]) ? [owner[index]] : [])));
+    const jobs = runners(lines);
+    for (const name of suite) {
+      if (path === CI && name === 'worker') continue;
+      if (!expected) {
+        problems.push(`${path}:1: job \`${name}\` runs the Worker suite, but ${CI} has no \`worker\` job runner to match`);
+        continue;
+      }
+      const job = jobs.get(name);
+      if (job?.runner !== expected) {
+        problems.push(`${path}:${(job?.index ?? 0) + 1}: job \`${name}\` runs the Worker suite on \`${job?.runner ?? 'no runner'}\`; use \`${expected}\`, the runner ${CI} sizes it for`);
+      }
+    }
+  }
+  return problems;
+}
+
 export function checkRepository(root = ROOT) {
   const files = [
     ...readdirSync(join(root, '.github', 'workflows')).filter((name) => /\.ya?ml$/.test(name)).map((name) => `.github/workflows/${name}`),
@@ -166,7 +212,10 @@ export function checkRepository(root = ROOT) {
       queue.push(callee);
     }
   }
-  return [...texts].flatMap(([path, text]) => checkWorkflow(path, text, { pullRequestCode: called.has(path) }));
+  return [
+    ...[...texts].flatMap(([path, text]) => checkWorkflow(path, text, { pullRequestCode: called.has(path) })),
+    ...workerSuiteRunnerProblems(texts),
+  ];
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

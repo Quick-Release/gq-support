@@ -64,7 +64,8 @@ const PROTECTED: Readonly<Record<string, { type: string; identity: Readonly<Reco
 function d1Identity(): Record<string, RegExp> {
   return {
     databaseId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    databaseName: /^[a-z0-9][a-z0-9_-]{0,63}$/,
+    // Alchemy names a database `<Stack>-<LogicalId>-<stage>-<suffix>`, in mixed case: GQSupportWorker-SupportDB-prod-….
+    databaseName: /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/,
     jurisdiction: /^(eu|fedramp|default)$/,
     accountId: /^[0-9a-f]{32}$/,
   };

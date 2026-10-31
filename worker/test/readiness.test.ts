@@ -25,7 +25,7 @@ const migrations = { SupportDB: readdirSync(new URL("../migrations/", import.met
   SupportLedger: readdirSync(new URL("../ledger-migrations/", import.meta.url).pathname).filter((name) => name.endsWith(".sql")).sort() };
 
 /** This checkout's real reviewed configuration for prod. */
-const repositoryConfig: ReadinessConfig = { enforcement: stageReleaseEnforcement.prod, pins: (pins as Record<string, never>).prod,
+const repositoryConfig: ReadinessConfig = { enforcement: stageReleaseEnforcement.prod, pins: (pins as Record<string, ReadinessConfig["pins"]>).prod,
   mappings: stageMappings.prod, centralTargets: stageCentralTargets.prod, inventory: stageInventories.prod, reviewers: SIGN_OFF_REVIEWERS, migrations };
 
 const PINS = { SupportDB: { databaseId: "00000000-0000-4000-8000-000000000001" }, SupportLedger: { databaseId: "00000000-0000-4000-8000-000000000002" },
@@ -152,7 +152,7 @@ describe("production readiness", () => {
     expect(report.gates.every((entry) => entry.state !== "passed")).toBe(true);
     expect(codes("evidence")).toEqual(["evidence_missing"]);
     expect(codes("release_enforcement")).toEqual(["release_enforcement_staged"]);
-    expect(codes("production_deployment")).toEqual(["prod_pins_missing", "deployment_missing"]);
+    expect(codes("production_deployment")).toEqual(["deployment_missing"]);
     expect(codes("slots")).toEqual(["no_prod_slots"]);
     expect(codes("sign_off")).toEqual(["no_reviewed_sign_off_reviewers", "sign_off_missing"]);
     expect(codes("access_audit")).toEqual(["access_missing"]);

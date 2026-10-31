@@ -2,7 +2,7 @@
 // trigger, and artifacts only through the secret-scanning upload with bounded retention.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkRepository, checkWorkflow } from './workflow-policy.mjs';
+import { checkRepository, checkWorkflow, workerSuiteRunnerProblems } from './workflow-policy.mjs';
 
 const PINNED = 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0';
 const workflow = ({ on = 'pull_request:', permissions = 'permissions:\n  contents: read', steps = `      - uses: ${PINNED}` } = {}) =>
@@ -123,4 +123,18 @@ test('a workflow applies a stage only after retaining its plan', () => {
   assert.match(steps(apply).join('\n'), /retained plan/);
   assert.match(steps(plan, apply).join('\n'), /retained plan/);
   assert.match(steps(apply, plan, upload).join('\n'), /retained plan/);
+});
+
+test('every job that runs the Worker suite uses the runner CI sizes it for', () => {
+  const job = (name, runner, steps = '      - run: pnpm test') =>
+    `name: X\n\non:\n  workflow_dispatch:\n\npermissions:\n  contents: read\n\njobs:\n  ${name}:\n    runs-on: ${runner}\n    defaults:\n      run:\n        working-directory: worker\n    steps:\n${steps}\n`;
+  const ci = job('worker', 'blacksmith-4vcpu-ubuntu-2404');
+  const texts = (deploy) => new Map([['.github/workflows/ci.yml', ci], ['.github/workflows/deploy-worker.yml', deploy]]);
+  // The deploy gate's plan job runs the full suite; on a 2-vCPU runner its integration tests time out
+  // and the stage cannot be planned (runs 41187455102 and 41187494530).
+  assert.match(workerSuiteRunnerProblems(texts(job('plan', 'ubuntu-latest'))).join('\n'), /deploy-worker\.yml:\d+: job `plan` runs the Worker suite on `ubuntu-latest`.*blacksmith-4vcpu-ubuntu-2404/);
+  assert.deepEqual(workerSuiteRunnerProblems(texts(job('plan', 'blacksmith-4vcpu-ubuntu-2404'))), []);
+  // A job that does not run the Worker suite may use any runner.
+  assert.deepEqual(workerSuiteRunnerProblems(texts(job('deploy', 'ubuntu-latest', '      - run: pnpm install --frozen-lockfile'))), []);
+  assert.match(workerSuiteRunnerProblems(new Map([['.github/workflows/deploy-worker.yml', job('plan', 'ubuntu-latest')]])).join('\n'), /ci\.yml.*`worker` job/);
 });
