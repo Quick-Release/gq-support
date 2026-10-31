@@ -1,5 +1,9 @@
 parameters:
 	level: 6
+	# Cold WordPress reflection caches exceed 1 GiB with the update/recovery code.
+	# Keep the 2 GiB per-process analysis budget bounded on larger CI hosts too.
+	parallel:
+		maximumNumberOfProcesses: 2
 	phpVersion:
 		min: 80000
 		max: 80499
