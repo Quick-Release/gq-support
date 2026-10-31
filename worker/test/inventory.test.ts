@@ -146,14 +146,45 @@ it("shows staff only when a Client's independent contact was verified; the route
     return (JSON.parse(body) as { slots: { contact: unknown }[] }).slots.map((slot) => slot.contact);
   };
   expect(await contact()).toEqual([{ state: "unverified", verified_at: null }, { state: "unverified", verified_at: null }]);
-  await operator("inventory-contact", "shop/production", route, at(300_000), "drill-2026-10", "alex");
+  await operator("inventory-contact", "shop/production", route, "Client operations duty manager", "separate-device-drill", at(300_000), "drill-2026-10", "alex");
   expect((await contact())[0]).toEqual({ state: "verified", verified_at: at(300_000) });
   expect(JSON.parse(await operator("inventory", "shop/production"))).toMatchObject({
     slot: "shop/production",
-    contact: { state: "verified", verified_at: at(300_000), route, evidence: "drill-2026-10", verified_by: "alex" },
+    contact: { state: "verified", verified_at: at(300_000), route, responder: "Client operations duty manager", method: "separate-device-drill",
+      evidence: "drill-2026-10", verified_by: "alex" },
   });
-  await expect(operator("inventory-contact", "shop/production", "", at(0), "ref", "alex")).rejects.toThrow("Invalid");
-  await expect(operator("inventory-contact", "shop/production", route, at(600_001), "ref", "alex")).rejects.toThrow("no later than now");
+  await expect(operator("inventory-contact", "shop/production", "", "Responder", "separate-device-drill", at(0), "ref", "alex")).rejects.toThrow("Invalid");
+  await expect(operator("inventory-contact", "shop/production", route, "", "separate-device-drill", at(0), "ref", "alex")).rejects.toThrow("Invalid");
+  await expect(operator("inventory-contact", "shop/production", route, "Responder", "email", at(0), "ref", "alex")).rejects.toThrow("Invalid");
+  await expect(operator("inventory-contact", "shop/production", route, "Responder", "separate-device-drill", at(600_001), "ref", "alex"))
+    .rejects.toThrow("no later than now");
+  // The old five-argument form recorded no responder or drill: refused rather than read as verified.
+  await expect(operator("inventory-contact", "shop/production", route, at(0), "ref", "alex")).rejects.toThrow("Usage");
+});
+
+it("onboarding readiness names each Slot's exact contact blocker; an attestation or an older record never counts as a verified drill", async () => {
+  advance(600_000);
+  const readiness = async () => JSON.parse(await operator("inventory-readiness")) as { ready: boolean; blocker: string | null;
+    slots: { slot: string; ready: boolean; blockers: string[] }[] };
+  expect(await readiness()).toEqual({ ready: false,
+    blocker: "Onboarding blocked: shop/production: contact_unverified; shop/staging: contact_unverified",
+    slots: [{ slot: "shop/production", ready: false, blockers: ["contact_unverified"] }, { slot: "shop/staging", ready: false, blockers: ["contact_unverified"] }] });
+  // A record from before responders and drills were recorded is incomplete.
+  await stage.databases.shared.prepare(`INSERT INTO slot_contact_verification (slot, route, evidence, verified_at, verified_by, recorded_at)
+    VALUES ('shop/staging', 'Legacy route', 'ref', ?, 'alex', ?)`).bind(START, START).run();
+  await operator("inventory-contact", "shop/production", "Contract annex B duty phone", "Duty manager", "attestation", at(100_000), "signed-letter", "alex");
+  expect((await readiness()).slots.map((slot) => slot.blockers)).toEqual([["contact_attestation_only"], ["contact_incomplete"]]);
+  expect((await staffInventory()).slots.map((slot) => slot.contact)).toEqual([{ state: "unverified", verified_at: null }, { state: "unverified", verified_at: null }]);
+
+  await operator("inventory-contact", "shop/production", "Contract annex B duty phone", "Duty manager", "separate-device-drill", at(200_000), "drill-1", "alex");
+  await operator("inventory-contact", "shop/staging", "Contract annex C desk", "Desk lead", "separate-device-drill", at(200_000), "drill-2", "alex");
+  expect(await readiness()).toEqual({ ready: true, blocker: null,
+    slots: [{ slot: "shop/production", ready: true, blockers: [] }, { slot: "shop/staging", ready: true, blockers: [] }] });
+  // The latest record decides: a later attestation of a new route is not a drill of it.
+  await operator("inventory-contact", "shop/production", "New route", "Duty manager", "attestation", at(300_000), "letter-2", "alex");
+  expect((await readiness()).slots[0]).toEqual({ slot: "shop/production", ready: false, blockers: ["contact_attestation_only"] });
+  // Nothing restricted leaves the CLI's own inventory view.
+  expect(JSON.stringify(await readiness())).not.toMatch(/annex|route|Duty manager|drill-1/i);
 });
 
 it("shows staff each credential's purpose, owner, expiry and rotation without its locations, which only the CLI shows", async () => {

@@ -311,7 +311,7 @@ it("routes a privacy cleanup that cannot confirm its remote outcome, until an Op
   loseCreate();
   const request = await accept(production);
   await tick();
-  await operator("offboard", "shop/production", "operator-1");
+  await operator("offboard", "shop/production", "operator-1", "https://github.com/Quick-Release/gq-support/issues/147");
   // Offboarding's 30-day grace ends: content is purged, but the uncertain create's outcome stays unconfirmed.
   advance(30 * 24 * 60 * MINUTE + MINUTE);
   await tick();

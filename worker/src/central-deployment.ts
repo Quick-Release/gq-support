@@ -18,10 +18,13 @@ import { mappingFor, type DeployedStage, type RepositoryMapping } from "./reposi
  *    named release is the approved, dispatched one, its contract is served and its
  *    bytes match the approved SHA-256.
  * 2. Records the application in one statement that rechecks the release is still
- *    approved and the Slot is not offboarded or already being applied to.
+ *    approved and the Slot is not offboarded or already being applied to. The
+ *    suppression ledger must show the service serving and the Slot not offboarded.
  * 3. Reads the installation's version (an unreachable host stops here, unchanged),
- *    uploads the verified bytes, checks their digest there, rechecks approval, then
- *    asks WordPress to install exactly that upload.
+ *    uploads the verified bytes, checks their digest there, rechecks approval and
+ *    the ledger (no offboarding, maintenance or restore since step 2), then asks
+ *    WordPress to install exactly that upload. An install already asked for may
+ *    still finish after an offboarding: its outcome is recorded, never assumed.
  * 4. Verifies by reading back the version and every file's SHA-256 against the
  *    approved ZIP's own entries, and records the outcome once: `verified`,
  *    `failed`, `unknown` (the transport was lost after a possible change),
@@ -192,6 +195,12 @@ export interface CentralApplication {
   /** Where the approved bytes come from (src/package-source.ts); they must match the approved SHA-256. */
   readonly packages: PackageSource;
   readonly query: OperatorOptions["query"];
+  /**
+   * The suppression ledger (src/ledger.ts): an offboarding recorded there, a
+   * maintenance begun or a restore recorded since the application started
+   * stops it before the install, even if a restore rewound the main database.
+   */
+  readonly ledger: OperatorOptions["query"];
   readonly now: number;
   readonly clock?: () => number;
   /**
@@ -247,6 +256,16 @@ export const applyCentralRelease = async (application: CentralApplication): Prom
   if (await hex(read.bytes) !== sha256) throw new CentralRefusal("The package bytes do not match the approved SHA-256; nothing was applied.");
   const expected = await packageFiles(read.bytes);
 
+  // The service's state as the application starts; any change before the install stops it.
+  const [fence] = await application.ledger(`SELECT e.epoch, m.generation FROM ledger_epoch e, maintenance m
+    WHERE e.id = 1 AND m.id = 1 AND m.state = 'serving'`, []);
+  if (!fence) throw new CentralRefusal("Refused: maintenance is in effect or the ledger cannot be read; see maintenance-status. Nothing was applied.");
+  const ledgerAllows = async () => (await application.ledger(`SELECT 1 FROM ledger_epoch e, maintenance m
+    WHERE e.id = 1 AND m.id = 1 AND m.state = 'serving' AND m.generation = ? AND e.epoch = ? AND NOT EXISTS (SELECT 1 FROM ledger_entry
+      WHERE payload IS NOT NULL AND ((kind = 'offboarding' AND reference = ?) OR (kind = 'suppression' AND reference = ?)))`,
+  [Number(fence.generation), Number(fence.epoch), slot, `slot:${slot}`])).length === 1;
+  if (!await ledgerAllows()) throw new CentralRefusal("Not applied: the Slot is offboarded; check offboard-status.");
+
   const id = crypto.randomUUID();
   // Write-ahead, in one statement: the release is still the approved, dispatched one with
   // these bytes, the Slot is not offboarded, and no other application to it is running.
@@ -265,7 +284,8 @@ export const applyCentralRelease = async (application: CentralApplication): Prom
   const stillApproved = async () => (await query(`SELECT 1 AS current FROM central_deployment x
     WHERE x.id = ? AND x.release_sequence = (SELECT MAX(sequence) FROM release_approval)
       AND NOT EXISTS (SELECT 1 FROM offboarding WHERE slot = x.slot)
-      AND NOT EXISTS (SELECT 1 FROM delivery_suppression WHERE scope = 'slot' AND reference = x.slot AND reason = 'offboarding')`, [id])).length === 1;
+      AND NOT EXISTS (SELECT 1 FROM delivery_suppression WHERE scope = 'slot' AND reference = x.slot AND reason = 'offboarding')`, [id])).length === 1
+    && await ledgerAllows();
 
   const run = async (argv: readonly string[], options: { stdin?: Uint8Array; timeoutMs?: number } = {}): Promise<CommandResult> => {
     // A transport that throws gave no answer either.
@@ -396,10 +416,11 @@ export const runCentralOperator = async (args: readonly string[], options: Opera
   if (command === "central-apply" && args.length === 5) {
     if (!RELEASE_ID.test(releaseId!) || !directory) throw new Error(USAGE);
     if (!central) throw new Error("This Operator boundary has no central deployment transport");
+    if (!options.ledger) throw new Error("Pass --ledger-database-id: a central application checks the suppression ledger's offboardings and maintenance.");
     if (!readArtifact) throw new Error("This Operator boundary cannot read release artifacts");
     return JSON.stringify(await applyCentralRelease({ slot: slot!, releaseId: Number(releaseId), actor: actor!, mappings,
       targets: central.targets, transport: central.transport, packages: central.packages ?? artifactPackages(readArtifact, directory),
-      query, now }));
+      query, ledger: options.ledger, now }));
   }
   throw new Error(USAGE);
 };

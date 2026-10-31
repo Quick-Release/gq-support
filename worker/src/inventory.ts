@@ -143,7 +143,16 @@ const update = (attempted: Evidence | undefined, observed: Evidence | undefined,
     : { outcome: "failed", at: new Date(failure).toISOString() };
 };
 
-interface Contact { slot: string; route: string; evidence: string; verified_at: number; verified_by: string }
+interface Contact { slot: string; route: string; responder: string | null; method: string | null; evidence: string; verified_at: number; verified_by: string }
+
+/**
+ * Why a Slot's independent contact does not yet allow onboarding (#147), from its
+ * restricted inventory entry: none recorded, only attested, or recorded before
+ * responders and drills were (no responder or method). Empty when verified.
+ */
+export const contactBlockers = (contact: { state: string; method?: string | null; responder?: string | null; verified_at: string | null }) =>
+  contact.state === "verified" ? [] : contact.verified_at === null ? ["contact_unverified"]
+    : contact.method === "attestation" && contact.responder ? ["contact_attestation_only"] : ["contact_incomplete"];
 
 /**
  * The per-Slot inventory (docs/support-operations-design.md). The operations API
@@ -187,14 +196,17 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
   // Its dispatch is policy intent: never an attempt or observation of any one installation.
   const approved = releases.approved && { kind: "desired", version: releases.approved.package_version,
     observed_at: Date.parse(releases.approved.approved_at!), source: "release" };
-  const contacts = (await db.prepare(`SELECT slot, route, evidence, verified_at, verified_by FROM (SELECT *, ROW_NUMBER()
+  const contacts = (await db.prepare(`SELECT slot, route, responder, method, evidence, verified_at, verified_by FROM (SELECT *, ROW_NUMBER()
     OVER (PARTITION BY slot ORDER BY verified_at DESC, rowid DESC) AS position FROM slot_contact_verification) WHERE position = 1`)
     .bind().all<Contact>()).results;
   const contact = (slot: string) => {
     const verified = contacts.find((row) => row.slot === slot);
     if (!verified) return { state: "unverified", verified_at: null };
-    const shown = { state: "verified", verified_at: new Date(verified.verified_at).toISOString() };
-    return restricted ? { ...shown, route: verified.route, evidence: verified.evidence, verified_by: verified.verified_by } : shown;
+    // Only the latest record's live separate-device drill with a named responder verifies the contact.
+    const drilled = verified.method === "separate-device-drill" && verified.responder !== null;
+    const shown = drilled ? { state: "verified", verified_at: new Date(verified.verified_at).toISOString() } : { state: "unverified", verified_at: null };
+    return restricted ? { ...shown, verified_at: new Date(verified.verified_at).toISOString(), route: verified.route, responder: verified.responder,
+      method: verified.method, evidence: verified.evidence, verified_by: verified.verified_by } : shown;
   };
   // Each Slot's current native update grant: its key ID and expiry, never more.
   const grants = (await db.prepare(`SELECT g.slot, g.key_id, g.expires_at, EXISTS (SELECT 1 FROM update_access_revocation r

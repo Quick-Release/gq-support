@@ -276,7 +276,11 @@ const launch = async (query: OperatorOptions["query"], sequence: number, live: n
 };
 
 /** The Slots a launch targets: every mapped, not offboarded Slot, recorded with its deployment method. */
-const targetsOf = (mappings: readonly RepositoryMapping[]) => mappings.map((mapping) => ({ slot: mapping.slot, method: mapping.deployment ?? null }));
+const targetsOf = async (query: OperatorOptions["query"], mappings: readonly RepositoryMapping[]) => {
+  const offboarded = new Set((await query(`SELECT slot FROM offboarding
+    UNION SELECT reference FROM delivery_suppression WHERE scope = 'slot' AND reason = 'offboarding'`, [])).map((row) => String(row.slot)));
+  return mappings.filter((mapping) => !offboarded.has(mapping.slot)).map((mapping) => ({ slot: mapping.slot, method: mapping.deployment ?? null }));
+};
 
 /**
  * Runs `work` over `items` with at most `limit` at once, stopping new work once
@@ -352,7 +356,7 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
       : recoveryProblem(previous as unknown as Package, schema, floor);
     if (previous !== null && previous.schema_to! >= floor && recovery !== null) failures.recovery = `previous release ${previous.package_version}: ${recovery}`;
     if (Object.keys(failures).length > 0) throw new GateRefusal(failures);
-    await launch(query, current.sequence, schema.live!, { deployment, targets: targetsOf(mappings),
+    await launch(query, current.sequence, schema.live!, { deployment, targets: await targetsOf(query, mappings),
       recovery: previous && recovery === null ? { release_id: previous.sequence, version: previous.package_version } : recovery }, actor!, now);
     return JSON.stringify(await rolloutStatus(db, mappings, current.sequence, now, options.central?.targets));
   }
@@ -369,6 +373,7 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
     const [, release, directory, actor] = args;
     if (!RELEASE_ID.test(release!) || !ACTOR.test(actor!)) throw new Error(USAGE);
     const central = need(options.central, "a central deployment transport for this Operator command");
+    const ledger = need(options.ledger, "the suppression ledger database (--ledger-database-id) for this Operator command");
     const readArtifact = need(options.readArtifact, "release artifact access for this Operator command");
     const offered = await offeredRelease(db);
     if (!offered || offered.sequence !== Number(release)) throw new FleetRefusal("Only the dispatched approved release is applied; check fleet-status.");
@@ -386,7 +391,7 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
       }
       try {
         const result: CentralResult = await applyCentralRelease({ slot: slot.slot, releaseId: offered.sequence, actor: actor!, mappings,
-          targets: central.targets, transport: central.transport, packages, query, now, mode });
+          targets: central.targets, transport: central.transport, packages, query, ledger, now, mode });
         // Withdrawn or superseded meanwhile: start nothing more for this release.
         if (!result.still_approved) halted = true;
         return { slot: slot.slot, action: mode, outcome: result.outcome, reason: result.reason, still_approved: result.still_approved };
@@ -442,7 +447,7 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
       RETURNING sequence`, [current.sequence, current.sequence, `withdraws release ${current.sequence}`, actor!, now, version!, current.sequence]);
     if (!approved) throw new FleetRefusal("The approved release changed meanwhile; check release-status.");
     const sequence = Number(approved.sequence);
-    await launch(query, sequence, schema.live!, { deployment, targets: targetsOf(mappings), withdraws: current.sequence }, actor!, now);
+    await launch(query, sequence, schema.live!, { deployment, targets: await targetsOf(query, mappings), withdraws: current.sequence }, actor!, now);
     return JSON.stringify({ withdrawn: { release_id: current.sequence, version: current.package_version },
       recovery: await rolloutStatus(db, mappings, sequence, now, options.central?.targets) });
   }

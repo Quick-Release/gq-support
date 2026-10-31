@@ -1,5 +1,5 @@
-import { ERASABLE, erasureImages, erasureStatements, erasureStatus, OFFBOARDING_GRACE_MS, OPEN_ERASURE, type Statement } from "./cleanup.ts";
-import { imageOf, ledgerStore } from "./ledger.ts";
+import { ERASABLE, erasureImages, erasureStatements, erasureStatus, OPEN_ERASURE, type Statement } from "./cleanup.ts";
+import { ledgerStore } from "./ledger.ts";
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
 import { mappingFor } from "./repository-mappings.ts";
 import { MAINTENANCE_DRAIN_MS } from "./maintenance.ts";
@@ -11,10 +11,10 @@ const REQUEST = /^req_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USAGE = "Usage: operator erase <slot> <opaque-actor> <reporter-reference>; operator erasure-status <erasure>; " +
   "operator erasure-close <erasure> <opaque-actor>; operator restore-recorded <opaque-actor> <time-travel-restore>; " +
   "operator cleanup-reconcile <request> <opaque-actor> positive-evidence; " +
-  "operator cleanup-exception <request> <opaque-actor> <client-instructed|operator-verified>; operator offboard <slot> <opaque-actor>";
+  "operator cleanup-exception <request> <opaque-actor> <client-instructed|operator-verified>";
 
 /**
- * Erasure, cleanup review and offboarding. Independent CLI credentials
+ * Erasure and cleanup review (offboarding is src/offboarding.ts). Independent CLI credentials
  * authorize this boundary; no HTTP route calls it. Every mutation writes its
  * audit row first, and reasons come from a fixed list, never free text.
  */
@@ -80,19 +80,6 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
     // The reference is needed only while the erasure is open.
     await query("UPDATE erasure SET closed_at = ?, reporter_reference = NULL, changed_at = ? WHERE id = ? AND closed_at IS NULL", [now, now, reference!]);
     return "Erasure closed";
-  }
-  if (command === "offboard" && args.length === 3) {
-    const slot = reference!;
-    if (!mappingFor(mappings, slot)) throw new Error("Unknown Slot");
-    await ledger().record([imageOf("suppression", { scope: "slot", reference: slot, reason: "offboarding" }),
-      imageOf("offboarding", { slot, recorded_at: now, purge_after: now + OFFBOARDING_GRACE_MS })], now);
-    await audit("offboard", slot, "offboarding");
-    // Suppression first: no new create from the moment the Slot is offboarded.
-    await query(`INSERT INTO delivery_suppression (scope, reference, reason, changed_at) VALUES ('slot', ?, 'offboarding', ?) ON CONFLICT DO NOTHING`, [slot, now]);
-    await query(`INSERT INTO offboarding (slot, recorded_at, purge_after, changed_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-      [slot, now, now + OFFBOARDING_GRACE_MS, now]);
-    const [{ purge_after: purgeAfter }] = await query("SELECT purge_after FROM offboarding WHERE slot = ?", [slot]) as [{ purge_after: number }];
-    return `Offboarded ${slot}; content is purged from ${new Date(purgeAfter).toISOString()}. Revoke its key with: operator revoke ${slot}`;
   }
   if (!REQUEST.test(reference ?? "") || args.length !== 4) throw new Error(USAGE);
   const unresolved = "EXISTS (SELECT 1 FROM support_cleanup WHERE request_id = ? AND state = 'unresolved')";

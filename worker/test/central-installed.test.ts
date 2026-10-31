@@ -41,12 +41,14 @@ afterAll(async () => { await stage?.dispose(); });
 
 const query = async (sql: string, parameters: readonly (string | number)[]) =>
   (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results;
+const ledger = async (sql: string, parameters: readonly (string | number)[]) =>
+  (await stage.databases.ledger.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results;
 /** Release workflow artifacts by version: the exact ZIP with a manifest and provenance that name it. */
 const artifacts = new Map<string, { zip: Uint8Array; manifest: string; provenance: string }>();
 const artifact = (zip: Uint8Array, version: string) => artifacts.set(version, { zip,
   manifest: JSON.stringify({ name: "gq-support", version, zip: { size: zip.length, sha256: sha256(zip) } }),
   provenance: JSON.stringify({ version, commit: "b".repeat(40), run: String(39_000_000_001 + artifacts.size), zip_sha256: sha256(zip) }) });
-const operator = async (...args: string[]) => runOperator(args, { mappings, now: Date.now(), recordRevocation: async () => {}, query,
+const operator = async (...args: string[]) => runOperator(args, { mappings, now: Date.now(), recordRevocation: async () => {}, query, ledger,
   stage: "staging", evidence, migrations: reviewedMigrations(),
   readArtifact: async (directory) => artifacts.get(directory)!, central: { targets: [target], transport: commandTransport() } });
 /** Gated, approved and launched to the fleet; `recovery` withdraws `expected` to this earlier launched version. */

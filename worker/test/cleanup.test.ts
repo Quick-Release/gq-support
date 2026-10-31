@@ -413,6 +413,18 @@ it("a completed erasure's tombstone window starts when its reference search ends
   expect(await erasureStatus(db(), erasure)).toBeNull();
 });
 
+it("a site's disconnect or an Operator key revocation is not offboarding: work already accepted is still delivered", async () => {
+  const accepted = await accept();
+  expect((await installation.send("DELETE", "/v1/installation")).status).toBe(200);
+  const second = await accept().catch(() => null);
+  expect(second).toBeNull();
+  expect(await operator("revoke", mapping.slot)).toBe("Revoked shop/production");
+  expect(await db().prepare("SELECT 1 FROM offboarding").first()).toBeNull();
+  await sweep();
+  expect(posts()).toHaveLength(1);
+  expect(await intentRow(accepted.id)).toMatchObject({ state: "delivered" });
+});
+
 it("offboarding suppresses creates, purges content after 30 days and leaves the Client's issues", async () => {
   const delivered = await accept();
   await sweep();
@@ -421,7 +433,13 @@ it("offboarding suppresses creates, purges content after 30 days and leaves the 
   const uncertain = await accept();
   await db().prepare(`UPDATE delivery_intent SET state = 'outcome_unknown', unknown_since = ?1, attempt_started_at = ?1,
     drain_until = ?1, next_attempt_at = NULL WHERE request_id = ?2`).bind(now, uncertain.id).run();
-  expect(await operator("offboard", mapping.slot, "operator-1")).toMatch(/Offboarded shop\/production/);
+  expect((await installation.send("DELETE", "/v1/installation")).status).toBe(200);
+  const offboarded = JSON.parse(await operator("offboard", mapping.slot, "operator-1", "https://github.com/Quick-Release/gq-support/issues/147"));
+  // Never attempted, so the suppression cancels it; the one whose create may have happened stays uncertain, not cancelled.
+  expect(offboarded).toMatchObject({ slot: "shop/production", suppressed: true, report_keys_revoked: [],
+    delivery: { cancelled: 1, delivered: 1, uncertain: [(await intentRow(uncertain.id))!.id] } });
+  expect(JSON.parse(await operator("offboard-status", mapping.slot))).toMatchObject({ complete: true,
+    delivery: { cancelled: 1, delivered: 1, uncertain: [(await intentRow(uncertain.id))!.id] } });
   await sweep();
   expect(posts()).toHaveLength(1);
   advance(30 * DAY - 1);
@@ -442,6 +460,94 @@ it("offboarding suppresses creates, purges content after 30 days and leaves the 
   await cleanup();
   expect(github.issues[0]!.body).toContain("Private report text");
   expect(patches()).toHaveLength(0);
+});
+
+// #147: the Slot's restricted inventory, update and quota rows follow the same 30-day grace, with or without its mapping.
+const SLOT_ROWS = ["slot_contact_verification", "slot_version_evidence", "slot_signed_version", "slot_installed_files", "slot_update_attempt",
+  "central_deployment", "intake_debit", "request_rate"];
+const slotRows = async (slot: string) => Object.fromEntries(await Promise.all(SLOT_ROWS.map(async (table) =>
+  [table, Number((await db().prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE slot = ?`).bind(slot).first<{ count: number }>())!.count)])));
+const inventoryOf = async (slot: string) => {
+  await db().batch([
+    db().prepare(`INSERT INTO slot_contact_verification (slot, route, evidence, verified_at, verified_by, recorded_at)
+      VALUES (?, 'Restricted contract contact route', 'https://example.test/drill', ?, 'alex', ?)`).bind(slot, now, now),
+    db().prepare(`INSERT INTO slot_version_evidence (slot, kind, version, observed_at, source, evidence, recorded_by, recorded_at)
+      VALUES (?, 'observed', '0.1.9', ?, 'operator', 'https://example.test/run', 'alex', ?)`).bind(slot, now, now),
+    db().prepare("INSERT INTO slot_signed_version (slot, version, observed_at) VALUES (?, '0.1.9', ?)").bind(slot, now),
+    db().prepare("INSERT INTO slot_installed_files (slot, version, files_sha256, observed_at) VALUES (?, '0.1.9', ?, ?)").bind(slot, "f".repeat(64), now),
+    db().prepare("INSERT INTO slot_update_attempt (slot, version, attempted_at) VALUES (?, '0.2.0', ?)").bind(slot, now),
+    // One settled central application, and one whose outcome the Operator process never recorded.
+    ...["verified", null].map((outcome) => db().prepare(`INSERT INTO central_deployment (id, slot, release_sequence, package_version, package_sha256,
+      actor, started_at, outcome, finished_at) VALUES (?, ?, 1, '0.2.0', ?, 'alex', ?, ?, ?)`)
+      .bind(crypto.randomUUID(), slot, "a".repeat(64), now, outcome, outcome === null ? null : now)),
+    db().prepare("INSERT INTO intake_debit (slot, subject, debited_at) VALUES (?, ?, ?)").bind(slot, subject, now),
+    db().prepare("INSERT INTO request_rate (slot, subject, window_start, requests) VALUES (?, ?, ?, 1)").bind(slot, subject, now),
+    db().prepare(`INSERT INTO update_access_grant (key_id, slot, public_key, expires_at, evidence, granted_by, granted_at)
+      VALUES (?, ?, 'public', ?, 'https://example.test/grant', 'alex', ?) ON CONFLICT DO NOTHING`).bind(slot.replace(/\W/g, "").padEnd(64, "0"), slot, now + 300 * DAY, now),
+  ]);
+};
+const ALL_ROWS = { slot_contact_verification: 1, slot_version_evidence: 1, slot_signed_version: 1, slot_installed_files: 1, slot_update_attempt: 1,
+  central_deployment: 2, intake_debit: 1, request_rate: 1 };
+
+it("after the grace period, an offboarded Slot's contact, inventory, update and quota rows are purged too, even once its mapping is removed", async () => {
+  const sibling: RepositoryMapping = { ...mapping, slot: "shop/staging", environment: "staging" };
+  await inventoryOf(mapping.slot);
+  await inventoryOf(sibling.slot);
+  // A shared, fleet-wide record: never deleted to remove one Client.
+  await db().prepare("INSERT INTO schema_observation (observed_at, state, live_schema, observed_by) VALUES (?, 'ok', 31, 'alex')").bind(now).run();
+  const offboarded = JSON.parse(await operator("offboard", mapping.slot, "operator-1", "https://github.com/Quick-Release/gq-support/issues/147"));
+  expect(offboarded.central).toEqual({ uncertain: [expect.any(String)] });
+  // The mapping is removed by reviewed PR before the grace ends.
+  const sweepWithout = () => Effect.runPromise(sweepCleanup({ db: db(), botLogin: `${SLUG}[bot]`, mappings: [sibling], digestKey: key, now: () => now })
+    .pipe(Effect.provide(gateway()), Effect.provide(logger())));
+  advance(30 * DAY - 1);
+  await sweepWithout();
+  expect(await slotRows(mapping.slot)).toEqual(ALL_ROWS);
+  advance(1);
+  await sweepWithout();
+  // Purged, except the central application whose outcome is unknown: it may have changed the installation, so it stays for review.
+  expect(await slotRows(mapping.slot)).toEqual({ ...Object.fromEntries(SLOT_ROWS.map((table) => [table, 0])), central_deployment: 1 });
+  // The revocation that keeps it ended stays, in the main database and the ledger; the sibling Slot sharing the repository is untouched.
+  expect((await db().prepare("SELECT COUNT(*) AS count FROM update_access_revocation WHERE slot = ?").bind(mapping.slot).first<{ count: number }>())!.count).toBe(1);
+  expect(await db().prepare("SELECT 1 FROM offboarding WHERE slot = ?").bind(mapping.slot).first()).not.toBeNull();
+  expect(await slotRows(sibling.slot)).toEqual(ALL_ROWS);
+  expect(await db().prepare("SELECT COUNT(*) AS count FROM schema_observation").first<{ count: number }>()).toEqual({ count: 1 });
+  // A restore to within the grace brings the rows back; the next pass purges them again.
+  await inventoryOf(mapping.slot);
+  await sweepWithout();
+  expect(await slotRows(mapping.slot)).toEqual({ ...Object.fromEntries(SLOT_ROWS.map((table) => [table, 0])), central_deployment: 2 });
+});
+
+it("a Slot unmapped without offboarding loses its contact routes 30 days after that is first seen, and a superseded route 30 days after", async () => {
+  const removed = "gone/production";
+  const contact = (slot: string, route: string) => db().prepare(`INSERT INTO slot_contact_verification (slot, route, evidence, verified_at,
+    verified_by, recorded_at) VALUES (?, ?, 'https://example.test/drill', ?, 'alex', ?)`).bind(slot, route, now, now).run();
+  const routes = async (slot: string) => (await db().prepare("SELECT route FROM slot_contact_verification WHERE slot = ? ORDER BY rowid")
+    .bind(slot).all<{ route: string }>()).results.map((row) => row.route);
+  await contact(removed, "Removed Client route");
+  await contact(mapping.slot, "Old route");
+  advance(DAY);
+  await contact(mapping.slot, "Current route");
+  await cleanup();
+  advance(30 * DAY - 1);
+  await cleanup();
+  expect(await routes(removed)).toEqual(["Removed Client route"]);
+  expect(await routes(mapping.slot)).toEqual(["Old route", "Current route"]);
+  advance(1);
+  await cleanup();
+  expect(await routes(removed)).toEqual([]);
+  // The newest verification of a mapped Slot stays however old it is.
+  expect(await routes(mapping.slot)).toEqual(["Current route"]);
+
+  // A Slot mapped again before its 30 days keeps its route, and its clock starts over if it is unmapped once more.
+  await contact(removed, "Returning route");
+  await cleanup();
+  advance(20 * DAY);
+  await Effect.runPromise(sweepCleanup({ db: db(), botLogin: `${SLUG}[bot]`, mappings: [mapping, { ...mapping, slot: removed }], digestKey: key,
+    now: () => now }).pipe(Effect.provide(gateway()), Effect.provide(logger())));
+  advance(20 * DAY);
+  await cleanup();
+  expect(await routes(removed)).toEqual(["Returning route"]);
 });
 
 it("an Operator erases by the issue's reporter reference, and the scheduled tick runs the cleanup", async () => {

@@ -9,7 +9,7 @@ import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { slotInventory } from "../src/inventory.ts";
 import { handleWorkerRequest } from "../src/worker-http.ts";
 import { handleUpdateRequest } from "../src/update-access.ts";
-import { harness, keyPair, publicKeyOf } from "./installation-client.ts";
+import { harness, keyPair, publicKeyOf, signed } from "./installation-client.ts";
 import { localStage } from "./local-d1.ts";
 import { fakeEvidence, filesSha256, pluginFiles, recordLiveMigrations, reviewedMigrations, SCHEMA_RANGE, zipOf, type FakeEvidence } from "./release-fixture.ts";
 import updateFixtures from "../../contract/fixtures/update.json";
@@ -402,4 +402,112 @@ it.each(["revocation", "rotation"])("never revives revoked update access after %
 
   await replayLedger(db, stage.databases.ledger, 1, now);
   expect((await metadata(key)).status).toBe(401);
+});
+
+// #147: explicit offboarding ends report and native update access together, ledger first, and audits exactly what it ended.
+const EVIDENCE_147 = "https://github.com/Quick-Release/gq-support/issues/147";
+/** A new installation redeeming an enrollment code, as the PHP client signs it. */
+const signedEnrollment = async (code: string) => {
+  const pair = await keyPair();
+  const body = JSON.stringify({ code, installation_id: "installation-b", origin: "https://shop.example", public_key: await publicKeyOf(pair) });
+  return signed(pair, "POST", "/v1/enroll", body, "", "installation-b", Date.now());
+};
+const ledgerRows = async (sql: string, ...parameters: string[]) =>
+  (await stage.databases.ledger.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results;
+
+it("offboarding revokes report and native update access with its pending download grants, recorded in the ledger first", async () => {
+  await release("0.2.0", "none");
+  const key = await updateKey();
+  const other = await updateKey();
+  await grant(key);
+  await grant(other, "news/production");
+  const sites = harness(stage.databases.shared, mappings);
+  const installation = await sites.enroll("shop/production", "installation-a", {}, "0.1.9");
+  // An offer made just before: its download grant is still pending.
+  const pending = await offer(key);
+
+  const result = JSON.parse(await operator("offboard", "shop/production", "alex", EVIDENCE_147));
+  expect(result).toMatchObject({ slot: "shop/production", suppressed: true, report_keys_revoked: [installation.keyId],
+    update_keys_revoked: [key.keyId], download_grants_revoked: 1, purge_after: at(now + 30 * DAY) });
+  expect((await installation.send("GET", "/v1/installation")).status).toBe(403);
+  expect((await metadata(key)).status).toBe(401);
+  expect((await download(key, pending)).status).toBe(401);
+  // The exact keys are revoked in the ledger, and the attempt and its result are audited there with actor and evidence.
+  expect((await ledgerRows("SELECT reference FROM ledger_entry WHERE kind = 'revocation' ORDER BY reference")).map((row) => row.reference))
+    .toEqual([installation.keyId, key.keyId].sort());
+  expect(await ledgerRows("SELECT slot, actor, evidence, phase FROM offboarding_audit ORDER BY occurred_at, phase"))
+    .toEqual([{ slot: "shop/production", actor: "alex", evidence: EVIDENCE_147, phase: "begin" },
+      { slot: "shop/production", actor: "alex", evidence: EVIDENCE_147, phase: "complete" }]);
+  // Another Client keeps its update access.
+  expect((await metadata(other)).status).toBe(200);
+});
+
+it("an offboarding denial survives a main database restore: no re-enrollment, new update grant or regrant bypasses it", async () => {
+  await release("0.2.0", "none");
+  const key = await updateKey();
+  await grant(key);
+  const db = stage.databases.shared;
+  const sites = harness(db, mappings);
+  const installation = await sites.enroll("shop/production", "installation-a", {}, "0.1.9");
+  // An enrollment code issued before the offboarding, and the main database as a restore would bring it back.
+  const code = await sites.operator("enroll", "shop/production");
+  const tables = ["delivery_suppression", "offboarding", "update_access_revocation", "update_access_grant", "installation_key", "enrollment_code"];
+  const image = await Promise.all(tables.map(async (table) => ({ table, rows: (await db.prepare(`SELECT * FROM ${table}`).all()).results })));
+  const restore = () => db.batch([...tables.map((table) => db.prepare(`DELETE FROM ${table}`)),
+    ...[...image].reverse().flatMap(({ table, rows }) => rows.map((row) => db.prepare(`INSERT INTO ${table} (${Object.keys(row).join(", ")})
+      VALUES (${Object.keys(row).map(() => "?").join(", ")})`).bind(...Object.values(row))))]);
+
+  await operator("offboard", "shop/production", "alex", EVIDENCE_147);
+  await expect(sites.operator("enroll", "shop/production")).rejects.toThrow(/offboarded/);
+  await expect(grant(await updateKey())).rejects.toThrow(/offboarded/);
+
+  // Restored to before the offboarding: before replay, the ledger alone still refuses new access.
+  await restore();
+  await expect(grant(await updateKey())).rejects.toThrow(/offboarded/);
+  const ledgered = harness(db, mappings, { ledger: stage.databases.ledger as never });
+  const redeemed = await ledgered.send(await signedEnrollment(code));
+  expect(redeemed.status).toBe(400);
+  // Replay brings the main database back: the old keys stay revoked, and nothing grants or enrolls again.
+  await replayLedger(db, stage.databases.ledger, 1, now);
+  expect((await metadata(key)).status).toBe(401);
+  expect((await installation.send("GET", "/v1/installation")).status).toBe(403);
+  await expect(grant(key)).rejects.toThrow(/offboarded|revoked/);
+  await expect(sites.operator("enroll", "shop/production")).rejects.toThrow(/offboarded/);
+  expect((await ledgered.send(await signedEnrollment(code))).status).toBe(400);
+});
+
+it("an offboarding interrupted before its key revocations still ends all of the Slot's access on replay, and blocks resuming until then", async () => {
+  await release("0.2.0", "none");
+  const key = await updateKey();
+  await grant(key);
+  const db = stage.databases.shared;
+  const installation = await harness(db, mappings).enroll("shop/production", "installation-a", {}, "0.1.9");
+  // Only the ledger's first step landed: the suppression and offboarding images, then the Operator process ended.
+  await stage.databases.ledger.batch([
+    stage.databases.ledger.prepare("INSERT INTO ledger_entry (kind, reference, payload, recorded_at) VALUES ('suppression', ?, ?, ?)")
+      .bind("slot:shop/production", JSON.stringify({ scope: "slot", reference: "shop/production", reason: "offboarding" }), now),
+    stage.databases.ledger.prepare("INSERT INTO ledger_entry (kind, reference, payload, recorded_at) VALUES ('offboarding', ?, ?, ?)")
+      .bind("shop/production", JSON.stringify({ slot: "shop/production", recorded_at: now, purge_after: now + 30 * DAY }), now),
+  ]);
+  const { maintenanceBlockers } = await import("../src/maintenance.ts");
+  expect(await maintenanceBlockers(query(db), query(stage.databases.ledger), now)).toContain("offboarded_access_present");
+
+  await replayLedger(db, stage.databases.ledger, 1, now);
+  expect((await metadata(key)).status).toBe(401);
+  expect((await installation.send("GET", "/v1/installation")).status).toBe(403);
+  expect(await maintenanceBlockers(query(db), query(stage.databases.ledger), now)).not.toContain("offboarded_access_present");
+  // A rerun of offboard completes the audit and reports nothing left to revoke.
+  expect(JSON.parse(await operator("offboard", "shop/production", "alex", EVIDENCE_147)))
+    .toMatchObject({ report_keys_revoked: [], update_keys_revoked: [], purge_after: at(now + 30 * DAY) });
+  expect(JSON.parse(await operator("offboard-status", "shop/production"))).toMatchObject({ complete: true, usable_keys: [] });
+});
+
+it("update access ends as soon as the main database suppresses the Slot, before the Operator's next step revokes its key", async () => {
+  await release("0.2.0", "none");
+  const key = await updateKey();
+  await grant(key);
+  const pending = await offer(key);
+  await stage.databases.shared.prepare("INSERT INTO delivery_suppression (scope, reference, reason) VALUES ('slot', 'shop/production', 'offboarding')").run();
+  expect((await metadata(key)).status).toBe(401);
+  expect((await download(key, pending)).status).toBe(401);
 });

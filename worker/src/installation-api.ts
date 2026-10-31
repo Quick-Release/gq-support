@@ -7,6 +7,7 @@ import { createStorageFor, type QueryDatabase } from "./storage.ts";
 import { CREATE_BODY_BYTES, handleExport, handleSupportRequests } from "./support-requests.ts";
 import { handleErasures } from "./erasure-api.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
+import { ledgerOffboarded, NOT_OFFBOARDED } from "./offboarding.ts";
 import type { AuthRejection } from "./operational-metrics.ts";
 import { releasePolicy, type ReleaseEnforcement, type ReleasePolicy } from "./release-policy.ts";
 import type { PackageSource } from "./package-source.ts";
@@ -54,10 +55,13 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
   if (!mapping) return invalidCode();
   // No caller-selected Slot, environment, Client or repository can override the code.
   if (Object.keys(data).some((field) => !["code", "installation_id", "origin", "public_key", "wp_environment_type", "plugin_version"].includes(field))) return invalidCode();
+  // An offboarded Slot never enrolls again, even with a code issued before, or one a restore brought back.
+  if (ledger && await ledgerOffboarded(ledger, mapping.slot)) return invalidCode();
   const keyId = crypto.randomUUID();
   await db.batch([
+    // Every later statement needs this one's consumption, so the offboarding check here guards them all.
     db.prepare(`UPDATE enrollment_code SET consumed_at = ?, consumed_public_key = ?, consumed_key_id = ?
-      WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?`).bind(now, publicKey, keyId, hash, now),
+      WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ? AND ${NOT_OFFBOARDED("enrollment_code.slot")}`).bind(now, publicKey, keyId, hash, now),
     db.prepare(`UPDATE installation_key SET revoked_at = ? WHERE slot = ? AND revoked_at IS NULL
       AND EXISTS (SELECT 1 FROM enrollment_code WHERE code_hash = ? AND consumed_key_id = ?)`)
       .bind(now, mapping.slot, hash, keyId),

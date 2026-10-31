@@ -279,7 +279,7 @@ tooling and the Composer package instead. Commands are in the
    grant state and expiry.
 5. **Revoke.** `update-access-revoke <slot> <key-id|all>` with the ledger
    database, which records the revocation first so no D1 restore revives it.
-   Offboarding (#147) must revoke `all` for the Slot. Revoking the report
+   `offboard` revokes every update key of the Slot itself. Revoking the report
    Installation credential, `GQ_SUPPORT_DISABLED` or disconnecting the site does
    not stop updates; only this does.
 
@@ -397,19 +397,49 @@ record evidence:
    confirmed failure. Never record an observation you did not see.
 2. Treat `unknown` (`stale` or `absent`) as unknown: check the installation
    through hosting/admin access, not by adding remote checks to page rendering.
-3. Verify each Client's independent contact from a separate device, then record
-   it with `inventory-contact`; keep the route out of Discord, issues and metrics.
+3. Verify each Client's independent contact: take the existing contract contact
+   route and the responsible responder from the Client's contract (never invent
+   or guess one; no automatic fallback email), contact it from a device separate
+   from the WordPress installation, and record the result with
+   `inventory-contact <slot> '<route>' '<responder>' separate-device-drill …` and
+   the drill's evidence reference. A written confirmation without that live
+   contact is recorded as `attestation` and stays unverified. Run
+   `inventory-readiness` before onboarding: it names every Slot still blocked.
+   Keep the route and responder out of Discord, issues and metrics.
 4. After rotating a credential, update its `rotated` date and evidence (and
    `expires`) in `worker/src/inventory.ts` by reviewed PR. Assign owners there.
 
 ## Offboarding
 
-Use the [operations inventory/offboarding checklist](../support-operations-design.md#inventory-custody-and-offboarding)
-and existing Operator revoke/offboard workflows. Verify dispatch suppression,
-credential/update access revocation, stopped central deployments, privacy purge
-scheduling and preservation of uncertain remote-outcome review state. Never
-destroy shared stage resources to remove a Client. Local disable/uninstall is not
-offboarding and must not silently delete accepted work.
+Use the [operations inventory/offboarding checklist](../support-operations-design.md#inventory-custody-and-offboarding).
+Commands and their effects are in the [Worker README](../../worker/README.md#offboarding).
+No customer offboarding is authorized by this procedure alone.
+
+1. Confirm the Client/Slot scope and record the decision (contract notice or
+   reviewed issue) as the evidence reference. Check `inventory <slot>` and
+   `central-status <slot>`; never offboard a sibling Slot by mistake.
+2. Run `offboard <slot> <opaque-actor> <evidence-ref>` with
+   `--ledger-database-id`, then commit `worker/revocations.json`. It suppresses
+   dispatch, revokes the report and native update keys (with pending download
+   grants and unused enrollment codes) ledger first, and stops central
+   applications before their install. Rerun it if it stopped part-way.
+3. Read its result and `offboard-status <slot>`: `complete` must be true.
+   `delivery.uncertain` and `central.uncertain` are work that may already have
+   had its effect (an issue created, a package installed); they stay for review
+   and are never re-sent, cancelled retroactively or reported as stopped.
+   `native.last_served` is a package already downloaded, which revocation cannot
+   retract. Follow up uncertain creates with `cleanup-reconcile` or
+   `cleanup-exception` as for retention; read central ones back only if the
+   Client asks, through its own access.
+4. Remove the Slot's mapping, central target and any Client-specific monitoring
+   by reviewed PR when appropriate. Cleanup does not depend on the mapping:
+   after 30 days the Slot's content, contact routes and inventory rows are
+   purged and only the suppression, revocations and review state remain.
+5. Leave GitHub issues in the Client's repository and every shared stage
+   resource in place.
+
+Local disable (`GQ_SUPPORT_DISABLED`), disconnect, deactivation or uninstall is
+not offboarding: updates keep working and accepted work is still delivered.
 
 ## Discord notification setup
 
@@ -609,7 +639,8 @@ Travel restore or live provider change is authorized or configured from it.
 | Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused. Exercised locally only (`worker/test/fleet-rollout.test.ts`, `package.sh native` and `central` on the disposable test site): no gate, launch, central target or native grant exists for any stage, so the staging drill has not run |
 | Release window | Previous release accepted until exactly 24 hours after recorded dispatch, then 426 at the service; WordPress closes new reports from its cached policy; accepted retries replay; production `enforced` |
 | Discord/Banquinha outage | Incidents survive; CLI works when storage is healthy; notifications recover without duplicate incidents |
-| Local fail-safe and Client contact | Disable/re-enable through hosting/admin access; separate-device independent contact verified |
+| Local fail-safe and Client contact | Disable/re-enable through hosting/admin access; separate-device independent contact verified. Local only: `package.sh native` rehearses disable, re-enable and refused update access on the installed release; `inventory-readiness` blocks every Slot until a real separate-device drill is recorded, and none has been |
+| Offboarding | Dispatch suppressed; report and update keys, download grants and enrollment codes revoked ledger first; central applications stopped before install; denial survives restore and refuses re-enrollment/regrant; uncertain work kept, not reported as stopped; content and inventory purged after 30 days without the mapping; other Clients and shared records untouched. Local only (`pnpm recovery-drill`); no Client or staging Slot has been offboarded |
 | Retention/privacy failure | Failed cleanup detected, expiry enforced, unresolved erasure remains explicitly incomplete |
 
 Queue replay drills are deferred with Queues. Exercise D1 review/resume safety now;

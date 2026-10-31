@@ -14,7 +14,8 @@ it("reports synthetic local drills as local evidence only, and staging as not ru
     expect(drill.staging.required_inputs.length).toBeGreaterThan(0);
   }
   expect(report.drills.map(({ id }) => id)).toEqual(["maintenance_boundary", "provider_outage", "credential_revocation",
-    "unknown_late_create", "d1_restore_suppression_replay", "poisoned_outbox", "privacy_exposure", "independent_outage_evidence"]);
+    "unknown_late_create", "d1_restore_suppression_replay", "poisoned_outbox", "privacy_exposure", "independent_outage_evidence", "offboarding",
+    "independent_contact"]);
 });
 
 it("a failed, missing or skipped local test fails its drill instead of passing it", () => {

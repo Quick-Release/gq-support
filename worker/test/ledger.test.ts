@@ -158,10 +158,10 @@ it("Operator erasure and offboarding refuse to run without the ledger", async ()
     query: async (sql, parameters) => (await main().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings: [mapping], now,
   });
-  await expect(without("offboard", mapping.slot, "operator-1")).rejects.toThrow("ledger database is required");
+  await expect(without("offboard", mapping.slot, "operator-1", "https://github.com/Quick-Release/gq-support/issues/147")).rejects.toThrow("ledger database is required");
   await expect(without("restore-recorded", "operator-1", "time-travel-restore")).rejects.toThrow("ledger database is required");
   expect(await main().prepare("SELECT COUNT(*) AS n FROM delivery_suppression").first("n")).toBe(0);
-  await operator("offboard", mapping.slot, "operator-1");
+  await operator("offboard", mapping.slot, "operator-1", "https://github.com/Quick-Release/gq-support/issues/147");
   expect(await entry("suppression", `slot:${mapping.slot}`)).toEqual({
     payload: JSON.stringify({ scope: "slot", reference: mapping.slot, reason: "offboarding" }) });
 });

@@ -184,6 +184,13 @@ export const replayLedger = async (main: QueryDatabase, ledger: QueryDatabase, e
         [image.revoked_at ?? now, image.key_id ?? ""]]);
         continue;
       }
+      if (kind === "offboarding") {
+        // An offboarded Slot keeps no usable key, even one whose revocation the ledger never got to record.
+        work.push(["UPDATE installation_key SET revoked_at = ? WHERE slot = ? AND revoked_at IS NULL", [now, image.slot ?? ""]]);
+        work.push([`INSERT INTO update_access_revocation (key_id, slot, evidence, revoked_by, revoked_at)
+          SELECT key_id, slot, 'ledger-replay', 'ledger', ? FROM update_access_grant WHERE slot = ? ON CONFLICT (key_id) DO NOTHING`,
+        [now, image.slot ?? ""]]);
+      }
       const updates = columns.filter((column) => !key.includes(column)).map((column) => `${column} = excluded.${column}`);
       work.push([`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})
         ON CONFLICT (${key.join(", ")}) DO ${updates.length > 0 ? `UPDATE SET ${updates.join(", ")}` : "NOTHING"}`, values]);

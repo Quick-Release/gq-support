@@ -128,6 +128,15 @@ switch ( $gq_support_scenario ) {
 		}
 		break;
 
+	case 'offboarded':
+		// Re-enabled, and refused by the service: no offer or download access is kept, and the release stays.
+		$gq_support_status = GQ_Support_Updater::status();
+		if ( GQ_Support_Fail_Safe::disabled() || 'unauthorized' !== $gq_support_status['error'] || null !== $gq_support_status['version']
+			|| isset( get_site_option( GQ_Support_Updater::OFFER_OPTION )['grant'] ) || GQ_SUPPORT_VERSION !== $args[1] ) {
+			$gq_support_fail( 'An offboarded, re-enabled installation kept an offer or changed: ' . wp_json_encode( $gq_support_status ) );
+		}
+		break;
+
 	case 'unchanged':
 		if ( GQ_SUPPORT_VERSION !== $args[1] || ! is_plugin_active( $gq_support_basename ) ) {
 			$gq_support_fail( 'A refused update changed or deactivated the installed plugin.' );

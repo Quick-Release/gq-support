@@ -2,6 +2,7 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import { recoverDelivery } from "./delivery-recovery.ts";
 import { runCleanupOperator } from "./cleanup-operator.ts";
+import { ledgerOffboarded, NOT_OFFBOARDED, runOffboardingOperator } from "./offboarding.ts";
 import { unsuspendRepository } from "./repository-suspension.ts";
 import { sha256 } from "./signature.ts";
 import { runStatusOperation } from "./status-operations.ts";
@@ -88,7 +89,8 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   if (args[0]?.startsWith("central-")) return runCentralOperator(args, { ...options, now });
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
-  if (["erase", "erasure-status", "erasure-close", "restore-recorded", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
+  if (args[0] === "offboard" || args[0] === "offboard-status") return runOffboardingOperator(args, { ...options, now });
+  if (["erase", "erasure-status", "erasure-close", "restore-recorded", "cleanup-reconcile", "cleanup-exception"].includes(args[0] ?? "")) {
     return runCleanupOperator(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   }
   if (args[0]?.startsWith("status-")) return runStatusOperation(args, { query, recordRevocation, mappings, now });
@@ -96,14 +98,18 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { ...options, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|verify|approve|withdraw|boundary>, fleet-<launch|status|run>, update-access-<status|grant|revoke> and central-<apply|status>");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, offboard-status, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|verify|approve|withdraw|boundary>, fleet-<launch|status|run>, update-access-<status|grant|revoke> and central-<apply|status>");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");
   if (command === "enroll") {
+    // An offboarded Slot never enrolls again: the ledger's record holds even if a restore dropped the main one.
+    const refused = new Error("Refused: this Slot is offboarded; nothing was issued");
+    if (ledger && await ledgerOffboarded(asQueryDatabase(ledger), slot)) throw refused;
     const code = enrollmentCode();
-    await query("INSERT INTO enrollment_code (code_hash, slot, expires_at) VALUES (?, ?, ?)",
-      [await sha256(code.replaceAll("-", "")), slot, now + 30 * 60_000]);
+    const issued = await query(`INSERT INTO enrollment_code (code_hash, slot, expires_at) SELECT ?, ?, ? WHERE ${NOT_OFFBOARDED("?")}
+      RETURNING slot`, [await sha256(code.replaceAll("-", "")), slot, now + 30 * 60_000, slot, slot]);
+    if (issued.length !== 1) throw refused;
     return code;
   }
   if (command === "revoke") {

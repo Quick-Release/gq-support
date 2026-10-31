@@ -205,8 +205,8 @@ ZIP published as a durable private GitHub Release asset and read by the Worker
 with a narrow read-only token, verified against the approved SHA-256 there and
 again on the installation. Not yet established: the stage read tokens, any
 native Slot mapping or grant, a real approved and dispatched release, immutable
-releases on the repository, and a staged end-to-end drill. Offboarding's
-revocation of update access is #147 and fleet convergence/rollback #144.
+releases on the repository, and a staged end-to-end drill. Offboarding revokes
+update access (#147); fleet convergence/rollback is #144.
 
 Implemented for the central path in #143 ([runbook](runbooks/support-operations.md#central-deployment)):
 a per-installation adapter that an Operator (and later the fleet coordinator)
@@ -307,6 +307,16 @@ Follow the existing 30-day content-purge grace and privacy retention/erasure rul
 GitHub issues remain in the Client repository. Remove Client-specific monitoring
 and access when appropriate, without deleting shared stage resources used by other
 Clients. Verify effects and retain only the audit permitted by existing policy.
+
+Implemented in #147 ([Worker README](../worker/README.md#offboarding),
+[runbook](runbooks/support-operations.md#offboarding)): one audited `offboard`
+command suppresses the Slot and revokes its report and native update access
+ledger first, refuses re-enrollment, regrants and central installs even after a
+restore, reports cancelled versus uncertain work, and purges the Slot's content
+and restricted inventory after the 30-day grace. Contact verification records
+the responsible responder and counts only a live separate-device drill;
+`inventory-readiness` names the exact onboarding blocker. No Client contact has
+been verified and no Slot offboarded; these remain readiness gaps.
 
 ## Production readiness evidence
 

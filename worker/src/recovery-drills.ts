@@ -79,6 +79,27 @@ export const DRILLS: readonly Drill[] = [
       { file: "test/maintenance.test.ts", test: "the independent checker's probe observes maintenance without replaying or writing" },
       { file: "test/independent-check.test.ts", test: "keeps one resolvable incident when the runner's state is lost mid-outage or the outage outlasts its retention" },
     ], stagingInputs: [...COMMON_STAGING, "Configured independent checker runner, key and staging Discord destination"] },
+  { id: "offboarding", title: "Explicit offboarding ends dispatch, report/update access and central deployment, across restore and races",
+    runbook: "#offboarding", local: [
+      { file: "test/native-updates.test.ts", test: "offboarding revokes report and native update access with its pending download grants, recorded in the ledger first" },
+      { file: "test/native-updates.test.ts", test: "an offboarding denial survives a main database restore: no re-enrollment, new update grant or regrant bypasses it" },
+      { file: "test/native-updates.test.ts", test: "an offboarding interrupted before its key revocations still ends all of the Slot's access on replay, and blocks resuming until then" },
+      { file: "test/native-updates.test.ts", test: "update access ends as soon as the main database suppresses the Slot, before the Operator's next step revokes its key" },
+      { file: "test/central-deployment.test.ts", test: "an offboarding the main database lost to a restore, or maintenance begun mid-way, still stops the install; never without the ledger" },
+      { file: "test/central-deployment.test.ts", test: "maintenance begun after a central application started stops it before the install" },
+      { file: "test/fleet-rollout.test.ts", test: "an offboarded Slot is not a launch target, gets no fleet application and stays out of convergence" },
+      { file: "test/cleanup.test.ts", test: "a site's disconnect or an Operator key revocation is not offboarding: work already accepted is still delivered" },
+      { file: "test/cleanup.test.ts", test: "offboarding suppresses creates, purges content after 30 days and leaves the Client's issues" },
+      { file: "test/cleanup.test.ts", test: "after the grace period, an offboarded Slot's contact, inventory, update and quota rows are purged too, even once its mapping is removed" },
+    ], stagingInputs: [...COMMON_STAGING, "Disposable synthetic staging Slot mapping (native or central) with its reviewed update grant or central target",
+      "Written authorization naming the synthetic Slot to offboard; never a Client's"] },
+  { id: "independent_contact", title: "Each Client's independent contact verified by a live separate-device drill, outside WordPress",
+    runbook: "#offboarding", local: [
+      { file: "test/inventory.test.ts", test: "onboarding readiness names each Slot's exact contact blocker; an attestation or an older record never counts as a verified drill" },
+      { file: "test/cleanup.test.ts", test: "a Slot unmapped without offboarding loses its contact routes 30 days after that is first seen, and a superseded route 30 days after" },
+    ], stagingInputs: ["Each Client's existing contract contact route and named responsible responder, from the contract",
+      "A live contact to that route from a device separate from the WordPress installation, with its evidence reference",
+      "Named human Operator who made the contact; nothing here invents a route, address or provider"] },
 ];
 
 export interface TestResult { readonly file: string; readonly test: string; readonly status: "passed" | "failed" | "skipped" }

@@ -204,7 +204,7 @@ it("refuses to record gates or launch until every gate passed at the release's o
   // A live migration that is not the reviewed one is a confirmed migration failure, alerted as an incident.
   const reviewed = reviewedMigrations();
   await recordLiveMigrations(stage.databases.shared, reviewed.map((migration, index) => index === reviewed.length - 1 ? { ...migration, sha256: "f".repeat(64) } : migration));
-  await expect(launch(id)).rejects.toThrow(/schema: live migration 0030 differs from its reviewed checksum/);
+  await expect(launch(id)).rejects.toThrow(/schema: live migration 0031 differs from its reviewed checksum/);
   await observeSignals(stage.databases.shared, now);
   expect((await listIncidents(stage.databases.shared, now)).map((incident) => [incident.category, incident.detail])).toEqual([["release_migration_failed", "mismatch"]]);
   // Unconfigured access fails closed, naming what is missing.
@@ -375,14 +375,14 @@ it("refuses a rollback that merely exists or is incompatible with the live schem
   await expect(operator("release-withdraw", String(second.id), "0.1.5", evidence.deploy("prod"), "alex")).rejects.toThrow(/verified release launched before/);
   // A live destructive migration past the package's tested range: the package is not compatible.
   const reviewed = reviewedMigrations();
-  const destructive = { name: "0031_drop_legacy.sql", sql: "DROP TABLE slot_update_attempt;", sha256: sha256("DROP TABLE slot_update_attempt;") };
+  const destructive = { name: "0032_drop_legacy.sql", sql: "DROP TABLE slot_update_attempt;", sha256: sha256("DROP TABLE slot_update_attempt;") };
   await recordLiveMigrations(stage.databases.shared, [...reviewed, destructive]);
   const withdraw = runOperator(["release-withdraw", String(second.id), "0.2.0", evidence.deploy("prod"), "alex"], { mappings, now, recordRevocation: async () => {},
     query: query(stage.databases.shared), stage: "prod", evidence, migrations: [...reviewed, destructive] });
   await expect(withdraw)
-    .rejects.toThrow(/not compatible with the live service \(live migration 0031 removes structures.*never rolled back/);
+    .rejects.toThrow(/not compatible with the live service \(live migration 0032 removes structures.*never rolled back/);
   // Nor a live migration that is not a reviewed one.
-  await recordLiveMigrations(stage.databases.shared, [...reviewed, { name: "0031_hotfix.sql", sha256: "9".repeat(64) }]);
+  await recordLiveMigrations(stage.databases.shared, [...reviewed, { name: "0032_hotfix.sql", sha256: "9".repeat(64) }]);
   await expect(operator("release-withdraw", String(second.id), "0.2.0", evidence.deploy("prod"), "alex")).rejects.toThrow(/the live schema is unreviewed/);
   expect(JSON.parse(await operator("release-status")).current).toMatchObject({ release_id: second.id, kind: "production" });
   // The schema is untouched: no migration was reversed.
@@ -434,4 +434,16 @@ it("a restore that makes a withdrawn release current again blocks service until 
   await expect(operator("fleet-launch", String(bad.id), evidence.deploy("prod"), "alex")).rejects.toThrow(/maintenance is in effect/);
   await json("release-withdraw", String(bad.id), "0.2.0", evidence.deploy("prod"), "alex");
   expect(await json("maintenance-end", "alex", "1", "inc-restore-1")).toMatchObject({ state: "serving" });
+});
+
+it("an offboarded Slot is not a launch target, gets no fleet application and stays out of convergence", async () => {
+  await operator("offboard", "blog/production", "alex", "https://github.com/Quick-Release/gq-support/issues/147");
+  const { id } = await ship("0.2.0", "none");
+  const [launched] = (await stage.databases.shared.prepare("SELECT evidence FROM fleet_launch WHERE sequence = ?").bind(id)
+    .all<{ evidence: string }>()).results;
+  expect((JSON.parse(launched!.evidence) as { targets: { slot: string }[] }).targets.map((target) => target.slot))
+    .toEqual(["shop/production", "news/production", "cafe/production"]);
+  const run = await json("fleet-run", String(id), "0.2.0", "alex") as { applications: { slot: string }[] };
+  expect(run.applications.map((application) => application.slot)).toEqual(["shop/production"]);
+  expect(await slotState("blog/production")).toMatchObject({ state: "offboarded" });
 });

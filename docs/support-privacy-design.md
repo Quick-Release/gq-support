@@ -154,9 +154,24 @@ The Reporter subject is stored in user meta, so it disappears when the user is d
 | Disconnect (site admin) | Keys deleted | Best-effort key revocation. Records stay under retention |
 | Deactivate | None | None |
 | Uninstall | Local state, key and capability grants deleted. No remote call | None. Records stay under retention |
-| **Offboarding** (`offboard <slot>`, then `revoke <slot>`, by an Operator) | n/a | Key revoked. After a **30-day grace period**, all of the Slot's `support_request` and `delivery_intent` rows are hard-purged, with a Slot tombstone in the ledger. Keys and revocation rows are kept. GitHub issues are never touched: they belong to the Client's repository |
+| **Offboarding** (`offboard <slot> <actor> <evidence>`, by an Operator) | n/a | Slot suppressed; report and native update keys revoked, ledger first. After a **30-day grace period**, all of the Slot's `support_request` and `delivery_intent` rows are hard-purged, with a Slot tombstone in the ledger, and so are its contact routes, inventory evidence, update observations, Reporter quota rows and settled central applications, whether or not it is still mapped. Keys, revocation rows, the suppression, unresolved cleanup records and unsettled central applications are kept. GitHub issues are never touched: they belong to the Client's repository |
+| Mapping removed without offboarding | n/a | The Slot's contact routes and other Slot rows are purged 30 days after the cleanup pass first finds it unmapped; mapping it again clears that clock. A superseded contact route goes 30 days after the record replacing it |
 
 None of these touches another Slot's records, the Project repository itself, or the shared Cloudflare resources.
+
+### Offboarding retention review (#147)
+
+| Record | At offboarding | After the 30-day grace | Why |
+|---|---|---|---|
+| `support_request`, `delivery_intent` | Creates suppressed | Purged; uncertain creates keep a minimal `offboarding` cleanup record | Existing policy |
+| `slot_contact_verification` (route, responder) | Kept for the handoff | Purged | Personal contact data; no indefinite contact retention is approved |
+| `slot_version_evidence`, `slot_signed_version`, `slot_installed_files`, `slot_update_attempt` | Kept | Purged | Slot content with no review purpose once service ended |
+| `intake_debit`, `request_rate` | Kept | Purged | Reporter subjects; nothing else prunes them once the Slot cannot submit |
+| `central_deployment` | Running applications stop before install | Settled rows purged; `NULL`/`unknown` outcomes kept | An unsettled one may have changed the installation |
+| `installation_key`, `update_access_grant`, `update_access_revocation` | Revoked, ledger first | Kept | Suppression state: what stops re-use or regrant |
+| `update_download_grant`, unused `enrollment_code` | Deleted | — | Pending access |
+| `delivery_suppression`, `offboarding`, ledger images and `offboarding_audit` | Recorded | Kept | Minimal authorized audit/suppression; no text, subjects or routes |
+| `fleet_launch` (target list), `release_*`, `rollback_boundary`, `schema_observation`, `repository_state` | Untouched; later launches exclude the Slot | Kept | Shared fleet/release records; opaque Slot IDs only. Never deleted to remove one Client |
 
 ## Preventing resurrection
 
@@ -178,7 +193,7 @@ Never-confirmed-delivered reports reaching 12 months from acceptance also lose t
 - The minute cleanup pass waits for each request's last authorized execution to drain, then moves the restricted fields onto a self-contained cleanup record and deletes the request rows. It purges known non-creations, redacts known issues and reconciles uncertain creates read-only on the delivery schedule, for 24 hours from capture. Every plausible marker match of an erased create (up to ten) is redacted, with a `multiple_matches` residual. After the window the record is `unresolved` (`needs_review`, residual `remote_outcome`) until `cleanup-reconcile` finds the issue or `cleanup-exception` releases its metadata; the exception never completes the erasure.
 - The suppressions, erasures, cleanup records, offboardings, suspensions and runtime key revocations are mirrored into the separate suppression ledger D1; erasure, offboarding and a site's self-revocation write it first, and every create checks it before dispatch. Each pass mirrors only rows changed since the last one, and every row once a day. After `restore-recorded`, each Worker answers `503` and skips sweeps until it has replayed the ledger: restored rows under cleanup lose their text before any traffic, suspensions and key revocations return (never lifted) and every undelivered request becomes `outcome-unknown`.
 - Resolved erasure tombstones and their request suppressions are compacted 45 days after resolution. A record with residual copies, or an excepted one, is resolved by `erasure-close`, so it goes 45 days after the close; an erasure goes 45 days after its close or, if never closed, after its reference search ended. Unresolved records are never compacted.
-- Retention purges never-delivered rows 12 months from acceptance and closed delivered rows 12 months after the last observed close; uncertain ones keep a minimal `retention` review record. Offboarding suppresses the Slot at once and purges its content after 30 days without touching GitHub; uncertain ones keep a minimal `offboarding` review record.
+- Retention purges never-delivered rows 12 months from acceptance and closed delivered rows 12 months after the last observed close; uncertain ones keep a minimal `retention` review record. Offboarding suppresses the Slot at once and purges its content after 30 days without touching GitHub; uncertain ones keep a minimal `offboarding` review record. Since #147 it also revokes the Slot's report and update access ledger first, audits the attempt and result in the ledger (`offboarding_audit`: actor, evidence reference, key IDs, counts and opaque intent/application IDs only), and purges the Slot's restricted inventory and quota rows with its content.
 
 By design, more than ten marker matches, or any suspicious one, still need an Operator: redaction never acts on an issue it cannot attribute.
 

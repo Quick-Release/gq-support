@@ -2,6 +2,7 @@ import { imageOf, ledgerStore } from "./ledger.ts";
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
 import { mappingFor } from "./repository-mappings.ts";
 import { updateKeyId } from "./update-access.ts";
+import { ledgerOffboarded, NOT_OFFBOARDED } from "./offboarding.ts";
 
 const ACTOR = /^[A-Za-z0-9_-]{1,64}$/;
 /** A reference to where the evidence lives, such as a reviewed issue or PR URL; never a credential. */
@@ -56,7 +57,13 @@ export const runUpdateAccessOperator = async (args: readonly string[], options: 
     }
     // The reviewed deployment method decides: central and manual installations get no native update access.
     if (mapping.deployment !== "native") throw new Error("This Slot's reviewed deployment method is not native; set it by reviewed PR first.");
+    if (!ledger) throw new Error("Pass --ledger-database-id: a grant checks the suppression ledger's offboardings and revocations, which no restore rewinds.");
     const keyId = await updateKeyId(publicKey!);
+    // The ledger's records hold even when a restore dropped the main ones.
+    if (await ledgerOffboarded(asQueryDatabase(ledger), slot!)) throw new Error("Refused: this Slot is offboarded; nothing was granted.");
+    if ((await ledger("SELECT 1 FROM ledger_entry WHERE kind = 'revocation' AND reference = ? AND payload IS NOT NULL", [keyId])).length > 0) {
+      throw new Error("This update key was revoked; generate a new key on the installation.");
+    }
     const [existing] = await query(`SELECT g.slot, r.key_id AS revoked FROM update_access_grant g
       LEFT JOIN update_access_revocation r ON r.key_id = g.key_id WHERE g.key_id = ?`, [keyId]);
     if (existing) {
@@ -74,12 +81,12 @@ export const runUpdateAccessOperator = async (args: readonly string[], options: 
     }
     const [inserted] = await query(`INSERT INTO update_access_grant (key_id, slot, public_key, expires_at, evidence, granted_by, granted_at)
       SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM update_access_grant g WHERE g.slot = ?
-        AND NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id))
-      ON CONFLICT (key_id) DO NOTHING RETURNING key_id`, [keyId, slot!, publicKey!, expiresAt, evidence!, actor!, now, slot!]);
+        AND NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id)) AND ${NOT_OFFBOARDED("?")}
+      ON CONFLICT (key_id) DO NOTHING RETURNING key_id`, [keyId, slot!, publicKey!, expiresAt, evidence!, actor!, now, slot!, slot!, slot!]);
     if (!inserted) {
       const [existing] = await query(`SELECT g.slot, r.key_id AS revoked FROM update_access_grant g
         LEFT JOIN update_access_revocation r ON r.key_id = g.key_id WHERE g.key_id = ?`, [keyId]);
-      if (!existing) throw new Error("Update grant lost a concurrent rotation; inspect update-access-status before retrying.");
+      if (!existing) throw new Error("Update grant lost a concurrent rotation or offboarding; inspect update-access-status before retrying.");
       if (existing?.slot !== slot) throw new Error("This update key is granted to another Slot; generate a new key on the installation.");
       if (existing?.revoked !== null) throw new Error("This update key was revoked; generate a new key on the installation.");
     }

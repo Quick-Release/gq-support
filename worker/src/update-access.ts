@@ -61,11 +61,14 @@ export const updateKeyId = async (publicKey: string): Promise<string> => {
 };
 
 /**
- * The SQL condition for an active grant `g`: unexpired, unrevoked and the Slot's
- * newest. Binds the current time once.
+ * The SQL condition for an active grant `g`: unexpired, unrevoked, the Slot's
+ * newest, and the Slot not offboarded (src/offboarding.ts), which ends access
+ * before its keys' revocation lands. Binds the current time once.
  */
 export const ACTIVE_GRANT = `g.expires_at > ? AND NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id)
-  AND NOT EXISTS (SELECT 1 FROM update_access_grant n WHERE n.slot = g.slot AND n.rowid > g.rowid)`;
+  AND NOT EXISTS (SELECT 1 FROM update_access_grant n WHERE n.slot = g.slot AND n.rowid > g.rowid)
+  AND NOT EXISTS (SELECT 1 FROM offboarding o WHERE o.slot = g.slot)
+  AND NOT EXISTS (SELECT 1 FROM delivery_suppression s WHERE s.scope = 'slot' AND s.reference = g.slot AND s.reason = 'offboarding')`;
 
 const randomToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
   .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");

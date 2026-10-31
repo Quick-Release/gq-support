@@ -15,7 +15,7 @@ import { githubEvidence } from "./release-evidence.ts";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|maintenance-<begin|status|end>|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|release-status|release-candidate|release-verify|release-approve|release-withdraw|release-boundary|fleet-launch|fleet-status|fleet-run|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|maintenance-<begin|status|end>|cleanup-reconcile|cleanup-exception|offboard|offboard-status|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|inventory-readiness|release-status|release-candidate|release-verify|release-approve|release-withdraw|release-boundary|fleet-launch|fleet-status|fleet-run|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
@@ -37,7 +37,7 @@ try {
     { binding: "SupportDB", database_name: "operator-target", database_id: databaseId },
     ...(ledgerId ? [{ binding: "SupportLedger", database_name: "operator-ledger", database_id: ledgerId }] : []),
   ] }), { mode: 0o600 });
-  if (positionals[0] === "revoke") lockFd = openSync(lock, "wx", 0o600);
+  if (positionals[0] === "revoke" || positionals[0] === "offboard") lockFd = openSync(lock, "wx", 0o600);
   const d1 = (binding: string) => async (sql: string, parameters: readonly (string | number | null)[]) => {
     // Wrangler's query interface has no parameter binding. Escape SQL literals.
     // The only code value here is its hash; plaintext codes never enter Wrangler.
@@ -95,7 +95,7 @@ try {
     },
   });
   console.log(output);
-  if (positionals[0] === "revoke") console.error("Commit worker/revocations.json before the next deployment or restore.");
+  if (positionals[0] === "revoke" || positionals[0] === "offboard") console.error("Commit worker/revocations.json before the next deployment or restore.");
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Operator command failed");
   process.exitCode = 1;

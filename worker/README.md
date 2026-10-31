@@ -106,8 +106,55 @@ since its last pass (every writer sets `changed_at`), and once a day every row. 
 
 ```sh
 pnpm operator erase shop/production <opaque-actor> <rs_reference> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
-pnpm operator offboard shop/production <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator offboard shop/production <opaque-actor> <evidence-ref> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator offboard-status shop/production --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
+
+### Offboarding
+
+`offboard` (#147, `src/offboarding.ts`, ledger migration 0004) ends service for
+one Slot in single-statement steps, each safe to have applied alone; rerun it to
+complete an interrupted one (it keeps the first grace period, and works once the
+ledger holds the offboarding even if the mapping is gone):
+
+1. The ledger audits the attempt (`offboarding_audit`, actor and evidence), then
+   records the Slot's suppression and offboarding.
+2. The main database suppresses the Slot. From here no create is dispatched,
+   no enrollment completes or code is issued, no update key is granted, native
+   update requests are refused, and no central application starts or reaches
+   its install.
+3. The exact report keys and native update keys still usable are revoked in the
+   ledger, recorded in `revocations.json` (commit it, as after `revoke`), then
+   revoked in the main database with pending download grants and unused
+   enrollment codes deleted.
+4. The ledger audits the result, which the command also prints: keys revoked,
+   `delivery.cancelled` (accepted creates never attempted, which the suppression
+   stops), `delivery.uncertain` (intents whose create may have happened, kept
+   for review), `central.uncertain` (applications with no settled outcome, which
+   may have changed the installation), and `native.last_served` (a package
+   already downloaded cannot be taken back; the site may still install it).
+
+Grants, enrollments and central applications check the ledger as well as the
+main database, so a restore that dropped the main record cannot reopen access,
+and replay revokes every remaining key of an offboarded Slot. Service cannot
+resume (`offboarded_access_present`) while one is usable. `offboard-status`
+shows whether the main database is complete, the uncertain work, unresolved
+cleanup records and the audit; it needs no mapping.
+
+After the 30-day grace the cleanup pass purges the Slot's requests (as before)
+and its contact routes, version evidence, signed/installed-files observations,
+served-update records, Reporter quota rows and settled central applications,
+with or without its mapping, and again after any restore. It keeps the
+suppression, offboarding, key/grant revocation rows, unresolved cleanup records
+and central applications without a settled outcome. A Slot's disconnect,
+`revoke`, `update-access-revoke` and `GQ_SUPPORT_DISABLED` are not offboarding:
+accepted work is still delivered. Shared stage resources, repository state,
+release, launch, schema and rollback records and GitHub issues are never
+deleted to remove one Client.
+
+Deployment order: apply ledger migration 0004 and main migration 0031 before a
+Worker or Operator checkout of this version runs; the inventory, cleanup pass and
+`offboard` read their new columns and tables.
 
 ### Maintenance boundary and restores
 
@@ -142,7 +189,7 @@ reconciled by its marker, and checker episodes the service had acknowledged
 come back, reopening their incident for review. `maintenance-end` refuses with
 bounded blockers (`not_drained`, `restore_not_recorded`, `replay_pending`,
 `suppression_missing`, `erasure_missing`, `offboarding_missing`,
-`suspension_missing`, `revocation_missing`, `erased_text_present`,
+`suspension_missing`, `revocation_missing`, `offboarded_access_present`, `erased_text_present`,
 `withdrawn_release_current`, `episode_missing`) until the restored database
 holds everything the ledger keeps. The procedure is in the
 [operations runbook](../docs/runbooks/support-operations.md#d1-restore-or-corrupting-migration).
@@ -692,8 +739,15 @@ it is a health check: it reports recorded evidence and says what it does not kno
   missing traffic is never read as healthy. WordPress page rendering makes no
   remote check to refresh it.
 - **Independent contact**: staff see only `verified` or `unverified` and the
-  verification time. The route, its evidence reference and the verifier are
-  restricted to the Operator CLI.
+  verification time. The route, responsible responder, method, evidence
+  reference and verifier are restricted to the Operator CLI. Only the latest
+  record verifies, and only when it is a `separate-device-drill`: a live
+  contact to the Client's existing contract route, from a device separate from
+  the WordPress installation, reaching the named responder. An `attestation`
+  is recorded but stays unverified, as do records from before migration 0031.
+  `inventory-readiness` lists each Slot's blockers (`contact_unverified`,
+  `contact_attestation_only`, `contact_incomplete`) and the exact onboarding
+  blocker. The route is never invented, messaged or tested by the service.
 - **Credentials**: staff see each credential's ID, purpose, owner, stage,
   expiry state (`valid`, `expired`, `never` or `unknown`) and last verified
   rotation date. Locations (secret names and stores), the revocation runbook and
@@ -704,15 +758,18 @@ it is a health check: it reports recorded evidence and says what it does not kno
 pnpm operator inventory <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator inventory-credentials --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator inventory-record <slot> <desired|attempted|observed|failed> <version> <at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator inventory-contact <slot> '<route>' <verified-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator inventory-contact <slot> '<route>' '<responder>' <separate-device-drill|attestation> <verified-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator inventory-readiness --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
 `at` and `verified-at` are ISO UTC times of the evidence, never later than now;
 `evidence-ref` is a link or reference without spaces (for example a CI run URL),
 never a credential. Each record is one appended row carrying its actor and
 recording time, so it is its own audit entry and is never edited; correct a
-mistake by recording newer evidence. Inventory rows are not purged by
-offboarding yet.
+mistake by recording newer evidence. A superseded contact route goes 30 days
+after the record replacing it; a Slot's rows go 30 days after its offboarding,
+or 30 days after the cleanup pass first finds it unmapped without offboarding
+(migration 0031; mapping it again clears that clock).
 
 ## Approved releases
 
@@ -843,7 +900,11 @@ submission disabled or the Installation credential revoked.
   host is contacted in a statement that rechecks the release is the approved,
   dispatched one, the Slot is not offboarded and no other application to it is
   running. Approval and offboarding are checked again just before WordPress
-  installs. `verified` needs the approved version and exactly the approved files;
+  installs, in the main database and the suppression ledger (`--ledger-database-id`
+  is required): an offboarding a restore dropped from the main database, a
+  maintenance begun or a restore recorded since the application started stops it.
+  An install already asked for may still finish after an offboarding; its
+  read-back outcome is recorded, never assumed. `verified` needs the approved version and exactly the approved files;
   `failed` is a read-back that confirmed otherwise; `unknown` is a lost answer after
   the install was requested; `unreachable` changed nothing; `refused` (a symlinked
   checkout, an unavailable plugin, a downgrade outside a recovery approval, or a
@@ -856,7 +917,7 @@ submission disabled or the Installation credential revoked.
   central outcome. Unreachable installations stay unknown.
 
 ```sh
-pnpm operator central-apply <slot> <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator central-apply <slot> <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 pnpm operator central-status <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
@@ -922,7 +983,7 @@ the procedure. There are no canary cohorts and no per-installation approvals.
 pnpm operator release-verify <package-version> <artifact-directory> <ci-run-id> <staging-deploy-run-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator fleet-launch <release-id> <deploy-run-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator fleet-status [release-id] --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator fleet-run <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator fleet-run <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 pnpm operator release-withdraw <release-id> <recovery-version> <deploy-run-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator release-boundary <release-id> <schema-floor> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```

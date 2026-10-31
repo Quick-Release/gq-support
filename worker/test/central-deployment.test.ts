@@ -205,17 +205,17 @@ it("refuses before contacting the installation unless the Slot, its reviewed tar
   const { stageCentralTargets } = await import("../src/central-deployment.ts");
   expect(stageCentralTargets).toEqual({ staging: [], prod: [] });
   await expect(runOperator(["central-apply", "shop/production", second.id, "0.3.0", "alex"], { mappings, now, recordRevocation: async () => {},
-    query: query(stage.databases.shared), readArtifact: async (directory) => artifacts.get(directory)!,
+    query: query(stage.databases.shared), ledger: query(stage.databases.ledger), readArtifact: async (directory) => artifacts.get(directory)!,
     central: { targets: stageCentralTargets.prod, transport: host } })).rejects.toThrow(/No reviewed central deployment target/);
   // A target whose tokens a remote shell would interpret is not used.
   await expect(runOperator(["central-apply", "shop/production", second.id, "0.3.0", "alex"], { mappings, now, recordRevocation: async () => {},
-    query: query(stage.databases.shared), readArtifact: async (directory) => artifacts.get(directory)!,
+    query: query(stage.databases.shared), ledger: query(stage.databases.ledger), readArtifact: async (directory) => artifacts.get(directory)!,
     central: { targets: [{ ...target, wp: ["wp", "--path=/srv/www/$(id)"] }], transport: host } })).rejects.toThrow(/shell-safe/);
   // Other bytes under the approved version are never sent.
   artifacts.set("tampered", { ...artifacts.get("0.3.0")!, zip: zipOf({ ...pluginFiles("0.3.0"), "extra.php": "<?php" }) });
   await expect(apply(second.id, "tampered")).rejects.toThrow(/do not match|integrity/);
   // An offboarded Slot gets no further central deployment.
-  await operator("offboard", "shop/production", "alex");
+  await operator("offboard", "shop/production", "alex", "https://github.com/Quick-Release/gq-support/issues/147");
   await expect(apply(second.id, "0.3.0")).rejects.toThrow(/offboarded/);
 
   expect(host.calls).toEqual([]);
@@ -311,10 +311,40 @@ it("applies nothing once a newer approval or an offboarding arrives, and never t
   expect(JSON.parse(newer)).toMatchObject({ release_id: 2 });
   host.next((command) => command[0] === "cp", async (command, options) => {
     const result = await host.run([...target.runner, ...command], options);
-    await operator("offboard", "shop/production", "alex");
+    await operator("offboard", "shop/production", "alex", "https://github.com/Quick-Release/gq-support/issues/147");
     return result;
   });
   expect(await apply("2", "0.2.1")).toMatchObject({ outcome: "refused", reason: "superseded", installed: false });
+  expect(host.version).toBe("0.1.9");
+});
+
+it("an offboarding the main database lost to a restore, or maintenance begun mid-way, still stops the install; never without the ledger", async () => {
+  host = fakeHost("0.1.9");
+  const approved = await release("0.2.0", "none");
+  const db = stage.databases.shared;
+  await expect(runOperator(["central-apply", "shop/production", approved.id, "0.2.0", "alex"], { mappings, now, recordRevocation: async () => {},
+    query: query(db), readArtifact: async (directory) => artifacts.get(directory)!, central: { targets: [target], transport: host } }))
+    .rejects.toThrow(/ledger/);
+  // Offboarded while the package uploads, then a restore of the main database to before it, not yet replayed.
+  host.next((command) => command[0] === "cp", async (command, options) => {
+    const result = await host.run([...target.runner, ...command], options);
+    await operator("offboard", "shop/production", "alex", "https://github.com/Quick-Release/gq-support/issues/147");
+    await db.batch([db.prepare("DELETE FROM offboarding"), db.prepare("DELETE FROM delivery_suppression")]);
+    return result;
+  });
+  expect(await apply(approved.id, "0.2.0")).toMatchObject({ outcome: "refused", reason: "superseded", installed: false, still_approved: false });
+  expect(host.version).toBe("0.1.9");
+});
+
+it("maintenance begun after a central application started stops it before the install", async () => {
+  host = fakeHost("0.1.9");
+  const approved = await release("0.2.0", "none");
+  host.next((command) => command[0] === "cp", async (command, options) => {
+    const result = await host.run([...target.runner, ...command], options);
+    await operator("maintenance-begin", "alex", "incident", "INC-147");
+    return result;
+  });
+  expect(await apply(approved.id, "0.2.0")).toMatchObject({ outcome: "refused", reason: "superseded", installed: false });
   expect(host.version).toBe("0.1.9");
 });
 

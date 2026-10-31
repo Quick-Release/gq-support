@@ -123,7 +123,8 @@ const images = async (ledgerQuery: OperatorOptions["query"], kind: string) =>
  * Why service cannot resume yet, by bounded code; empty when it can. The
  * restore must be recorded and replayed, and the restored main database must
  * hold everything the ledger keeps: suppressions, erasures, offboardings,
- * suspensions and key revocations, with no erased text left, no withdrawn
+ * suspensions and key revocations, with no usable key of an offboarded Slot,
+ * no erased text left, no withdrawn
  * release current again, and every acknowledged checker episode back. A
  * ledger or database that cannot be read refuses rather than passing.
  */
@@ -146,6 +147,11 @@ export const maintenanceBlockers = async (query: OperatorOptions["query"], ledge
     ...await query(`SELECT g.key_id FROM update_access_grant g
       WHERE NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id)`, [])], "key_id");
   if ((await images(ledgerQuery, "revocation")).some(({ reference }) => usable.has(reference))) blockers.push("revocation_missing");
+  // Nor may any key of an offboarded Slot, even one whose revocation the ledger never got to record.
+  const offboardings = await images(ledgerQuery, "offboarding");
+  if (offboardings.length > 0 && (await query(`SELECT k.slot FROM installation_key k WHERE k.revoked_at IS NULL
+      UNION SELECT g.slot FROM update_access_grant g WHERE NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id)`, []))
+    .some((row) => offboardings.some(({ reference }) => reference === row.slot))) blockers.push("offboarded_access_present");
   const [text] = await query(`SELECT COUNT(*) AS count FROM support_request r WHERE r.erased_at IS NULL
     AND EXISTS (SELECT 1 FROM support_cleanup c WHERE c.request_id = r.id)`, []);
   if (Number(text?.count ?? 1) > 0) blockers.push("erased_text_present");

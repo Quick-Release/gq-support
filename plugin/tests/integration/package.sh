@@ -6,7 +6,8 @@
 #   native   after single: WordPress's own updater installs an approved next release from a stand-in
 #            support service (#142), refuses corrupt, wrong-origin, unauthorized and withdrawn packages,
 #            renews expired download access, keeps working disabled and without the report key, and
-#            makes no remote call while pages render; then reinstalls the candidate.
+#            makes no remote call while pages render; once offboarded (#147) and re-enabled, the refused
+#            update key leaves the installed release and pages unchanged; then reinstalls the candidate.
 #   central  after single: central deployment's WP-CLI adapter installs approved next and recovery
 #            releases from verified bytes with support disabled and no report key (#143).
 #   network  after multisite.sh: network deactivation and uninstall stay bounded to the main site.
@@ -170,6 +171,20 @@ PY
     native recovered "$version" "$candidate_files"
     # Recovered once: nothing loops back to the withdrawn release or reinstalls the recovery.
     [[ "$(wp gq-support update-recover)" == *'No recovery is needed'* ]]
+
+    # Offboarded (#147): support is re-enabled locally, but the service now refuses the revoked update key.
+    # The plugin forgets the offer and its access, keeps the installed release, and pages still ask nothing.
+    native mode unauthorized
+    [[ "$(wp gq-support update-check 2>&1 || true)" == *'Update check: unauthorized.'* ]]
+    native offboarded "$version"
+    native mode unauthorized
+    curl -fsS -o /dev/null "$site/"
+    for page in '' plugins.php update-core.php; do
+      [[ "$(curl -fsS -b "$cookies/admin" "$site/wp-admin/$page")" == *'wpadminbar'* ]]
+    done
+    native quiet
+    wp cron event run wp_update_plugins >/dev/null
+    native unchanged "$version"
 
     native cleanup
     wp plugin install "$zip" --force
