@@ -20,6 +20,7 @@ import type { StageInventory } from "./inventory.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { GUARDED_COMMANDS, guardOperatorMutation, runMaintenanceOperator } from "./maintenance.ts";
+import { runComposerApprovalOperator, type PackageTags } from "./composer-approval.ts";
 
 export type CredentialDatabase = Pick<D1Database, "prepare" | "batch">;
 export interface OperatorOptions {
@@ -43,6 +44,8 @@ export interface OperatorOptions {
   readonly evidence?: ReleaseEvidence;
   /** The reviewed migrations in the Operator's checkout, compared with the live migration state (src/fleet-rollout.ts). */
   readonly migrations?: readonly ReviewedMigration[];
+  /** This repository's published Composer tags, read with the Operator's GitHub access (src/composer-approval.ts). */
+  readonly packageTags?: PackageTags;
 }
 
 /** A one-statement-at-a-time D1 view of an Operator query function, for shared store code. */
@@ -89,6 +92,7 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   if (args[0]?.startsWith("release-")) return runReleaseOperator(args, { ...options, now });
   if (args[0]?.startsWith("update-access")) return runUpdateAccessOperator(args, { ...options, now });
   if (args[0]?.startsWith("central-")) return runCentralOperator(args, { ...options, now });
+  if (args[0] === "composer-approval") return runComposerApprovalOperator(args, { ...options, now });
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   if (args[0] === "offboard" || args[0] === "offboard-status") return runOffboardingOperator(args, { ...options, now });
@@ -100,7 +104,7 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { ...options, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, offboard-status, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|verify|approve|withdraw|boundary>, fleet-<launch|status|run>, update-access-<status|grant|revoke> and central-<apply|status>");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, offboard-status, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|verify|approve|withdraw|boundary>, fleet-<launch|status|run>, update-access-<status|grant|revoke>, central-<apply|status> and composer-approval");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

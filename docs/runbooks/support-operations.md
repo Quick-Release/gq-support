@@ -337,6 +337,42 @@ repository; collect them through the implementation workflow, never guess them.
    Report-key revocation, `GQ_SUPPORT_DISABLED` and disconnecting do not affect
    this path; offboarding does, and refuses further applications.
 
+### Composer approval record
+
+A Composer-managed central Slot is never installed by `central-apply`: its site
+deployment tooling (gq-site) changes the site's lock and installs the package
+itself. What it may install comes only from this read-only Operator command,
+run with the Operator's own Cloudflare and `gh` logins and the ledger:
+
+`composer-approval <slot> <release-id> <dir> <prepare|deploy>` with `--stage`,
+the database IDs and `--ledger-database-id`, where `<dir>` holds the release's
+tested package as downloaded above.
+
+It prints one `gq-support.composer-approval/v1` record (stage, Slot, phase,
+release ID, `getquick/gq-support` version and approved ZIP SHA-256, the source
+commit and release run, the published `v<version>` tag's commit, every file's
+SHA-256, the `gq-support.files/v1` files digest and the observation time), or
+refuses and prints nothing. It writes nothing. It refuses during maintenance,
+before a recorded restore is replayed, for a Slot that is not central or is
+offboarded (also when only the ledger still says so), for anything but the
+current approved, verified, signed release, a withdrawn release, an unserved
+contract or a live schema outside the release's tested range, for artifact
+bytes, manifest or provenance that are not the approved ones, and when the
+published tag's git tree is not exactly the approved files.
+
+- `prepare` works before the fleet dispatch: use it to prepare the lock change.
+- `deploy` needs the dispatch, and is valid only as it is read: run it again
+  just before each install, and stop if it refuses or differs from the prepared
+  record.
+- The source commit, the tag's package commit (what `composer.lock`'s
+  `source.reference` must be) and the approved ZIP bytes are three different
+  identities. A registry may repack its dist ZIP: verify an install by its files
+  against `files` and `files_digest`, never by registry ZIP bytes.
+
+There is no remote endpoint, detached signature or verification key for this
+record; the full contract is in `worker/src/composer-approval.ts`. Composer
+central targets stay refused by `central-apply` and `fleet-run`.
+
 ## Fleet rollout and recovery
 
 Commands are in the [Worker README](../../worker/README.md#fleet-rollout-and-recovery).

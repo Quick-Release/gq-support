@@ -10,7 +10,9 @@ import type { OperatorOptions } from "./operator.ts";
  * withdrawn release current again (see maintenanceBlockers).
  */
 export const GUARDED_COMMANDS: readonly string[] = ["enroll", "resume", "reconcile", "unsuspend", "release-candidate", "release-verify",
-  "release-approve", "release-withdraw", "release-boundary", "fleet-launch", "fleet-run", "update-access-grant", "central-apply"];
+  "release-approve", "release-withdraw", "release-boundary", "fleet-launch", "fleet-run", "update-access-grant", "central-apply",
+  // Read-only, but its record authorizes a Composer install: it must never describe rewound or restored state.
+  "composer-approval"];
 
 /**
  * Refuses a guarded command unless the ledger shows the service serving and

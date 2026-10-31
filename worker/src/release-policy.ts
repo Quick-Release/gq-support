@@ -115,9 +115,15 @@ const wellFormed = (row: ReleaseRow) => integer(row.sequence) && row.sequence >=
  * record is well formed. A withdrawn release is never offered again.
  */
 export const offeredRelease = async (db: QueryDatabase): Promise<ReleaseRow | null> => {
+  const current = await currentRelease(db);
+  return current && current.dispatched_at !== null ? current : null;
+};
+
+/** The approved release, dispatched or not, only while it and its previous release are well formed. */
+export const currentRelease = async (db: QueryDatabase): Promise<ReleaseRow | null> => {
   const { current, previous } = await approvedReleases(db);
   const valid = current && wellFormed(current) && (current.previous_sequence === null || (previous && wellFormed(previous)));
-  return valid && current.dispatched_at !== null ? current : null;
+  return valid ? current : null;
 };
 
 /** Why new intake is open or closed for a plugin version. */

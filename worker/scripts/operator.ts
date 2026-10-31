@@ -12,10 +12,12 @@ import { stageReleaseEnforcement } from "../src/release-policy.ts";
 import { stageCentralTargets } from "../src/central-deployment.ts";
 import { commandTransport } from "./central-transport.ts";
 import { githubEvidence } from "./release-evidence.ts";
+import { githubPackageTags } from "./package-tags.ts";
+import { MAX_PACKAGE_BYTES } from "../src/package-source.ts";
 import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|maintenance-<begin|status|end>|cleanup-reconcile|cleanup-exception|offboard|offboard-status|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|inventory-readiness|release-status|release-candidate|release-verify|release-approve|release-withdraw|release-boundary|fleet-launch|fleet-status|fleet-run|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|maintenance-<begin|status|end>|cleanup-reconcile|cleanup-exception|offboard|offboard-status|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|inventory-readiness|release-status|release-candidate|release-verify|release-approve|release-withdraw|release-boundary|fleet-launch|fleet-status|fleet-run|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status|composer-approval> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
@@ -77,8 +79,14 @@ try {
     })(),
     // The stage's reviewed central targets, reached with the Operator's own hosting access.
     central: { targets: stageCentralTargets[stage], transport: commandTransport() },
-    // A downloaded release workflow artifact: the exact ZIP and the manifest and provenance recorded with it.
-    readArtifact: async (artifact) => ({ zip: readFileSync(join(artifact, "gq-support.zip")),
+    // This repository's published Composer tags, read with the Operator's `gh` login (composer-approval).
+    packageTags: githubPackageTags(),
+    // A downloaded release workflow artifact: the exact ZIP (bounded) and the manifest and provenance recorded with it.
+    readArtifact: async (artifact) => ({ zip: (() => {
+      const zip = join(artifact, "gq-support.zip");
+      if (!statSync(zip).isFile() || statSync(zip).size > MAX_PACKAGE_BYTES) throw new Error("The artifact's gq-support.zip is not a bounded regular file");
+      return readFileSync(zip);
+    })(),
       manifest: readFileSync(join(artifact, "gq-support.manifest.json"), "utf8"), provenance: readFileSync(join(artifact, "provenance.json"), "utf8") }),
     query: d1("SupportDB"),
     ...(ledgerId ? { ledger: d1("SupportLedger") } : {}),
