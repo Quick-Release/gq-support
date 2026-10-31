@@ -240,6 +240,7 @@ it("records a failure only when the read-back confirms WordPress did not install
   // The right version with other files is not the approved package either.
   host.next(isInstall, () => { host.version = "0.2.0"; host.files!.set("gq-support.php", "<?php // tampered"); return { kind: "exit", code: 0, stdout: "" }; });
   expect(await apply(approved.id, "0.2.0")).toMatchObject({ outcome: "failed", reason: "files_mismatch", observed_version: "0.2.0" });
+  expect((await inventory()).update).toMatchObject({ outcome: "failed" });
   // Nor is one WordPress left deactivated.
   host.next(isInstall, async (command) => { const result = await host.run([...target.runner, ...command]); host.active = false; return result; });
   expect(await apply(approved.id, "0.2.0")).toMatchObject({ outcome: "failed", reason: "deactivated" });
