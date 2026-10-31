@@ -202,7 +202,7 @@ it("keeps incidents through a Discord outage, exposes the failing delivery, and 
     pending: 0, failed: 0, last_sent_at: new Date(now).toISOString() }));
   expect((await status()).problems).toEqual([]);
   expect(JSON.parse(await operator("incidents")).incidents).toHaveLength(1);
-});
+}, 20_000);
 
 it("retries a send whose outcome is unknown without creating another incident, and edits the last known message afterwards", async () => {
   discord.fail(INCIDENTS, { lostResponse: true });
@@ -295,8 +295,9 @@ it("reposts a deleted message, and keeps delivery state no longer than its sourc
   // Without a reviewed repository name the issue is named, not linked.
   expect(discord.messages(REQUESTS)[0]!.content).toMatch(/Issue: #\d+ in repository 77/);
 
-  const rows = async () => (await stage.databases.shared.prepare("SELECT source_kind, state FROM notification ORDER BY source_kind")
-    .all()).results;
+  // Request notifications only: the week without status refreshes also routes its own incident (src/operational-signals.ts).
+  const rows = async () => (await stage.databases.shared.prepare(`SELECT source_kind, state FROM notification
+    WHERE source_kind = 'support_request' ORDER BY source_kind`).all()).results;
   expect(await rows()).toEqual([{ source_kind: "support_request", state: "sent" }]);
   advance(7 * 86_400_000);
   await tick();

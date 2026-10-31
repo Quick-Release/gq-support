@@ -2,6 +2,7 @@ import { readBody } from "./installation-api.ts";
 import { claimIncident, findIncident, isResolution, listIncidents, resolveIncident } from "./incidents.ts";
 import { slotInventory, type StageInventory } from "./inventory.ts";
 import { notificationStatus, type Destination } from "./notifications.ts";
+import { operationsHealth } from "./operations-health.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
 import { OPERATIONS_SIGNATURE, verifySignature } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
@@ -61,9 +62,10 @@ export const handleOperationsRequest = async (request: Request, db: QueryDatabas
     const list = request.method === "GET" && url.pathname === "/v1/operations/incidents";
     const delivery = request.method === "GET" && url.pathname === "/v1/operations/notifications";
     const slots = request.method === "GET" && url.pathname === "/v1/operations/inventory";
+    const health = request.method === "GET" && url.pathname === "/v1/operations/health";
     const match = INCIDENT.exec(url.pathname);
     const action = match?.[2]?.slice(1);
-    if (url.search || !(list || delivery || slots || (match && request.method === (action ? "POST" : "GET")))) return notFound();
+    if (url.search || !(list || delivery || slots || health || (match && request.method === (action ? "POST" : "GET")))) return notFound();
     if (url.protocol !== "https:") return unauthorized();
     const body = await readBody(request, BODY_BYTES);
     if (body === null) return json({ code: "request_too_large" }, 413);
@@ -83,6 +85,7 @@ export const handleOperationsRequest = async (request: Request, db: QueryDatabas
     if (list) return json({ incidents: await listIncidents(db, now) });
     if (delivery) return json(await notificationStatus(db, notifications));
     if (slots) return json(await slotInventory(db, mappings, inventory, now));
+    if (health) return json(await operationsHealth(db, mappings, now));
     const id = match![1]!;
     if (!action) {
       const incident = await findIncident(db, id, now);

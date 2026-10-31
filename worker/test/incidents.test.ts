@@ -105,7 +105,7 @@ it("groups a shared repository failure into one incident listing every affected 
 
   // The suspension covers every Slot on the repository, whichever one observed it.
   expect(await incidents()).toEqual([{
-    id: expect.any(String), category: "repository_suspended", state: "open",
+    id: expect.any(String), category: "repository_suspended", detail: null, state: "open",
     affected_slots: ["shop/production", "shop/staging"],
     first_observed_at: new Date(START + 10_000).toISOString(), last_observed_at: expect.any(String),
     claimant: null, claimed_at: null, resolution: null, resolved_at: null,

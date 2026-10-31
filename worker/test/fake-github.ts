@@ -69,6 +69,8 @@ export const makeFakeGitHub = () => {
   const requests: Recorded[] = [];
   const scripts: Script[] = [];
   const minted: string[] = [];
+  /** Webhook deliveries GitHub has sent, with the status the receiver answered (0: no response). */
+  const hookDeliveries: { guid: string; at: number; status: number }[] = [];
   let sequence = 0;
   const omitted = new Set<string>();
   let afterCreate: ((issue: FakeIssue) => Response | undefined | Promise<Response | undefined>) | undefined;
@@ -139,6 +141,16 @@ export const makeFakeGitHub = () => {
         repositories: scoped.map((repository) => Object.fromEntries(Object.entries(repositoryJson(repository!))
           .filter(([field]) => !omitted.has(field)))),
       }, 201);
+    }
+
+    // The App's webhook delivery log, newest first, as GitHub keeps it.
+    if (path === "/app/hook/deliveries" && request.method === "GET") {
+      if (!appJwt(request.headers.get("authorization"), now)) return message(401, "A JSON web token could not be decoded");
+      const perPage = Number(request.query.get("per_page") ?? "30");
+      return json(hookDeliveries.slice().reverse().slice(0, perPage).map((delivery, index) => ({
+        id: 3_849_000_000_000_000_000 + index, guid: delivery.guid, delivered_at: new Date(delivery.at).toISOString().replace(/\.\d{3}Z$/, "Z"),
+        redelivery: false, duration: 0.1, status: delivery.status === 0 ? "timed out" : `${delivery.status}`, status_code: delivery.status,
+        event: "issues", action: "closed", installation_id: 7, repository_id: 42 })));
     }
 
     const header = request.headers.get("authorization") ?? "";
@@ -272,7 +284,8 @@ export const makeFakeGitHub = () => {
       if (url.origin !== "https://api.github.com") {
         return yield* Effect.die(new Error(`Unexpected origin ${url.origin}`));
       }
-      const script = scripts.shift();
+      // Scripts fault the service's issue and token traffic; the delivery log is read as recorded.
+      const script = url.pathname === "/app/hook/deliveries" ? undefined : scripts.shift();
       const scripted = yield* Effect.promise(() => Promise.resolve(script?.(recorded)));
       if (scripted === "hang") return yield* Effect.never;
       if (scripted === "reset") {
@@ -291,7 +304,9 @@ export const makeFakeGitHub = () => {
     requests,
     minted,
     issues,
-    /** Queue one response for the next request; `undefined` passes it through. */
+    /** Records a webhook delivery in the App's delivery log, as GitHub does after sending one. */
+    delivered: (status: number, at = Date.now()) => { hookDeliveries.push({ guid: crypto.randomUUID(), at, status }); },
+    /** Queue one response for the next request, other than a delivery-log read; `undefined` passes it through. */
     next: (script: Script) => { scripts.push(script); },
     installation: (id: number, options: { suspended?: boolean } = {}) => {
       installations.set(id, { suspended: options.suspended ?? false });

@@ -1,4 +1,5 @@
 import { findIncident, type IncidentProjection } from "./incidents.ts";
+import { SIGNALS } from "./signal-rules.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
 
@@ -57,6 +58,10 @@ export const REQUEST_NOTIFICATION_RETENTION_MS = 7 * 86_400_000;
 const DOCS = "https://github.com/Quick-Release/gq-support/blob/main/";
 const USER_AGENT = "DiscordBot (https://github.com/Quick-Release/gq-support, 1)";
 
+// A more advanced stage of an incident edits its message, such as an uncertain create reaching Operator handoff.
+const detailRank = `CASE ${Object.values(SIGNALS).flatMap((signal) => signal.details?.map((detail, rank) =>
+  `WHEN i.detail = '${detail}' THEN ${rank}`) ?? []).join(" ")} ELSE 0 END`;
+
 /**
  * Brings each source's notification up to its current transition. Transitions
  * only move forward; one that moves resets the attempts and keeps the message.
@@ -71,8 +76,9 @@ const enqueue = async (db: QueryDatabase, destinations: DiscordDestinations, now
     statements.push(db.prepare(`INSERT INTO notification (source_kind, source_id, destination, transition, transition_rank,
       state, next_attempt_at, source_at, changed_at)
       SELECT 'incident', i.id, 'operational_incidents',
-        CASE WHEN i.state = 'resolved' THEN 'resolved' WHEN i.claimant IS NOT NULL THEN 'claimed' ELSE 'opened' END,
-        CASE WHEN i.state = 'resolved' THEN 2 WHEN i.claimant IS NOT NULL THEN 1 ELSE 0 END, 'pending', ?, i.first_observed_at, ?
+        CASE WHEN i.state = 'resolved' THEN 'resolved' WHEN i.claimant IS NOT NULL THEN 'claimed' ELSE 'opened' END
+          || COALESCE(':' || i.detail, ''),
+        CASE WHEN i.state = 'resolved' THEN 2 WHEN i.claimant IS NOT NULL THEN 1 ELSE 0 END * 100 + ${detailRank}, 'pending', ?, i.first_observed_at, ?
       FROM incident i WHERE i.state = 'open' OR (i.state = 'resolved' AND EXISTS (SELECT 1 FROM notification n
         WHERE n.source_kind = 'incident' AND n.source_id = i.id AND n.destination = 'operational_incidents')) ${upsert}`)
       .bind(now, now));
@@ -114,8 +120,8 @@ const code = (value: string) => `\`${value.replaceAll("`", "")}\``;
 const incidentMessage = (incident: IncidentProjection) => [
   `**Operational incident** · ${incident.state === "resolved" ? `Resolved (${incident.resolution})`
     : incident.claimant ? `Claimed by ${code(incident.claimant)}` : "Unclaimed"}`,
-  `Category: ${code(incident.category)}`,
-  `Affected Slots: ${incident.affected_slots.map(code).join(", ")}`,
+  `Category: ${code(incident.category)}${incident.detail ? ` · ${code(incident.detail)}` : ""}`,
+  `Affected Slots: ${incident.affected_slots.length ? incident.affected_slots.map(code).join(", ") : "none (stage-wide)"}`,
   `Incident: ${code(incident.id)}`,
   ...(incident.runbook ? [`Runbook: <${DOCS}${incident.runbook}>`] : []),
 ].join("\n");

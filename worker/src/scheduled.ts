@@ -4,9 +4,12 @@ import { sweepDelivery, type DeliveryOptions } from "./delivery.ts";
 import { sweepCleanup } from "./cleanup.ts";
 import type { GitHubGateway, GitHubReader } from "./github-gateway.ts";
 import { sweepStatus, type SweepConfig } from "./status-sweep.ts";
+import { scanWebhookDeliveries } from "./webhook-deliveries.ts";
 import { refreshStatus, type RefreshConfig } from "./status-refresh.ts";
 import { expireIncidents } from "./incidents.ts";
+import { observeSignals } from "./operational-signals.ts";
 import { sweepNotifications, type NotificationOptions } from "./notifications.ts";
+import { expireMetrics, metricStatement, type SchedulerPhase } from "./operational-metrics.ts";
 
 export interface ScheduledOptions extends DeliveryOptions {
   /** The title-digest key for erasure redaction (src/cleanup.ts). */
@@ -19,47 +22,53 @@ export interface ScheduledOptions extends DeliveryOptions {
 
 /**
  * The minute Cron's work, in priority order: delivery and reconciliation
- * first, then erasure and retention cleanup (including resolved incidents past
- * their 90 days), then Discord notifications of what those phases recorded,
- * then due refreshes and status sweeps within their time bounds. A failure in
- * one phase never skips the others, and no phase waits for Discord.
+ * first, then erasure and retention cleanup, then operational signals
+ * (expiring resolved incidents past 90 days and aggregates past 12 months, and
+ * routing what trusted records now show, src/operational-signals.ts), then
+ * Discord notifications of what those phases recorded, then due refreshes and
+ * status sweeps within their time bounds. A failure in one phase never skips
+ * the others, and no phase waits for Discord. How each phase ended is measured.
  */
 export const scheduledTick = (options: ScheduledOptions): Effect.Effect<void, never, GitHubGateway | GitHubReader> => Effect.gen(function* () {
-  yield* sweepDelivery(options).pipe(
-    Effect.timeoutOption(25_000),
-    Effect.catchCause(() => Effect.logError("Support delivery sweep failed")),
-  );
-  yield* sweepCleanup({ db: options.db, botLogin: options.botLogin, mappings: options.mappings, digestKey: options.digestKey ?? null,
-    ledger: options.ledger ?? null,
-    ...(options.now ? { now: options.now } : {}) }).pipe(
-    Effect.timeoutOption(5_000),
-    Effect.catchCause(() => Effect.logError("Support cleanup sweep failed")),
-  );
-  yield* Effect.tryPromise(() => expireIncidents(options.db, (options.now ?? Date.now)())).pipe(
-    Effect.timeoutOption(1_000),
-    Effect.catchCause(() => Effect.logError("Operational incident expiry failed")),
-  );
+  const now = options.now ?? Date.now;
+  const outcomes: { phase: SchedulerPhase; outcome: "completed" | "timed_out" | "failed"; durationMs: number; at: number }[] = [];
+  /** Runs one phase within its bound and records how it ended; a failure is logged and never skips the next phase. */
+  const phase = <A, E, R>(name: SchedulerPhase, work: Effect.Effect<A, E, R>, bound: number, failure: string) => Effect.gen(function* () {
+    const started = now();
+    const outcome = yield* work.pipe(Effect.timeoutOption(bound),
+      Effect.map((result) => Option.isSome(result) ? "completed" as const : "timed_out" as const),
+      Effect.catchCause(() => Effect.logError(failure).pipe(Effect.as("failed" as const))));
+    outcomes.push({ phase: name, outcome, durationMs: now() - started, at: now() });
+  });
+  yield* phase("delivery", sweepDelivery(options), 25_000, "Support delivery sweep failed");
+  yield* phase("cleanup", sweepCleanup({ db: options.db, botLogin: options.botLogin, mappings: options.mappings,
+    digestKey: options.digestKey ?? null, ledger: options.ledger ?? null,
+    ...(options.now ? { now: options.now } : {}) }), 5_000, "Support cleanup sweep failed");
+  // GitHub's webhook delivery log first, briefly bounded, so this tick routes what it shows.
+  yield* phase("signals", scanWebhookDeliveries(options.db, now()).pipe(Effect.timeoutOption(1_000),
+    Effect.catchCause(() => Effect.logError("Webhook delivery log scan failed")),
+    Effect.andThen(Effect.tryPromise(async () => {
+      await expireIncidents(options.db, now());
+      await expireMetrics(options.db, now());
+      await observeSignals(options.db, now());
+    }))), 2_000, "Operational signal phase failed");
   const notifications = options.notifications;
   if (notifications) {
-    yield* Effect.tryPromise((signal) => sweepNotifications(options.db, notifications, options.mappings,
-      (options.now ?? Date.now)(), signal)).pipe(
-      Effect.timeoutOption(4_000),
-      Effect.flatMap((sweep) => Effect.forEach(Option.match(sweep, { onNone: () => [], onSome: ({ failed }) => failed }),
-        ({ destination, code }) => Effect.logError("Discord notification failed").pipe(
-          Effect.annotateLogs({ destination, code, alert: true })))),
-      Effect.catchCause(() => Effect.logError("Discord notification sweep failed")),
-    );
+    yield* phase("notifications", Effect.tryPromise((signal) => sweepNotifications(options.db, notifications, options.mappings,
+      now(), signal)).pipe(
+      Effect.tap(({ failed }) => Effect.forEach(failed, ({ destination, code }) => Effect.logError("Discord notification failed").pipe(
+        Effect.annotateLogs({ destination, code, alert: true }))))), 4_000, "Discord notification sweep failed");
   }
-  yield* refreshStatus({ db: options.db,
+  // Bounded at its own execution time; claims are durable, so a cut-off read retries next minute.
+  yield* phase("refresh", refreshStatus({ db: options.db,
     ...(options.now ? { now: options.now } : {}), ...(options.random ? { random: options.random } : {}),
-    ...(options.refresh ? { config: options.refresh } : {}) }).pipe(
-    Effect.timeoutOption(11_000),
-    Effect.catchCause(() => Effect.logError("Support status refresh failed")),
-  );
-  yield* sweepStatus({ db: options.db, botLogin: options.botLogin, mappings: options.mappings,
-    ...(options.now ? { now: options.now } : {}), ...(options.sweep ? { config: options.sweep } : {}) }).pipe(
-    // Phase bounds total 58 seconds, ending before the next minute tick.
-    Effect.timeoutOption(12_000),
-    Effect.catchCause(() => Effect.logError("Support status sweep failed")),
-  );
+    ...(options.refresh ? { config: options.refresh } : {}) }), 10_000, "Support status refresh failed");
+  // Phase bounds total 58 seconds, ending before the next minute tick.
+  yield* phase("sweep", sweepStatus({ db: options.db, botLogin: options.botLogin, mappings: options.mappings,
+    ...(options.now ? { now: options.now } : {}), ...(options.sweep ? { config: options.sweep } : {}) }), 12_000,
+    "Support status sweep failed");
+  // Scheduler health, in one write after the work it measures, bounded so the tick still ends before the next.
+  yield* Effect.tryPromise(() => options.db.batch(outcomes.map(({ phase: name, outcome, durationMs, at }) =>
+    metricStatement(options.db, { metric: "scheduler", outcome: `${name}_${outcome}` }, { at, durationMs })))).pipe(
+    Effect.timeoutOption(500), Effect.catchCause(() => Effect.logError("Scheduler measurement failed")));
 });

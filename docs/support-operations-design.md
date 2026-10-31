@@ -306,5 +306,10 @@ before onboarding, not values established by this interview.
 - Existing release CI verifies packaged bytes and installed upgrades, but does
   not establish automatic delivery to client installations. Existing Worker
   deploy CI does not establish the required non-destructive production plan gate.
-- Existing webhook runbooks describe log signals; routed alerts remain work for
-  this design. Coverage policy is not evidence of an implemented alert channel.
+- Existing webhook runbooks describe log signals. #138 routes the delivery,
+  webhook, status-lag and privacy signals above as grouped incidents and reports
+  measured health ([Worker README](../worker/README.md#routed-operational-signals)).
+  Webhook outcomes come from GitHub's authenticated delivery log, never from
+  untrusted requests. No baseline, objective or additional threshold has been
+  recorded, and the staging broken-webhook drill has not run: its Discord
+  destinations are not configured. Independent outage detection is #139.

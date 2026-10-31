@@ -1,5 +1,6 @@
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import type { QueryDatabase } from "./storage.ts";
+import { SIGNALS, type SignalCategory } from "./signal-rules.ts";
 
 /**
  * Operational incidents (CONTEXT.md, docs/support-operations-design.md). The
@@ -9,7 +10,7 @@ import type { QueryDatabase } from "./storage.ts";
  * here reminds, times out a claim or escalates: an unclaimed incident simply
  * stays visible. An incident holds no report content, identity or credential.
  */
-export type IncidentCategory = "repository_suspended";
+export type IncidentCategory = "repository_suspended" | SignalCategory;
 export type Via = "service" | "api" | "operator";
 const RESOLUTIONS = ["recovered"] as const;
 export type Resolution = typeof RESOLUTIONS[number];
@@ -20,17 +21,22 @@ export const INCIDENT_RETENTION_MS = 90 * 86_400_000;
 
 interface CategoryRule {
   readonly runbook: string;
-  /** An SQL condition on incident `i` that holds only once trusted records show the cause recovered. */
-  readonly recovered: string;
+  /** An SQL condition on incident `i` that holds only once trusted records show the cause recovered at `now`. */
+  readonly recovered: (now: number) => string;
 }
-const CATEGORIES: Readonly<Record<IncidentCategory, CategoryRule>> = {
-  // Only the Operator's audited `unsuspend` lifts a suspension (src/repository-suspension.ts).
-  repository_suspended: { runbook: "worker/README.md#suspended-mappings",
-    recovered: `NOT EXISTS (SELECT 1 FROM repository_state r
-      WHERE r.repository_id = CAST(i.subject AS INTEGER) AND r.suspended_reason IS NOT NULL)` },
+// Only the Operator's audited `unsuspend` lifts a suspension (src/repository-suspension.ts).
+const SUSPENDED: CategoryRule = { runbook: "worker/README.md#suspended-mappings",
+  recovered: () => `NOT EXISTS (SELECT 1 FROM repository_state r
+    WHERE r.repository_id = CAST(i.subject AS INTEGER) AND r.suspended_reason IS NOT NULL)` };
+// Read at call time: the signal rules import this module's observation.
+const ruleOf = (category: string): CategoryRule | undefined => {
+  if (category === "repository_suspended") return SUSPENDED;
+  if (!Object.hasOwn(SIGNALS, category)) return undefined;
+  const signal = SIGNALS[category as SignalCategory];
+  // A routed signal has recovered exactly when its own observation finds nothing for the cause (src/operational-signals.ts).
+  return { runbook: signal.runbook,
+    recovered: (now) => `NOT EXISTS (SELECT 1 FROM (${signal.affected(now)}) a WHERE a.subject = i.subject)` };
 };
-const ruleOf = (category: string): CategoryRule | undefined =>
-  Object.hasOwn(CATEGORIES, category) ? CATEGORIES[category as IncidentCategory] : undefined;
 
 export interface Observation {
   readonly category: IncidentCategory;
@@ -38,6 +44,8 @@ export interface Observation {
   readonly subject: string;
   readonly slots: readonly string[];
   readonly now: number;
+  /** The cause's current stage within its category, when the category has stages. */
+  readonly detail?: string | null;
 }
 
 /**
@@ -45,12 +53,13 @@ export interface Observation {
  * failure and its incident are written together. They open the cause's incident
  * if none is open, or extend the open one's last observation and affected Slots.
  */
-export const observeIncident = (db: QueryDatabase, { category, subject, slots, now }: Observation): D1PreparedStatement[] => {
+export const observeIncident = (db: QueryDatabase, { category, subject, slots, now, detail = null }: Observation): D1PreparedStatement[] => {
   const id = crypto.randomUUID();
   return [
-    db.prepare(`INSERT INTO incident (id, category, subject, state, first_observed_at, last_observed_at) VALUES (?, ?, ?, 'open', ?, ?)
-      ON CONFLICT (category, subject) WHERE state = 'open'
-      DO UPDATE SET last_observed_at = MAX(last_observed_at, excluded.last_observed_at)`).bind(id, category, subject, now, now),
+    db.prepare(`INSERT INTO incident (id, category, subject, state, first_observed_at, last_observed_at, detail)
+      VALUES (?, ?, ?, 'open', ?, ?, ?) ON CONFLICT (category, subject) WHERE state = 'open'
+      DO UPDATE SET last_observed_at = MAX(last_observed_at, excluded.last_observed_at), detail = excluded.detail`)
+      .bind(id, category, subject, now, now, detail),
     // Only when this observation opened it.
     db.prepare(`INSERT INTO incident_audit (id, incident_id, actor, via, action, previous_state, new_state, occurred_at)
       SELECT ?, id, 'service', 'service', 'open', NULL, 'open', ? FROM incident WHERE id = ?`).bind(crypto.randomUUID(), now, id),
@@ -62,7 +71,7 @@ export const observeIncident = (db: QueryDatabase, { category, subject, slots, n
 };
 
 interface IncidentRow {
-  id: string; category: string; state: "open" | "resolved"; first_observed_at: number; last_observed_at: number;
+  id: string; category: string; detail: string | null; state: "open" | "resolved"; first_observed_at: number; last_observed_at: number;
   claimant: string | null; claimed_at: number | null; claim_audit_id: string | null;
   resolution: string | null; resolved_at: number | null; resolve_audit_id: string | null; slots: string;
 }
@@ -70,6 +79,8 @@ interface IncidentRow {
 export interface IncidentProjection {
   readonly id: string;
   readonly category: string;
+  /** The cause's last observed stage within its category, such as `operator_handoff`; null when it has none. */
+  readonly detail: string | null;
   readonly state: "open" | "claimed" | "resolved";
   readonly affected_slots: readonly string[];
   readonly first_observed_at: string;
@@ -82,7 +93,7 @@ export interface IncidentProjection {
 }
 const iso = (time: number | null) => time === null ? null : new Date(time).toISOString();
 const project = (row: IncidentRow): IncidentProjection => ({
-  id: row.id, category: row.category,
+  id: row.id, category: row.category, detail: row.detail,
   state: row.state === "resolved" ? "resolved" : row.claimant ? "claimed" : "open",
   affected_slots: JSON.parse(row.slots) as string[],
   first_observed_at: iso(row.first_observed_at)!, last_observed_at: iso(row.last_observed_at)!,
@@ -90,7 +101,7 @@ const project = (row: IncidentRow): IncidentProjection => ({
   runbook: ruleOf(row.category)?.runbook ?? null,
 });
 
-const SELECT = `SELECT i.id, i.category, i.state, i.first_observed_at, i.last_observed_at, i.claimant, i.claimed_at, i.claim_audit_id,
+const SELECT = `SELECT i.id, i.category, i.detail, i.state, i.first_observed_at, i.last_observed_at, i.claimant, i.claimed_at, i.claim_audit_id,
   i.resolution, i.resolved_at, i.resolve_audit_id,
   (SELECT json_group_array(slot) FROM (SELECT slot FROM incident_slot WHERE incident_id = i.id ORDER BY slot)) AS slots
   FROM incident i WHERE (i.state = 'open' OR i.resolved_at > ?)`;
@@ -150,7 +161,7 @@ export const resolveIncident = async (db: QueryDatabase, id: string, actor: stri
     await db.batch([
       db.prepare(`INSERT INTO incident_audit (id, incident_id, actor, via, action, previous_state, new_state, occurred_at)
         SELECT ?, i.id, ?, ?, 'resolve', 'claimed', 'resolved', ? FROM incident i
-        WHERE i.id = ? AND i.state = 'open' AND i.claimant = ? AND ${rule.recovered}`).bind(audit, actor, via, now, id, actor),
+        WHERE i.id = ? AND i.state = 'open' AND i.claimant = ? AND ${rule.recovered(now)}`).bind(audit, actor, via, now, id, actor),
       db.prepare(`UPDATE incident SET state = 'resolved', resolution = ?, resolved_at = ?, resolve_audit_id = ?
         WHERE id = ? AND state = 'open' AND claimant = ? AND EXISTS (SELECT 1 FROM incident_audit WHERE id = ?)`)
         .bind(resolution, now, audit, id, actor, audit),

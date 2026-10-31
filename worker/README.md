@@ -365,8 +365,9 @@ per category and cause groups every observation of a shared failure and lists
 each affected Slot; a different cause is a separate incident. The first producer
 is the [suspended mapping](#suspended-mappings) path: every unsafe repository
 observation records the `repository_suspended` incident for that repository,
-listing every Slot mapped to it, in the same D1 batch as the suspension. Further
-signals are routed by later #134 tickets.
+listing every Slot mapped to it, in the same D1 batch as the suspension. Other
+[routed operational signals](#routed-operational-signals) (#138) open incidents
+from durable records each minute.
 
 - Incidents stay unassigned until someone claims one. There are no designated
   responders, claim timeouts, reminders or automatic escalation.
@@ -399,6 +400,7 @@ as Banquinha (`src/operations-api.ts`):
 - `GET /v1/operations/notifications`: [Discord notification](#discord-notifications)
   delivery health per destination and the failing notifications
 - `GET /v1/operations/inventory`: the stage's [Slot inventory](#slot-inventory)
+- `GET /v1/operations/health`: [measured support-path health](#measured-health)
 
 The dashboard authenticates its team member itself, then signs every request
 with its registered Ed25519 key over this canonical string, newline-separated
@@ -435,6 +437,87 @@ pnpm operator incident-claim <incident-id> <opaque-actor> --stage <stage> --acco
 claim rule, recorded with channel `operator`. The claim and its audit metadata
 are one statement, so remote CLI races leave no losing claimant's audit event.
 Resolution goes through the operations API. Neither path can write while D1 is down.
+
+## Routed operational signals
+
+The minute tick's signal phase (#138, `src/operational-signals.ts`) reads
+trusted durable records, never log text, and records what it observes as
+grouped [Operational incidents](#operational-incidents), which the
+[Discord notifier](#discord-notifications) then announces. Each category's
+observation query is also its recovery check, so the claimant can resolve the
+incident only once the signal no longer observes its cause. One cause is one
+incident whose affected Slots grow with each observation; a recurrence after
+resolution opens a new incident. No signal retries, replays or force-creates work.
+
+| Category | Cause (grouping) | Observed when | Recovered when |
+|---|---|---|---|
+| `delivery_unknown` | Repository | An uncertain create is unresolved after 15 minutes, or at once with duplicate/suspicious matches (`detail: conflicting_evidence`). At 24 hours the same incident becomes `detail: operator_handoff` and its Discord message is edited | Trusted positive reconciliation, or audited review, leaves no such create |
+| `delivery_rejected` | Repository | A delivery failed for configuration or permissions (`AppAuthenticationFailed`, `PermissionMissing`, `ValidationRejected`, `MappingUnavailable`, `MissingIdentity`), immediately | The Operator repairs it and `resume`s, or cleanup removes it |
+| `delivery_deadline` | Repository | Known non-creation reached the 24-hour automatic retry deadline; the request is kept under its own retention | Audited `resume`, or retention/erasure cleanup |
+| `repository_suspended` | Repository | A [suspension](#suspended-mappings), immediately | Audited `unsuspend` |
+| `webhook_rejected` | Stage | GitHub's delivery log shows a delivery our receiver answered `401` | GitHub records a later acknowledged delivery |
+| `webhook_failed` | Stage | GitHub's delivery log shows a `5xx` or no response | GitHub records a later acknowledged delivery |
+| `status_refresh_behind` | Stage | A refresh has been due for over the existing one hour | No eligible refresh is over an hour due |
+| `status_sweep_behind` | Repository | The existing one-hour sweep lag, for repositories with tracked requests | A sweep completes |
+| `privacy_cleanup` | Purpose | Retention, offboarding or erasure cannot confirm completion: an `unresolved` remote outcome, residual copies of an open erasure, or an incomplete/failed reference search | The Operator's audited reconcile, exception or erasure close |
+| `suppression_ledger_behind` | Stage | The suppression ledger mirror has not completed for 15 minutes after first succeeding | A cleanup pass mirrors again |
+
+Webhook outcomes come from GitHub's own App delivery log (`GET /app/hook/deliveries`,
+App JWT), counted each minute after the last counted delivery from the newest
+page of 100, with the counts and the mark in one D1 batch. The log holds only
+GitHub's genuine deliveries, so a forged request is never counted, never routed
+and still never touches D1. While GitHub has the service in a rate-limit
+cooldown the log is read later. A `5xx` answered while D1 itself is down cannot be
+recorded then; it is counted once storage returns. Detecting a D1 or Worker
+outage while it lasts belongs to the independent checker (#139), not this phase.
+
+The 15-minute ledger rule is provisional, like any numerical rule not inherited
+from the [delivery design](../docs/support-delivery-design.md): tune it from
+measured baselines. A write failure in this phase never rolls back a suspension,
+erasure, revocation or accepted request; the next tick observes again.
+
+### Measured health
+
+`GET /v1/operations/health` and `pnpm operator health` (`src/operations-health.ts`)
+report the same view: the last 24 hours of hourly aggregates (`measured`) and
+what durable records show now (`current`). Absent or `null` means not
+observed, never healthy. Nothing in it is an objective or SLA; no baseline has
+been recorded for any stage yet.
+
+- `measured` rows are `metric`, `outcome`, `client` (or `null`), `count`, and for
+  timed metrics `mean_ms`/`max_ms`: `intake` (Worker-entry outcome and latency of
+  creates and status changes), `auth` (credential refusals by reason, never a
+  Client), `delivery` (each step's bounded outcome, including provider pacing),
+  `delivery_confirmed` (acceptance to confirmed GitHub creation), `delivery_claim`
+  (a due candidate not won: another execution's claim or pacing), `webhook` (GitHub's delivery log) and `scheduler` (each tick
+  phase completed, timed out or failed, with its duration; written in one
+  statement bounded at 0.5 s after the 58 s of phase bounds).
+- `current` reports durably accepted requests per Client, the pending/failed/
+  unknown backlog per Client with oldest due and unknown times, provider
+  cooldowns, per-Slot fairness (due Slots, never-served Slots, least recently
+  served), and status freshness (tracked requests, oldest observation, refresh
+  backlog, oldest sweep).
+- `usage` attributes measured counts to a Client only through its reviewed
+  mapping and verified credentials, and labels everything else shared and
+  unestimated.
+
+Aggregates (`operational_metric`, migration 0025) hold hourly counts and
+durations per closed metric/outcome and Client only: no request, Reporter,
+credential, URL, header, payload or exception text. They are kept 12 months,
+then the tick deletes them in bounded batches; they never extend a request's
+own retention. Workers Logs keep their configured retention, without Logpush.
+Recording never blocks or fails the work it measures.
+
+### Broken-webhook drill verification
+
+`pnpm operator drill-verify webhook <ISO-start>` checks the drill's evidence in
+D1 only, never contacting GitHub or Discord: a `webhook_rejected`/`webhook_failed`
+incident opened after the start, its sent Discord notification, a later
+acknowledged delivery, and a resolution. Each step is `observed`/`sent` or
+`absent`/`pending`/`failed`; the verdict is `passed` only when all hold. The
+local integration test proves the path with fake GitHub and Discord; it is not
+staging evidence. The staging run is gated on authorized Discord setup (see the
+[operations runbook](../docs/runbooks/support-operations.md#missed-or-broken-webhooks)).
 
 ## Slot inventory
 

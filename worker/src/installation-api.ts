@@ -6,6 +6,7 @@ import { createStorageFor, type QueryDatabase } from "./storage.ts";
 import { CREATE_BODY_BYTES, handleExport, handleSupportRequests } from "./support-requests.ts";
 import { handleErasures } from "./erasure-api.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
+import type { AuthRejection } from "./operational-metrics.ts";
 
 interface InstallationKey {
   key_id: string;
@@ -97,7 +98,12 @@ const enroll = async (request: Request, body: string, db: CredentialDatabase, ma
   return key && !recordedRevocation(key.key_id) ? json(binding(key, mapping)) : invalidCode();
 };
 
+/** What the boundary established about a request, for measurement only: never authority. */
+export type Observation = { readonly slot: string } | { readonly rejected: AuthRejection };
+
 export interface InstallationApiOptions {
+  /** Told the verified Slot, or why credentials were refused (src/operational-metrics.ts). */
+  readonly observe?: (observation: Observation) => void;
   /** The title-digest key for erasures (src/cleanup.ts); without it, redacted titles need review. */
   readonly digestKey?: CryptoKey | null;
   /** The suppression ledger (src/ledger.ts); erasures are recorded there first. */
@@ -130,7 +136,10 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
           attempts = CASE WHEN window_start < excluded.window_start THEN 1 ELSE attempts + 1 END,
           window_start = excluded.window_start RETURNING attempts`)
         .bind(await sha256(ip), windowStart).first<{ attempts: number }>();
-      if (!rate || rate.attempts > 10) return json({ code: "gq_support_rate_limited" }, 429);
+      if (!rate || rate.attempts > 10) {
+        options.observe?.({ rejected: "enrollment_rate_limited" });
+        return json({ code: "gq_support_rate_limited" }, 429);
+      }
     }
     // Bound cleanup work, even after a long quiet period.
     await db.batch([
@@ -140,13 +149,20 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
     ]);
     const body = await readBody(request, create ? CREATE_BODY_BYTES : BODY_BYTES);
     if (body === null) return json({ code: "request_too_large" }, 413);
-    if (enrollment) return await enroll(request, body, db, mappings, now, options.ledger ?? null);
+    if (enrollment) {
+      const enrolled = await enroll(request, body, db, mappings, now, options.ledger ?? null);
+      if (enrolled.status !== 200) options.observe?.({ rejected: "enrollment_rejected" });
+      return enrolled;
+    }
     const keyId = request.headers.get("GQ-Support-Key-Id");
     const key = await db.prepare("SELECT * FROM installation_key WHERE key_id = ? AND revoked_at IS NULL")
       .bind(keyId ?? "").first<InstallationKey>();
     const mapping = key && mappingFor(mappings, key.slot);
     if (!key || !mapping || recordedRevocation(key.key_id) || request.headers.get("GQ-Support-Installation-Id") !== key.installation_id ||
-      !await verifySignature(request, body, key.public_key, now)) return rejected();
+      !await verifySignature(request, body, key.public_key, now)) {
+      options.observe?.({ rejected: "installation_rejected" });
+      return rejected();
+    }
     // Check authority again in the same primary-D1 batch that consumes the nonce.
     // A request paused in signature verification cannot authorize an already-revoked key.
     const requestId = request.headers.get("GQ-Support-Request-Id")!;
@@ -165,7 +181,11 @@ export const handleRequest = async (request: Request, db: CredentialDatabase, ma
             LEFT JOIN repository_state r ON r.repository_id = ? WHERE k.key_id = ? AND k.revoked_at IS NULL`)
             .bind(mapping.repositoryId, key.key_id),
     ]);
-    if (results[0].meta.changes !== 1 || results[1].results.length !== 1) return rejected();
+    if (results[0].meta.changes !== 1 || results[1].results.length !== 1) {
+      options.observe?.({ rejected: "installation_rejected" });
+      return rejected();
+    }
+    options.observe?.({ slot: key.slot });
     if (request.method === "DELETE") return json({ revoked: true });
     const suspended = Boolean(results[1].results[0].suspended_reason);
     // Scope comes from the verified key alone; Slot-owned rows only through the storage seam.

@@ -10,6 +10,11 @@ described in the [Worker README](../../worker/README.md#operational-incidents).
 Discord notifications of accepted Support requests and incidents are implemented
 (#136, [Worker README](../../worker/README.md#discord-notifications)), but no
 stage has approved destinations configured until the setup below is evidenced.
+Routed signals and measured health are implemented (#138, [Worker README](../../worker/README.md#routed-operational-signals)):
+delivery ambiguity, deadline and rejection, webhook `401`/`5xx`, status lag and
+privacy/ledger failures open grouped incidents from durable records, and
+`pnpm operator health` shows measured observations. No stage has recorded a
+baseline or tuned threshold yet.
 
 ## Common procedure
 
@@ -90,9 +95,26 @@ Installation credential as Operator authority.
 Follow [missed webhooks](missed-webhooks.md) and [webhook rotation](github-webhooks.md).
 The receiver's absence of logs is not proof that no provider delivery failed.
 Use the documented status-health, reconciliation and repair evidence workflow.
+Webhook incidents come from GitHub's own delivery log, read each minute: a
+`401` opens `webhook_rejected`, a `5xx` or missing response `webhook_failed`.
+Forged requests are never counted. A `5xx` answered during a D1 outage is
+counted only once D1 is back; the independent checker (#139) must cover the outage.
+
 The staging `scripts/github-webhook-staging.py break` drill must create the routed
-401/5xx incident and Discord notification, then restore configuration and confirm
+incident and Discord notification, then restore configuration and confirm
 the projection catches up. Do not edit production webhook configuration as a drill.
+It is readiness-gated: run it only after the staging Discord destinations are
+set up and evidenced (below), with authorized credentials.
+
+1. Record the start time, then run `break` and the existing transitions so GitHub
+   sends deliveries that fail with `401`.
+2. Within a few minutes, confirm the `webhook_rejected` incident (`pnpm operator incidents`)
+   and its message in the staging incident channel.
+3. Run `restore`, let a genuine delivery be acknowledged, then claim and resolve
+   the incident. `recovery_not_verified` means no acknowledged delivery yet.
+4. Run `pnpm operator drill-verify webhook <start>`; keep its output with the
+   status-repair evidence. `passed` is evidence for sign-off, not a substitute.
+   A local test pass is not staging evidence.
 
 ## D1 restore or corrupting migration
 
@@ -226,7 +248,7 @@ signal/notification, recovery action, invariant checks, result and human sign-of
 | GitHub outage and poisoned outbox item | Known-non-creation retries bounded; unrelated Slots progress; unknown outcomes never reposted |
 | Ambiguous create and late GitHub success | 15-minute incident, 24-hour handoff, positive reconciliation and no duplicate create |
 | Credential replacement/revocation | Correct stage/Slot only, old key refused, independent update recovery still available |
-| Broken staging webhook | 401/5xx reaches incident store and Discord; configuration restored; status repair evidence complete |
+| Broken staging webhook | 401/5xx reaches incident store and Discord; `drill-verify webhook` passes; configuration restored; status repair evidence complete. Not yet run: staging Discord destinations are not configured |
 | Worker/D1 outage | Independent detection works; website requests remain independent; accepted work and incident state reconcile |
 | D1 restore | Suppressions/revocations survive; erased text not served; stale delivered work never blindly replayed; unsafe resume refused |
 | Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused |
