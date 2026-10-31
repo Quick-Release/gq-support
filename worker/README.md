@@ -614,6 +614,17 @@ inference. No live per-roundtrip timing has been measured. After deployment,
 confirm in `pnpm operator health` that `scheduler` shows `signals_timed_out` and
 `cleanup_timed_out` stopping.
 
+After that deployment (12:00 UTC on 2026-10-31), signal timeouts stopped (33
+completed), but cleanup still timed out on 5 of 35 ticks, although staging's
+main database held no cleanup, erasure, offboarding or unmapped-Slot rows. Each
+such idle pass was 16 sequential roundtrips, 4 of them writes that changed
+nothing. Offboarding, unmapped-Slot and compaction deletes now run only when
+their reads find work, and the ledger's two compaction deletes share one
+ordered batch: an idle pass is 12 roundtrips. The test models a slow minute at
+320 ms per roundtrip (5 s over 16 is about 312 ms); that figure is a model, not
+a measured latency. Whether the live timeouts fall is unverified until this is
+deployed and `cleanup_timed_out` is compared with that hour.
+
 The 15-minute ledger rule is provisional, like any numerical rule not inherited
 from the [delivery design](../docs/support-delivery-design.md): tune it from
 measured baselines. A write failure in this phase never rolls back a suspension,

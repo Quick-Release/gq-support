@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { adminPassword, forgetLogIn, logIn, probe, probeSource, site, sync, wp } from '../performance/test-site.cjs';
+import { describeChange, redactNonces } from '../performance/public-evidence.cjs';
 
 // Deterministic counter gate (docs/research/idle-performance-budgets.md, B1–B4, B6, B8 and B10–B13).
 // Every probe runs with and without its negative control: gq-probe.php injects one violation,
@@ -108,10 +109,17 @@ async function publicCost(page: Page, violation?: string) {
   const off = await fetchPage('gq_off=1');
   const on = await fetchPage(violationParam(violation));
   if (!violation && on.html !== off.html) {
-    for (const [name, html] of [['public-off.html', off.html], ['public-on.html', on.html]]) {
+    // The comparison above is on the raw pages. The evidence is sanitized: the pages carry real
+    // nonces, and the artifact scan withholds anything that does (public-evidence.cjs).
+    const evidence: [string, string, string][] = [
+      ['public-diff.txt', describeChange(off.html, on.html), 'text/plain'],
+      ['public-off.html', redactNonces(off.html), 'text/html'],
+      ['public-on.html', redactNonces(on.html), 'text/html'],
+    ];
+    for (const [name, body, contentType] of evidence) {
       const path = test.info().outputPath(name);
-      writeFileSync(path, html);
-      await test.info().attach(name, { path, contentType: 'text/html' });
+      writeFileSync(path, body);
+      await test.info().attach(name, { path, contentType });
     }
   }
   return { htmlDiffers: on.html !== off.html, ...on.counters };

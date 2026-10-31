@@ -241,17 +241,20 @@ const cleanupStore = (db: QueryDatabase) => {
     },
     /** After the grace period, every request of an offboarded Slot loses its content. */
     async offboard(now: number) {
-      const rows = (await db.prepare(`SELECT r.id, r.slot FROM offboarding o JOIN support_request r ON r.slot = o.slot
+      const [{ results: rows }, due] = await Promise.all([db.prepare(`SELECT r.id, r.slot FROM offboarding o JOIN support_request r ON r.slot = o.slot
         WHERE o.purge_after <= ? AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.request_id = r.id) LIMIT 100`)
-        .bind(now).all<{ id: string; slot: string }>()).results;
+        .bind(now).all<{ id: string; slot: string }>(),
+        db.prepare("SELECT 1 FROM offboarding WHERE purge_after <= ? LIMIT 1").bind(now).first()]);
       await queue("offboarding", rows, now);
+      // No Slot past its grace: nothing below can match, so an idle pass spends no write.
+      if (due === null) return;
       // The Slot's restricted inventory and update observations, and its Reporters' quota rows, go at the same time,
       // whether or not it is still mapped; every pass, so rows a restore brought back go again. A central application
       // without a settled outcome may have changed the installation and stays for review; key revocations and the
       // suppression stay so nothing can grant access again. Shared release records are never touched for one Slot.
-      const due = "slot IN (SELECT slot FROM offboarding WHERE purge_after <= ?)";
-      await run([...OFFBOARDED_SLOT_ROWS.map((table): Statement => [`DELETE FROM ${table} WHERE ${due}`, [now]]),
-        [`DELETE FROM central_deployment WHERE ${due} AND outcome IS NOT NULL AND outcome != 'unknown'`, [now]]]);
+      const offboarded = "slot IN (SELECT slot FROM offboarding WHERE purge_after <= ?)";
+      await run([...OFFBOARDED_SLOT_ROWS.map((table): Statement => [`DELETE FROM ${table} WHERE ${offboarded}`, [now]]),
+        [`DELETE FROM central_deployment WHERE ${offboarded} AND outcome IS NOT NULL AND outcome != 'unknown'`, [now]]]);
     },
     /**
      * Rows of a Slot no longer mapped, and never offboarded, go 30 days after the
@@ -261,9 +264,16 @@ const cleanupStore = (db: QueryDatabase) => {
     async unmapped(now: number, mapped: readonly string[]) {
       // One read per table: D1 bounds the terms of a compound SELECT.
       const slots = async (sql: string) => (await db.prepare(sql).bind().all<{ slot: string }>()).results.map((row) => row.slot);
-      const [offboarded, present] = await Promise.all([slots("SELECT slot FROM offboarding"),
-        Promise.all([...OFFBOARDED_SLOT_ROWS, "central_deployment"].map((table) => slots(`SELECT DISTINCT slot FROM ${table}`)))]);
+      const superseded = `slot_contact_verification WHERE EXISTS (SELECT 1 FROM slot_contact_verification n WHERE n.slot = slot_contact_verification.slot
+          AND (n.verified_at > slot_contact_verification.verified_at OR (n.verified_at = slot_contact_verification.verified_at
+            AND n.rowid > slot_contact_verification.rowid)) AND n.recorded_at <= ?)`;
+      const [offboarded, present, tracked, replaced] = await Promise.all([slots("SELECT slot FROM offboarding"),
+        Promise.all([...OFFBOARDED_SLOT_ROWS, "central_deployment"].map((table) => slots(`SELECT DISTINCT slot FROM ${table}`))),
+        slots("SELECT slot FROM slot_unmapped LIMIT 1"),
+        db.prepare(`SELECT 1 FROM ${superseded} LIMIT 1`).bind(now - OFFBOARDING_GRACE_MS).first()]);
       const found = [...new Set(present.flat())].filter((slot) => !mapped.includes(slot) && !offboarded.includes(slot));
+      // Nothing unmapped, no clock running and no superseded route: every statement below would change nothing.
+      if (found.length === 0 && tracked.length === 0 && replaced === null) return;
       const due = `slot IN (SELECT slot FROM slot_unmapped WHERE first_seen_at <= ?)`;
       await run([
         ["DELETE FROM slot_unmapped WHERE slot NOT IN (SELECT value FROM json_each(?))", [JSON.stringify(found)]],
@@ -272,9 +282,7 @@ const cleanupStore = (db: QueryDatabase) => {
         [`DELETE FROM central_deployment WHERE ${due} AND outcome IS NOT NULL AND outcome != 'unknown'`, [now - OFFBOARDING_GRACE_MS]],
         // Purged: a row added later starts a new clock.
         ["DELETE FROM slot_unmapped WHERE first_seen_at <= ?", [now - OFFBOARDING_GRACE_MS]],
-        [`DELETE FROM slot_contact_verification WHERE EXISTS (SELECT 1 FROM slot_contact_verification n WHERE n.slot = slot_contact_verification.slot
-          AND (n.verified_at > slot_contact_verification.verified_at OR (n.verified_at = slot_contact_verification.verified_at
-            AND n.rowid > slot_contact_verification.rowid)) AND n.recorded_at <= ?)`, [now - OFFBOARDING_GRACE_MS]],
+        [`DELETE FROM ${superseded}`, [now - OFFBOARDING_GRACE_MS]],
       ]);
     },
     /** Two index-bounded passes: never-confirmed-delivered by acceptance, delivered by last observed close. */
@@ -393,6 +401,8 @@ const cleanupStore = (db: QueryDatabase) => {
           ...records.filter((record) => record.purpose === "erasure").map((record) => removal("suppression", `request:${record.request_id}`)),
           ...erasures.map((erasure) => removal("erasure", erasure.id)),
         ], now);
+        // No eligible rows were observed; skip the empty delete batch and recheck next pass.
+        if (records.length === 0 && erasures.length === 0) return;
       }
       await run([
         [`DELETE FROM delivery_suppression WHERE scope = 'request' AND reason = 'erasure'
