@@ -20,6 +20,7 @@ package-dist/
 
 /worker/revocations.lock
 /worker/revocations.json.tmp
+/worker/deploy-plan/
 .bench-base/
 benchmark-results/
 .ddev/config.gq-runtime.yaml

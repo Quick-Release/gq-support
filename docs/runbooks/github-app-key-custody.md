@@ -110,11 +110,12 @@ resource apply. It never mints an installation token or creates an issue.
 
 ## Alchemy and CI custody
 
-Run **Deploy Support Worker** manually on **main**, choosing staging or prod.
-The workflow runs typecheck and tests before exposing any App secret. Its final
-step receives only the selected GitHub Environment's credentials. It verifies
-the App, then invokes the pinned Alchemy deployment. Deployments to a stage are
-serialized and are not automatically cancelled. Do not run deployment jobs with
+Run **Deploy Support Worker** manually on **main**, choosing staging or prod and
+`plan` or `deploy`. The workflow runs typecheck and tests before exposing any App
+secret. Its plan and deploy steps receive only the selected GitHub Environment's
+credentials. They verify the App, then plan and apply the pinned Alchemy deployment
+through the [deployment plan gate](support-operations.md#deployment-plan-gate).
+Deployments to a stage are serialized and are not automatically cancelled. Do not run deployment jobs with
 Actions debug logging, shell tracing or Alchemy trace/debug logging enabled.
 
 The pinned Alchemy `2.0.0-beta.83` serializes `Redacted` contents in its state

@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "alchemy dev",
     "deploy": "alchemy deploy",
+    "deploy-gate": "node --import ./node_modules/alchemy/bin/register-oxc.js scripts/deploy-gate.ts",
     "destroy": "node scripts/destroy.ts",
-    "operator": "node scripts/operator.ts",
+    "operator": "node --import ./node_modules/alchemy/bin/register-oxc.js scripts/operator.ts",
+    "recovery-drill": "node scripts/recovery-drill.ts",
+    "readiness": "node --import ./node_modules/alchemy/bin/register-oxc.js scripts/readiness.ts",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -b",
     "test": "vitest run",

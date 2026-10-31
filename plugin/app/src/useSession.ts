@@ -8,6 +8,8 @@ declare global {
       session: string; ajaxUrl: string; timezone?: string; help?: { url: string; label: string } | null;
       /** The coarse screen the launcher was rendered on, if approved; never a URL. */
       screen?: string | null;
+      /** New intake under the release policy WordPress cached; `closed` only for an outdated plugin. */
+      intake?: 'open' | 'closed' | 'unknown';
     };
   }
 }

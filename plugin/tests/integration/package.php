@@ -134,6 +134,10 @@ switch ( $gq_support_scenario ) {
 		if ( wp_next_scheduled( 'gq_support_retry_erasure' ) ) {
 			$gq_support_fail( 'Uninstall kept plugin-owned scheduled work.' );
 		}
+		// The native update key and offer belong to the whole installation, network included.
+		if ( false !== get_site_option( 'gq_support_update_key' ) || false !== get_site_option( 'gq_support_update_offer' ) ) {
+			$gq_support_fail( 'Uninstall kept the native update key or offer.' );
+		}
 		$gq_support_unrelated_kept();
 		break;
 

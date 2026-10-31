@@ -2,12 +2,13 @@ import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubIssue } from "./github-gateway.ts";
 import { reporterReference, supportIssues, type ReconciliationProgress, type SupportIssueIntent } from "./support-issues.ts";
-import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
+import { mappingFor, slotsOf, type RepositoryMapping } from "./repository-mappings.ts";
 import { sha256 } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { DAY, DRAIN_MS, EXECUTION_MS, deliveryStore, type DeliveryRow } from "./delivery-store.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
 import { ledgerStore } from "./ledger.ts";
+import { deliveryOutcome, recordMetric, type MetricEvent } from "./operational-metrics.ts";
 
 export interface DeliveryOptions {
   readonly db: QueryDatabase;
@@ -52,15 +53,23 @@ const approved = (row: DeliveryRow, mappings: readonly RepositoryMapping[]) => {
 /** Before the attempt is recorded, so a storage failure cannot skip it. A failed write alerts; the next unsafe check retries it. */
 const suspendIfUnsafe = (options: DeliveryOptions, row: DeliveryRow, error: { readonly _tag: string; readonly reason?: string }, now: number) => {
   const reason = unsafeReason(error);
-  return reason ? suspendRepository(options.db, row.repository_id, reason, now).pipe(Effect.asVoid,
+  return reason ? suspendRepository(options.db, row.repository_id, reason, now, slotsOf(options.mappings, row.repository_id)).pipe(Effect.asVoid,
     Effect.catch(() => Effect.logError("Repository suspension not recorded").pipe(
       Effect.annotateLogs({ repository: row.repository_id, reason, alert: true })))) : Effect.void;
 };
-const log = (row: Pick<DeliveryRow, "id" | "request_id" | "generation"> & { owner?: string | null }, outcome: string, alert = false) =>
-  (alert ? Effect.logError("Support delivery requires review") : Effect.logInfo("Support delivery outcome")).pipe(
-    Effect.annotateLogs({ request: row.request_id, intent: row.id, generation: row.generation,
-      ...(row.owner ? { attempt: row.owner } : {}), outcome, alert }),
-  );
+/** Each outcome is also counted per Client (src/operational-metrics.ts), best effort: a lost count never changes delivery. */
+const logger = (options: DeliveryOptions, now: () => number) =>
+  (row: Pick<DeliveryRow, "id" | "request_id" | "generation"> & { owner?: string | null; slot?: string }, outcome: string, alert = false) =>
+    (alert ? Effect.logError("Support delivery requires review") : Effect.logInfo("Support delivery outcome")).pipe(
+      Effect.annotateLogs({ request: row.request_id, intent: row.id, generation: row.generation,
+        ...(row.owner ? { attempt: row.owner } : {}), outcome, alert }),
+      Effect.andThen(Effect.promise(() => recordMetric(options.db, { metric: "delivery", outcome: deliveryOutcome(outcome) },
+        { at: now(), ...clientFor(options.mappings, row.slot) }))),
+    );
+const clientFor = (mappings: readonly RepositoryMapping[], slot: string | undefined) => {
+  const client = slot === undefined ? undefined : mappingFor(mappings, slot)?.client;
+  return client ? { client } : {};
+};
 
 /** One bounded wake-up. D1, never this invocation, is the durable work queue. */
 export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, OutcomeUnknown, GitHubGateway> => Effect.gen(function* () {
@@ -69,6 +78,14 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
   const started = now();
   const deadline = started + EXECUTION_MS;
   const store = deliveryStore(options.db);
+  const log = logger(options, now);
+  const measure = (event: MetricEvent, slot?: string, durationMs?: number) => Effect.promise(() => recordMetric(options.db, event,
+    { at: now(), ...clientFor(options.mappings, slot), ...(durationMs === undefined ? {} : { durationMs }) }));
+  // The maintenance boundary and restore epoch this execution runs under (src/maintenance.ts): nothing is
+  // dispatched during maintenance, and a create is authorized only while both are unchanged.
+  const ledger = options.ledger;
+  const fence = ledger ? yield* io(() => ledgerStore(ledger).control()) : null;
+  if (ledger && (!fence || fence.maintenance)) return;
   yield* io(() => store.recover(now()));
   const expired = yield* io(() => store.expire(now()));
   for (const row of expired) yield* log(row, "DeliveryDeadline", true);
@@ -78,7 +95,8 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
     let attempt = candidate;
     const process = Effect.gen(function* () {
       const row = yield* io(() => store.claim(candidate, crypto.randomUUID(), now(), started + DRAIN_MS));
-      if (!row) return;
+      // Another execution took it, or pacing moved on: claim contention.
+      if (!row) return yield* measure({ metric: "delivery_claim", outcome: "contended" }, candidate.slot);
       attempt = row;
       yield* Effect.annotateCurrentSpan({ request: row.request_id, intent: row.id, generation: row.generation, attempt: row.owner });
       // A delayed claim response cannot extend the dispatch window.
@@ -102,9 +120,10 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         if (now() >= deadline) return yield* Effect.fail(new OutcomeUnknown());
         const permitted = yield* io(() => store.authorized(row, now()));
         if (!permitted || now() >= deadline) return yield* Effect.fail(new OutcomeUnknown());
-        // A suppression the main database lost to a restore still holds here.
-        const ledger = options.ledger;
-        if (ledger && (yield* io(() => ledgerStore(ledger).suppressed(row.slot, row.request_id)))) return yield* Effect.fail(new OutcomeUnknown());
+        // A suppression the main database lost to a restore still holds here, and so does maintenance begun since.
+        if (ledger && fence && !(yield* io(() => ledgerStore(ledger).authorizes(row.slot, row.request_id, fence)))) {
+          return yield* Effect.fail(new OutcomeUnknown());
+        }
       });
       if (row.kind !== 'create') {
         // A close or reopen of the delivered issue (ADR 0020). GitHub stays
@@ -169,8 +188,11 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         return yield* log(row, error._tag, !['OutcomeUnknown', 'RateLimited', 'ProviderUnavailable', 'IssueGone', 'IssueMoved'].includes(error._tag));
       }
       const intent = yield* intentFor(row);
+      // Acceptance to GitHub creation confirmed, by a create's response or by reconciling an uncertain one.
       const delivered = (issue: GitHubIssue) => finish({ state: 'delivered', issue, next: now() + 10_000,
-        repair: !issue.labels.includes(intent.clientOriginLabel) || !issue.assignees.includes(intent.defaultDeveloper) });
+        repair: !issue.labels.includes(intent.clientOriginLabel) || !issue.assignees.includes(intent.defaultDeveloper) }).pipe(
+        Effect.andThen(measure({ metric: "delivery_confirmed", outcome: row.state === 'outcome_unknown' ? "reconciled" : "created" },
+          row.slot, now() - row.created_at)));
       if (row.state === 'outcome_unknown') {
         const since = row.unknown_since ?? now();
         const reconcileDeadline = reconcileUntil(row, since);

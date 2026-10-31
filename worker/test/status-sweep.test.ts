@@ -10,7 +10,7 @@ import { requestStatusRefresh } from "../src/status-refresh.ts";
 import { scheduledTick } from "../src/scheduled.ts";
 import type { SweepConfig } from "../src/status-sweep.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { BOT, CLIENT_ID, makeFakeGitHub, SLUG, type FakeIssue } from "./fake-github.ts";
 
 const START = Date.parse("2026-10-17T10:00:00Z");
@@ -356,7 +356,7 @@ it("suspends a public mapped repository without any Support request or webhook",
 });
 
 
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
   query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 
 it("requires a passing sweep after suspension before an Operator can lift it", async () => {
@@ -458,7 +458,7 @@ it("refuses an Operator lift if renewed unsafe evidence arrives during the passi
   github.next(() => undefined);
   github.next(async () => {
     // Another sweep observes loss of access while this one reads a stale healthy response.
-    await Effect.runPromise(suspendRepository(stage.databases.shared, 42, "no_access", now));
+    await Effect.runPromise(suspendRepository(stage.databases.shared, 42, "no_access", now, []));
     return Response.json({ id: 42, full_name: "Quick-Release/repo-42", private: true, archived: false });
   });
   await tick();

@@ -9,7 +9,7 @@ import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 
 // A production and a staging Slot share repository 42; globex keeps its own repository 77.
 const START = Date.parse("2026-10-17T10:00:00Z");
@@ -68,7 +68,7 @@ const verifySweep = () => {
 };
 /** Waits out the shared mutation pacing between creates. */
 const deliver = async () => { advance(10_000); await sweep(); };
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
   query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 const issuePosts = () => github.requests.filter((request) => request.method === "POST" && request.path.endsWith("/issues"));
 const suspensionAlerts = () => logs.filter((log) => log.message === "Repository mapping suspended");

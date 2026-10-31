@@ -145,7 +145,7 @@ describe("accepting a Support request", () => {
       },
     };
     const body = JSON.stringify({ submission_id: submissionId(2), description: "Replacement", reporter_subject: REPORTER_1, scope: "mine", supersedes_id: id });
-    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body, production.keyId, production.installationId), changedBeforeCommit, mappings);
+    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body, production.keyId, production.installationId), changedBeforeCommit, mappings, { release: "staged" });
     expect(response.status).toBe(404);
     expect(await ids(await list(production))).toEqual([id]);
     for (const n of [3, 4, 5, 6]) expect((await submit(production, { submission_id: submissionId(n) })).status).toBe(202);
@@ -163,7 +163,7 @@ describe("accepting a Support request", () => {
       },
     };
     const replacement = { submission_id: submissionId(2), description: "Replacement", reporter_subject: REPORTER_1, scope: "mine", supersedes_id: id };
-    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", JSON.stringify(replacement), production.keyId, production.installationId), failedCommit, mappings);
+    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", JSON.stringify(replacement), production.keyId, production.installationId), failedCommit, mappings, { release: "staged" });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ code: "gq_support_not_accepted" });
     expect(await ids(await list(production))).toEqual([id]);
@@ -183,7 +183,7 @@ describe("accepting a Support request", () => {
         return result;
       },
     };
-    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", JSON.stringify(replacement), production.keyId, production.installationId), lostResponse, mappings);
+    const response = await handleRequest(await signed(production.pair, "POST", "/v1/requests", JSON.stringify(replacement), production.keyId, production.installationId), lostResponse, mappings, { release: "staged" });
     expect(response.status).toBe(202);
     const accepted = await response.json() as { id: string };
     const retries = await Promise.all([submit(production, replacement), submit(production, replacement)]);
@@ -384,21 +384,21 @@ describe("resource scope", () => {
   it("confines a stolen key to its own installation and rejects unsigned use", async () => {
     const path = `/v1/requests?${query({ reporter_subject: REPORTER_1, scope: "site", per_page: "20" })}`;
     const asGlobex = await signed(production.pair, "GET", path, "", production.keyId, "installation-c");
-    expect((await handleRequest(asGlobex, db, mappings)).status).toBe(403);
+    expect((await handleRequest(asGlobex, db, mappings, { release: "staged" })).status).toBe(403);
     const withGlobexKey = await signed(production.pair, "GET", path, "", globex.keyId, "installation-c");
-    expect((await handleRequest(withGlobexKey, db, mappings)).status).toBe(403);
+    expect((await handleRequest(withGlobexKey, db, mappings, { release: "staged" })).status).toBe(403);
     const unsigned = new Request(`https://support.example${path}`, {
       headers: { "GQ-Support-Key-Id": production.keyId, "GQ-Support-Installation-Id": "installation-a" },
     });
-    expect((await handleRequest(unsigned, db, mappings)).status).toBe(403);
+    expect((await handleRequest(unsigned, db, mappings, { release: "staged" })).status).toBe(403);
   });
 
   it("rejects a replayed request without a second side effect", async () => {
     const replayable = await signed(production.pair, "POST", "/v1/requests",
       JSON.stringify({ submission_id: submissionId(7), description: "Once", reporter_subject: REPORTER_1, scope: "mine" }),
       production.keyId, production.installationId);
-    expect((await handleRequest(replayable.clone(), db, mappings)).status).toBe(202);
-    expect((await handleRequest(replayable, db, mappings)).status).toBe(403);
+    expect((await handleRequest(replayable.clone(), db, mappings, { release: "staged" })).status).toBe(202);
+    expect((await handleRequest(replayable, db, mappings, { release: "staged" })).status).toBe(403);
     expect(await rows("support_request")).toBe(3);
   });
 
@@ -527,7 +527,7 @@ describe("intake quotas", () => {
     const request = await signed(production.pair, "POST", "/v1/requests",
       JSON.stringify({ submission_id: SUBMISSION, description: "SECRET report", reporter_subject: REPORTER_1, scope: "mine" }),
       production.keyId, production.installationId);
-    const response = await handleRequest(request, failing, mappings);
+    const response = await handleRequest(request, failing, mappings, { release: "staged" });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ code: "gq_support_not_accepted" });
     expect(await rows("support_request")).toBe(0);
@@ -544,7 +544,7 @@ describe("intake quotas", () => {
         return results;
       },
     };
-    const lost = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body, production.keyId, "installation-a"), committedThenLost, mappings);
+    const lost = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body, production.keyId, "installation-a"), committedThenLost, mappings, { release: "staged" });
     expect(lost.status).toBe(202);
     expect(await lost.json()).toMatchObject({ submission_id: SUBMISSION, delivery: "accepted-pending" });
 
@@ -560,7 +560,7 @@ describe("intake quotas", () => {
       },
     };
     const body2 = JSON.stringify({ submission_id: submissionId(2), description: "Report", reporter_subject: REPORTER_1, scope: "mine" });
-    const unknown = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body2, production.keyId, "installation-a"), unresolved, mappings);
+    const unknown = await handleRequest(await signed(production.pair, "POST", "/v1/requests", body2, production.keyId, "installation-a"), unresolved, mappings, { release: "staged" });
     expect(unknown.status).toBe(504);
     expect(await unknown.json()).toEqual({ code: "gq_support_outcome_unknown" });
   });
@@ -615,7 +615,7 @@ describe("request budget", () => {
       batch: db.batch.bind(db),
     };
     const path = `/v1/requests?${query({ reporter_subject: REPORTER_1, scope: "mine", per_page: "20" })}`;
-    const response = await handleRequest(await signed(production.pair, "GET", path, "", production.keyId, "installation-a"), failing, mappings);
+    const response = await handleRequest(await signed(production.pair, "GET", path, "", production.keyId, "installation-a"), failing, mappings, { release: "staged" });
     expect(response.status).toBe(200);
   });
 });

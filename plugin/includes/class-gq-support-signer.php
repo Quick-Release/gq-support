@@ -13,6 +13,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Produces the signing headers from the API contract. The Worker verifies
  * them within a five-minute clock window and rejects a reused request ID;
  * contract/fixtures/signing.json pins the canonical string on both sides.
+ * The `gq-support-v2` string also signs the plugin version, so the service
+ * can enforce its release policy on a version nobody else could claim.
  */
 final class GQ_Support_Signer {
 
@@ -38,16 +40,25 @@ final class GQ_Support_Signer {
 	private string $installation_id;
 
 	/**
+	 * The plugin version the signature claims.
+	 *
+	 * @var string
+	 */
+	private string $plugin_version;
+
+	/**
 	 * Sign with a secret key and its service key ID.
 	 *
 	 * @param string $secret A 64-byte Ed25519 secret key.
 	 * @param string $key_id          The key ID, or '' for `POST /v1/enroll`, which proves possession of the key in its body.
 	 * @param string $installation_id This installation's ID.
+	 * @param string $plugin_version  The running plugin's version; another only in signing fixtures.
 	 */
-	public function __construct( string $secret, string $key_id, string $installation_id ) {
+	public function __construct( string $secret, string $key_id, string $installation_id, string $plugin_version = GQ_SUPPORT_VERSION ) {
 		$this->secret          = $secret;
 		$this->key_id          = $key_id;
 		$this->installation_id = $installation_id;
+		$this->plugin_version  = $plugin_version;
 	}
 
 	/**
@@ -64,6 +75,7 @@ final class GQ_Support_Signer {
 		$headers = array(
 			'GQ-Support-Key-Id'          => $this->key_id,
 			'GQ-Support-Installation-Id' => $this->installation_id,
+			'GQ-Support-Plugin-Version'  => $this->plugin_version,
 			'GQ-Support-Timestamp'       => (string) ( $timestamp ?? time() ),
 			'GQ-Support-Request-Id'      => $request_id ?? wp_generate_uuid4(),
 			'Content-Digest'             => self::digest( $body ),
@@ -81,17 +93,18 @@ final class GQ_Support_Signer {
 	 * @param string                $method  HTTP method.
 	 * @param string                $path    Path and query.
 	 * @param string                $body    Exact request body.
-	 * @param array<string, string> $headers The key ID, installation ID, timestamp and request ID headers.
+	 * @param array<string, string> $headers The key ID, installation ID, plugin version, timestamp and request ID headers.
 	 */
 	public static function canonical( string $method, string $path, string $body, array $headers ): string {
 		return implode(
 			"\n",
 			array(
-				'gq-support-v1',
+				'gq-support-v2',
 				strtoupper( $method ),
 				$path,
 				$headers['GQ-Support-Key-Id'],
 				$headers['GQ-Support-Installation-Id'],
+				$headers['GQ-Support-Plugin-Version'],
 				$headers['GQ-Support-Timestamp'],
 				$headers['GQ-Support-Request-Id'],
 				self::digest( $body ),

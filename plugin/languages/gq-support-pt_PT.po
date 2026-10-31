@@ -286,3 +286,18 @@ msgstr "Estado local da ligação"
 
 msgid "Local connection state only. No live service check has been performed."
 msgstr "Apenas o estado local da ligação. Não foi efetuada uma verificação do serviço em tempo real."
+
+msgid "GETQUICK Support installs only its approved update package, from the GETQUICK Support service."
+msgstr "O GETQUICK Support instala apenas o seu pacote de atualização aprovado, a partir do serviço GETQUICK Support."
+
+msgid "This site is not authorized to download GETQUICK Support updates. Contact GETQUICK."
+msgstr "Este site não está autorizado a transferir atualizações do GETQUICK Support. Contacte a GETQUICK."
+
+msgid "This GETQUICK Support update was withdrawn. Check for updates again."
+msgstr "Esta atualização do GETQUICK Support foi retirada. Procure atualizações novamente."
+
+msgid "The GETQUICK Support update package did not match the approved release and was not installed."
+msgstr "O pacote de atualização do GETQUICK Support não corresponde à versão aprovada e não foi instalado."
+
+msgid "The GETQUICK Support update could not be downloaded. Try again later."
+msgstr "Não foi possível transferir a atualização do GETQUICK Support. Tente novamente mais tarde."

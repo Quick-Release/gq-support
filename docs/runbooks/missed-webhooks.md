@@ -24,11 +24,13 @@ address.
 
 ## 1. Detect
 
-Each of these is a structured Worker log event (Workers Logs). Alert routing
-belongs to [#20](https://github.com/Quick-Release/gq-support/issues/20); until
-it lands, query the logs directly.
-
-These are not yet alerts: nothing pages an Operator until #20 routes them.
+Each of these is a structured Worker log event (Workers Logs). Since #138 the
+minute tick also routes them as Operational incidents with Discord notifications
+([Worker README](../../worker/README.md#routed-operational-signals)): GitHub's
+delivery log answered `401` (`webhook_rejected`) or `5xx`/no response
+(`webhook_failed`), refresh age and sweep lag past one hour
+(`status_refresh_behind`, `status_sweep_behind`). The log events below still give
+the reason class, which the incident does not.
 
 | Signal | Event | Likely cause |
 |---|---|---|

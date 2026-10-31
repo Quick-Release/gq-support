@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import type { RepositoryMapping } from "./repository-mappings.ts";
+import { slotsOf, type RepositoryMapping } from "./repository-mappings.ts";
 import { suspendRepository, SuspensionNotRecorded, type SuspensionReason } from "./repository-suspension.ts";
 import { SWEEP_DEFAULTS } from "./status-sweep.ts";
 import type { QueryDatabase } from "./storage.ts";
@@ -12,7 +12,7 @@ import type { QueryDatabase } from "./storage.ts";
  * The sweep's verification and the Operator's `unsuspend` are the only way back.
  */
 export interface LifecycleChange {
-  readonly suspend: readonly { readonly repositoryId: number; readonly reason: SuspensionReason }[];
+  readonly suspend: readonly { readonly repositoryId: number; readonly reason: SuspensionReason; readonly slots: readonly string[] }[];
   /** Repositories whose next sweep, and so their safety verification, is due now. */
   readonly verify: readonly number[];
 }
@@ -43,7 +43,7 @@ export const lifecycleChange = (event: string, body: unknown, mappings: readonly
   const listed = (key: string) => [...new Set((Array.isArray(payload[key]) ? payload[key] as unknown[] : [])
     .map((repository) => record(repository).id).filter(mapped))];
   const suspend = (ids: readonly number[], reason: SuspensionReason): LifecycleChange =>
-    ({ suspend: ids.map((repositoryId) => ({ repositoryId, reason })), verify: ids });
+    ({ suspend: ids.map((repositoryId) => ({ repositoryId, reason, slots: slotsOf(mappings, repositoryId) })), verify: ids });
   const action = payload.action;
   const repositoryId = record(payload.repository).id;
 
@@ -83,6 +83,6 @@ const scheduleVerification = (db: QueryDatabase, repositoryIds: readonly number[
 
 /** Records every suspension, then schedules verification. Any failure is a `503`, so the delivery can be redelivered. */
 export const applyLifecycleChange = (db: QueryDatabase, change: LifecycleChange, now: number) => Effect.gen(function* () {
-  for (const { repositoryId, reason } of change.suspend) yield* suspendRepository(db, repositoryId, reason, now);
+  for (const { repositoryId, reason, slots } of change.suspend) yield* suspendRepository(db, repositoryId, reason, now, slots);
   if (change.verify.length > 0) yield* scheduleVerification(db, change.verify, now);
 });

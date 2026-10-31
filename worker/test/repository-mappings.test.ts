@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { inventoryForSlug, stageInventories } from "../src/inventory.ts";
 import { mappingsForSlug, stageMappings } from "../src/repository-mappings.ts";
 
 const SANDBOX = 1424354303;
@@ -23,5 +24,18 @@ it("keeps the staging sandbox out of production", () => {
 it("has unique Slots within each stage", () => {
   for (const mappings of Object.values(stageMappings)) {
     expect(new Set(mappings.map((mapping) => mapping.slot)).size).toBe(mappings.length);
+  }
+});
+
+it("gives each deployed stage only its own reviewed inventory on the Tipme account, and other stages none", () => {
+  expect(inventoryForSlug("getquick-support-staging")).toBe(stageInventories.staging);
+  expect(inventoryForSlug("getquick-support")).toBe(stageInventories.prod);
+  for (const slug of ["", "getquick-support-dev", "constructor"]) expect(inventoryForSlug(slug)).toBeNull();
+  for (const [stage, inventory] of Object.entries(stageInventories)) {
+    expect(inventory.stage).toBe(stage);
+    // AGENTS.md: the existing Tipme account, never a replacement.
+    expect(inventory.account).toEqual({ name: "Tipme", id: "8f38791a8c37b182239af2a385ab3c31" });
+    // Custody names where values live; a value itself never enters reviewed configuration.
+    expect(JSON.stringify(inventory)).not.toMatch(/BEGIN [A-Z ]*PRIVATE KEY|discord(app)?\.com\/api\/webhooks|ghs_|github_pat_/i);
   }
 });

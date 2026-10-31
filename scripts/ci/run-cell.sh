@@ -47,8 +47,10 @@ if [[ -n "$CELL_SUITE" ]]; then
 fi
 
 if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" ]]; then
-  echo '::group::Installed package uninstall and upgrade'
+  echo '::group::Installed package uninstall, upgrade, native update and central deployment'
   bash plugin/tests/integration/package.sh single
+  bash plugin/tests/integration/package.sh native
+  bash plugin/tests/integration/package.sh central
   echo '::endgroup::'
 fi
 
@@ -66,7 +68,10 @@ if [[ -n "$CELL_PLUGIN_CHECK" ]]; then
   plugin_check=()
   [[ "$CELL_PLUGIN_CHECK" == latest ]] || plugin_check=(--version="$CELL_PLUGIN_CHECK")
   wp plugin install plugin-check "${plugin_check[@]}" --force --activate
+  # plugin_updater: the directory forbids the Update URI header and update hooks; this private
+  # plugin's native updater needs them (#142, plugin/includes/class-gq-support-updater.php).
   wp plugin check gq-support \
+    --exclude-checks=plugin_updater \
     --exclude-directories=tests,app,vendor \
     --exclude-files=composer.json,composer.lock,phpstan.neon.dist,.phpcs.xml.dist
   echo '::endgroup::'

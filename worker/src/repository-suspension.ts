@@ -4,6 +4,7 @@ import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
 import { ledgerStore, removal } from "./ledger.ts";
 import { mappingFor } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
+import { observeIncident } from "./incidents.ts";
 
 /**
  * Suspended mappings (CONTEXT.md). A suspension is per repository, so every
@@ -32,9 +33,12 @@ export const unsafeReason = (error: { readonly _tag: string; readonly reason?: s
 
 /**
  * Suspends the repository and alerts the Operator. Idempotent: an existing
- * suspension keeps its first cause and time, and alerts only once.
+ * suspension keeps its first cause and time, and alerts only once. Each unsafe
+ * observation also records the repository's Operational incident, listing every
+ * Slot mapped to it. Observability failure must not roll back the safety write.
  */
-export const suspendRepository = (db: QueryDatabase, repositoryId: number, reason: SuspensionReason, now: number) => Effect.gen(function* () {
+export const suspendRepository = (db: QueryDatabase, repositoryId: number, reason: SuspensionReason, now: number,
+  slots: readonly string[]) => Effect.gen(function* () {
   const suspended = yield* Effect.tryPromise({
     try: async () => {
       const [changed] = await db.batch([
@@ -53,6 +57,10 @@ export const suspendRepository = (db: QueryDatabase, repositoryId: number, reaso
   if (suspended) {
     yield* Effect.logError("Repository mapping suspended").pipe(Effect.annotateLogs({ repository: repositoryId, reason, alert: true }));
   }
+  yield* Effect.tryPromise(() => db.batch(observeIncident(db, {
+    category: "repository_suspended", subject: String(repositoryId), slots, now,
+  }))).pipe(Effect.catchCause(() => Effect.logError("Operational incident observation failed").pipe(
+    Effect.annotateLogs({ category: "repository_suspended", alert: true }))));
   return suspended;
 });
 

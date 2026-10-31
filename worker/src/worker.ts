@@ -12,18 +12,28 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { SupportDB, SupportLedger } from "./support-db.ts";
 import { sweepDelivery } from "./delivery.ts";
 import { GitHubGateway, GitHubReader } from "./github-gateway.ts";
-import { scheduledTick } from "./scheduled.ts";
+import { serviceTick } from "./scheduled.ts";
 import { refreshStatus, type RefreshConfig } from "./status-refresh.ts";
 import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
 import { restoreGate } from "./ledger.ts";
+import { operationsAccess } from "./operations-api.ts";
+import { checkerAccess } from "./independent-check.ts";
+import { DESTINATIONS, discordDestinations } from "./notifications.ts";
+import { inventoryForSlug } from "./inventory.ts";
+import { releaseEnforcementForSlug } from "./release-policy.ts";
+import { githubReleasePackages } from "./package-source.ts";
 
 let webhookReceiver: GitHubWebhookReceiver | undefined;
 // Per isolate: derived once from the App key, which never enters D1 (src/cleanup.ts).
 let titleDigestKey: Promise<CryptoKey | null> | undefined;
-// Per isolate: nothing serves or sweeps until a recorded restore has been replayed (src/ledger.ts).
+// The Discord webhook secrets (src/notifications.ts). Unset or malformed sends nothing to that channel.
+const destinationsOf = (env: Record<string, unknown>) => discordDestinations(
+  typeof env.DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL === "string" ? env.DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL : "",
+  typeof env.DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL === "string" ? env.DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL : "");
+// Per isolate: nothing serves or sweeps during maintenance or until a recorded restore has been replayed (src/ledger.ts).
 const restored = restoreGate();
 
 export default Cloudflare.Worker(
@@ -44,6 +54,12 @@ export default Cloudflare.Worker(
     // Only this stage's reviewed mappings: the slug is pinned per stage at deployment.
     const repositoryMappings = mappingsForSlug(slug);
     const webhookDiagnostics = yield* Config.Boolean("GITHUB_WEBHOOK_DIAGNOSTICS").pipe(Config.withDefault(false));
+    // The operations API's dashboard keys and staff roster (src/operations-api.ts). Unset or malformed closes it.
+    const operations = operationsAccess(
+      yield* Config.String("OPERATIONS_API_KEYS").pipe(Config.withDefault("")),
+      yield* Config.String("OPERATIONS_STAFF").pipe(Config.withDefault("")));
+    // The independent checker's public keys (src/independent-check.ts). Unset or malformed closes its probe and report.
+    const checker = checkerAccess(yield* Config.String("OPERATIONS_CHECKER_KEYS").pipe(Config.withDefault("")));
     // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
     const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
       Config.map(Option.filter((value) => value >= minimum)));
@@ -73,10 +89,10 @@ export default Cloudflare.Worker(
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const ledger = yield* ledgerDatabase.raw;
-      if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) return yield* Effect.logError("Support restore replay pending");
       const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
       const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
-      yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key }).pipe(
+      yield* serviceTick(() => restored(db, ledger, Date.now()), { db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key,
+        notifications: { destinations: destinationsOf(env) } }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
       );
     }).pipe(Effect.catchCause(() => Effect.logError("Support scheduled tick failed")));
@@ -100,10 +116,7 @@ export default Cloudflare.Worker(
         const key = yield* Effect.promise(() => titleDigestKey ??= typeof env.GITHUB_APP_PRIVATE_KEY === "string"
           ? digestKey(env.GITHUB_APP_PRIVATE_KEY) : Promise.resolve(null));
         const ledger = yield* ledgerDatabase.raw;
-        const db = yield* database.raw;
-        if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) {
-          return HttpServerResponse.fromWeb(Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } }));
-        }
+        // The restore gate applies to every route but the independent checker's probe (src/worker-http.ts).
         const response = yield* handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
           (task) => context.raw.waitUntil(task), {
             mappings: repositoryMappings, botLogin: `${slug}[bot]`,
@@ -115,7 +128,16 @@ export default Cloudflare.Worker(
               })));
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
-          }, { digestKey: key, ledger });
+          // The stage's reviewed release enforcement; an unknown stage has none, and new intake fails closed.
+          }, { digestKey: key, ledger, release: releaseEnforcementForSlug(slug),
+            // Native update packages, read with the narrow UPDATE_PACKAGE_TOKEN only; unset fails closed (src/package-source.ts).
+            packages: githubReleasePackages({ token: typeof env.UPDATE_PACKAGE_TOKEN === "string" ? env.UPDATE_PACKAGE_TOKEN : undefined }) },
+          operations, DESTINATIONS.filter((destination) => destinationsOf(env)[destination]),
+          inventoryForSlug(slug), {
+            checker, ledger, restored: (db, ledger) => restored(db, ledger, Date.now()),
+            configuration: { github_app: !!clientId && !!slug && typeof env.GITHUB_APP_PRIVATE_KEY === "string",
+              operational_incidents: !!destinationsOf(env).operational_incidents },
+          });
         // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
         if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
           response.status === 202) {

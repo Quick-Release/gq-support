@@ -178,6 +178,8 @@ final class GQ_Support_Plugin {
 			'loading'  => __( 'Loading support…', 'gq-support' ),
 			'error'    => __( 'Support could not load. Press to retry.', 'gq-support' ),
 			'help'     => GQ_Support_Fail_Safe::help(),
+			// From the cached release policy only: no remote check while the page renders.
+			'intake'   => GQ_Support_Release::local_intake( time() ),
 			// Kept only in launcher memory until the Reporter opens the panel.
 			'screen'   => self::originating_screen(),
 		);

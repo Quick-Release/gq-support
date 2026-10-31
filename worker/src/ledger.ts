@@ -1,5 +1,6 @@
 import type { QueryDatabase } from "./storage.ts";
 import { PURGED_TEXT } from "./support-requests.ts";
+import { episodeWork, type Episode } from "./independent-check.ts";
 
 /**
  * The suppression ledger (ADR 0016): a separate D1 that a restore of the main
@@ -17,10 +18,15 @@ import { PURGED_TEXT } from "./support-requests.ts";
  *   restore it can regress an image to an older, more conservative state but
  *   cannot drop a suppression. Removals come only from compaction and an
  *   Operator's lift, each recorded explicitly.
+ *
+ * It also holds the restore epoch, the maintenance boundary
+ * (src/maintenance.ts), acknowledged checker episodes and withdrawn releases.
  */
 export type LedgerKind = "suppression" | "erasure" | "cleanup" | "offboarding" | "suspension" | "revocation";
 type Value = string | number | null;
 export type LedgerImage = Readonly<Record<string, Value>>;
+/** What the ledger says about service: the recorded restore epoch and the maintenance boundary (ledger-migrations/0003). */
+export interface ServiceControl { readonly epoch: number; readonly generation: number; readonly maintenance: boolean }
 export interface LedgerEntry {
   readonly kind: LedgerKind;
   readonly reference: string;
@@ -44,7 +50,8 @@ const TABLES: Record<LedgerKind, { readonly table: string; readonly key: readonl
     "last_error_class", "resolved_at", "intent_id", "github_installation_id", "repository_id", "attempt_started_at", "attempt_ended_at", "issues_json"] },
   suspension: { table: "repository_state", key: ["repository_id"], columns: ["repository_id", "suspended_reason", "suspended_at"],
     present: "suspended_reason IS NOT NULL", changed: "suspended_at" },
-  // Key revocations made at runtime: never undone, so a restore cannot revive a revoked key.
+  // Key revocations made at runtime: never undone, so a restore cannot revive a revoked key. Native update key
+  // revocations are recorded here explicitly, first, under the same kind (src/update-access-operator.ts).
   revocation: { table: "installation_key", key: ["key_id"], columns: ["key_id", "revoked_at"], present: "revoked_at IS NOT NULL", changed: "revoked_at" },
 };
 /** Replay order: an erasure before its cleanup records. */
@@ -54,10 +61,6 @@ const CHUNK = 50;
 const MIRROR_SKEW_MS = 300_000;
 /** A full pass also covers any write that left `changed_at` at its default. */
 const FULL_MIRROR_MS = 86_400_000;
-/** How long a passed restore check is reused before the epochs are compared again. */
-const VERDICT_MS = 60_000;
-/** A failed recheck still trusts a verdict this recent. */
-const STALE_VERDICT_MS = 600_000;
 
 const referenceOf = (kind: LedgerKind, image: LedgerImage) => TABLES[kind].key.map((column) => String(image[column])).join(":");
 /** A full image with every mirrored column, so a replay never mixes two versions of a row. */
@@ -74,20 +77,35 @@ const inChunks = async (db: QueryDatabase, list: readonly (readonly [string, rea
 export const ledgerStore = (ledger: QueryDatabase) => ({
   async record(entries: readonly LedgerEntry[], now: number) {
     await inChunks(ledger, entries.map((entry) => [`INSERT INTO ledger_entry (kind, reference, payload, recorded_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT (kind, reference) DO UPDATE SET payload = excluded.payload, recorded_at = excluded.recorded_at`,
+      ON CONFLICT (kind, reference) DO UPDATE SET payload = excluded.payload, recorded_at = excluded.recorded_at
+      WHERE ledger_entry.kind != 'offboarding' OR ledger_entry.payload IS NULL`,
       [entry.kind, entry.reference, entry.payload === null ? null : JSON.stringify(entry.payload), now]] as const));
-  },
-  /** The last check before a create: a suppression recorded here holds even if the main copy was lost. */
-  async suppressed(slot: string, requestId: string) {
-    return (await ledger.prepare(`SELECT 1 FROM ledger_entry WHERE kind = 'suppression' AND payload IS NOT NULL
-      AND reference IN (?, ?)`).bind(`slot:${slot}`, `request:${requestId}`).first()) !== null;
   },
   async epoch() {
     return (await ledger.prepare("SELECT epoch FROM ledger_epoch WHERE id = 1").first<{ epoch: number }>())?.epoch ?? 0;
   },
+  /** The restore epoch and maintenance boundary, in one read; null when either row is missing. */
+  async control(): Promise<ServiceControl | null> {
+    const row = await ledger.prepare(`SELECT e.epoch, m.generation, m.state FROM ledger_epoch e, maintenance m
+      WHERE e.id = 1 AND m.id = 1`).first<{ epoch: number; generation: number; state: string }>();
+    return row ? { epoch: row.epoch, generation: row.generation, maintenance: row.state !== "serving" } : null;
+  },
+  /**
+   * The last check before a create: no suppression recorded here, even if the
+   * main copy was lost, and the service still serving under the same restore
+   * epoch and maintenance generation as when this execution began.
+   */
+  async authorizes(slot: string, requestId: string, fence: ServiceControl) {
+    return (await ledger.prepare(`SELECT 1 FROM ledger_epoch e, maintenance m WHERE e.id = 1 AND m.id = 1
+      AND m.state = 'serving' AND m.generation = ? AND e.epoch = ?
+      AND NOT EXISTS (SELECT 1 FROM ledger_entry WHERE kind = 'suppression' AND payload IS NOT NULL AND reference IN (?, ?))`)
+      .bind(fence.generation, fence.epoch, `slot:${slot}`, `request:${requestId}`).first()) !== null;
+  },
   /** Removals outlive the 30-day Time Travel window, then go. */
   async compact(now: number, keepMs: number) {
     await ledger.prepare("DELETE FROM ledger_entry WHERE payload IS NULL AND recorded_at <= ?").bind(now - keepMs).run();
+    // Retained checker episodes go once no restore within the Time Travel window could need them.
+    await ledger.prepare("DELETE FROM retained_episode WHERE received_at <= ?").bind(now - keepMs).run();
   },
 });
 
@@ -161,7 +179,18 @@ export const replayLedger = async (main: QueryDatabase, ledger: QueryDatabase, e
       if (kind === "revocation") {
         // A key enrolled after the restore point is absent, and stays unusable until it enrolls again.
         work.push(["UPDATE installation_key SET revoked_at = ? WHERE key_id = ? AND revoked_at IS NULL", [image.revoked_at ?? now, image.key_id ?? ""]]);
+        // The same image revokes a native update key (src/update-access-operator.ts); its grant may be absent too.
+        work.push([`INSERT INTO update_access_revocation (key_id, slot, evidence, revoked_by, revoked_at)
+          SELECT key_id, slot, 'ledger-replay', 'ledger', ? FROM update_access_grant WHERE key_id = ? ON CONFLICT (key_id) DO NOTHING`,
+        [image.revoked_at ?? now, image.key_id ?? ""]]);
         continue;
+      }
+      if (kind === "offboarding") {
+        // An offboarded Slot keeps no usable key, even one whose revocation the ledger never got to record.
+        work.push(["UPDATE installation_key SET revoked_at = ? WHERE slot = ? AND revoked_at IS NULL", [now, image.slot ?? ""]]);
+        work.push([`INSERT INTO update_access_revocation (key_id, slot, evidence, revoked_by, revoked_at)
+          SELECT key_id, slot, 'ledger-replay', 'ledger', ? FROM update_access_grant WHERE slot = ? ON CONFLICT (key_id) DO NOTHING`,
+        [now, image.slot ?? ""]]);
       }
       const updates = columns.filter((column) => !key.includes(column)).map((column) => `${column} = excluded.${column}`);
       work.push([`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})
@@ -178,27 +207,41 @@ export const replayLedger = async (main: QueryDatabase, ledger: QueryDatabase, e
       attempt_started_at = COALESCE(attempt_started_at, (SELECT created_at FROM support_request r WHERE r.id = delivery_intent.request_id)),
       drain_until = MAX(COALESCE(drain_until, 0), ?)
     WHERE state != 'delivered'`, [now, now + 60_000, now]]);
+  // Checker episodes the service acknowledged before the restore point's loss: each comes back, reopening its
+  // component's incident for review rather than being silently treated as settled.
+  for (const row of (await ledger.prepare(`SELECT id, component, code, first_failed_at, last_failed_at, recovered_at FROM retained_episode`)
+    .all<{ id: string; component: Episode["component"]; code: Episode["code"]; first_failed_at: number; last_failed_at: number;
+      recovered_at: number | null }>()).results) {
+    work.push(...episodeWork({ id: row.id, component: row.component, code: row.code, first: row.first_failed_at,
+      last: row.last_failed_at, recovered: row.recovered_at }, now));
+  }
   work.push(["UPDATE restore_state SET epoch = ?, replayed_at = ? WHERE id = 1", [epoch, now]]);
   await inChunks(main, work);
 };
 
 /**
- * The gate before any traffic or sweep: if the Operator recorded a restore
- * since the main database last replayed, replay first. The verdict is cached
- * for a minute; a failed check trusts a verdict up to ten minutes old.
+ * The gate before any traffic or sweep. Every call reads the ledger's restore
+ * epoch and maintenance boundary: no verdict is cached, so no isolate keeps
+ * serving after maintenance begins, and an unreachable ledger closes it. If
+ * the Operator recorded a restore since the main database last replayed, it
+ * replays first, during maintenance too, so the replay can be verified before
+ * service resumes. Only the replayed epoch is kept per isolate, to skip
+ * rereading the main database while the ledger's epoch is unchanged.
  */
 export const restoreGate = () => {
-  let verdict: { epoch: number; at: number } | undefined;
+  let replayed: number | undefined;
   return async (mainDb: QueryDatabase, ledgerDb: QueryDatabase, now: number): Promise<boolean> => {
-    if (verdict && now - verdict.at < VERDICT_MS) return true;
     try {
-      const recorded = await ledgerStore(ledgerDb).epoch();
-      const replayed = (await mainDb.prepare("SELECT epoch FROM restore_state WHERE id = 1").first<{ epoch: number }>())?.epoch ?? 0;
-      if (replayed < recorded) await replayLedger(mainDb, ledgerDb, recorded, now);
-      verdict = { epoch: recorded, at: now };
-      return true;
+      const control = await ledgerStore(ledgerDb).control();
+      if (!control) return false;
+      if (replayed !== control.epoch) {
+        const epoch = (await mainDb.prepare("SELECT epoch FROM restore_state WHERE id = 1").first<{ epoch: number }>())?.epoch ?? 0;
+        if (epoch < control.epoch) await replayLedger(mainDb, ledgerDb, control.epoch, now);
+        replayed = control.epoch;
+      }
+      return !control.maintenance;
     } catch {
-      return verdict !== undefined && now - verdict.at < STALE_VERDICT_MS;
+      return false;
     }
   };
 };

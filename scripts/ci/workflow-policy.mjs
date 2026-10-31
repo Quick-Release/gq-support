@@ -6,7 +6,10 @@
 //   job bound to an environment, which scopes the secret to that job, or passes it by name to a local
 //   reusable workflow, which is checked the same way; never `secrets: inherit`; forks receive none;
 // - artifacts are uploaded only through ./.github/actions/upload-scanned-artifact, which
-//   secret-scans them first, from an allowlisted path and with an explicit `retention-days`.
+//   secret-scans them first, from an allowlisted path and with an explicit `retention-days`;
+// - Worker stages deploy only through the plan gate (worker/deploy/plan-gate.ts): no direct
+//   `alchemy` command but `--help`, no destructive Wrangler command, and `deploy-gate apply` only
+//   after `deploy-gate plan` and the upload that retains its plan.
 // A line-based check: these files keep one key per line, which is all it needs.
 //   node scripts/ci/workflow-policy.mjs
 import { readdirSync, readFileSync } from 'node:fs';
@@ -16,7 +19,7 @@ import { pathToFileURL } from 'node:url';
 const ROOT = join(import.meta.dirname, '..', '..');
 const SCANNED_UPLOAD = './.github/actions/upload-scanned-artifact';
 // Report directories that only ever hold test and scan output, and the release candidate.
-const UPLOAD_PATHS = new Set(['audit-results/', 'benchmark-results/', 'package-zip/', 'plugin/phpcs-report.xml', 'runtime-results/', 'runtime-results/resolved-matrix.json', 'secret-scan/', 'test-results/']);
+const UPLOAD_PATHS = new Set(['audit-results/', 'benchmark-results/', 'independent-check/', 'package-zip/', 'plugin/phpcs-report.xml', 'runtime-results/', 'runtime-results/resolved-matrix.json', 'secret-scan/', 'test-results/', 'worker/deploy-plan/']);
 // Jobs that may write although their workflow runs on pull requests, and why.
 const WRITERS = {
   // Runs only on a manual `simulate` dispatch, to cancel its own run.
@@ -53,6 +56,7 @@ export function checkWorkflow(path, text, { pullRequestCode = false } = {}) {
   });
 
   if (!path.startsWith('.github/workflows/')) return problems;
+  problems.push(...deploymentProblems(path, lines));
   const on = topLevelBlock(lines, 'on');
   if (on.some((line) => /\bpull_request_target\b/.test(line))) report(0, '`pull_request_target` would run pull-request code with a privileged token');
   const permissions = topLevelBlock(lines, 'permissions');
@@ -79,6 +83,33 @@ export function checkWorkflow(path, text, { pullRequestCode = false } = {}) {
     report(index, inherits
       ? `job \`${owner[index]}\` passes every secret with \`secrets: inherit\` in pull-request code: pass each by name`
       : `job \`${owner[index]}\` reads a secret in pull-request code without an \`environment\` that scopes it to the job`);
+  });
+  return problems;
+}
+
+// `pnpm exec alchemy …`, `npx alchemy …`: Alchemy applies, destroys or rewrites state outside the gate.
+const ALCHEMY = /(?:^|[\s;&|(])alchemy\s+([a-z][\w-]*)(.*)$/;
+// Package scripts and Wrangler commands that deploy or delete outside the gate.
+const UNGATED = /\bpnpm\s+(?:run\s+)?deploy(?::worker)?(?![\w-])|\bwrangler\s+(?:d1\s+delete|delete)\b/;
+
+function deploymentProblems(path, lines) {
+  const problems = [];
+  const report = (index, message) => problems.push(`${path}:${index + 1}: ${message}`);
+  let planned = -1;
+  let retained = -1;
+  lines.forEach((line, index) => {
+    const code = line.replace(/(^|\s)#.*/, '$1');
+    const alchemy = code.match(ALCHEMY);
+    if (alchemy && !/(^|\s)--help\b/.test(alchemy[2])) {
+      report(index, `\`alchemy ${alchemy[1]}\` bypasses the deploy gate: plan and apply with \`pnpm deploy-gate\`, destroy with \`pnpm run destroy\``);
+    } else if (UNGATED.test(code)) {
+      report(index, 'a direct deploy or destructive command bypasses the deploy gate: use `pnpm deploy-gate`');
+    }
+    if (/\bdeploy-gate\s+plan\b/.test(code)) planned = index;
+    if (planned >= 0 && /^\s*path:\s*worker\/deploy-plan\/\s*$/.test(code)) retained = index;
+    if (/\bdeploy-gate\s+apply\b/.test(code) && retained < 0) {
+      report(index, '`deploy-gate apply` needs the retained plan: an earlier `deploy-gate plan` and the scanned upload of `worker/deploy-plan/`');
+    }
   });
   return problems;
 }

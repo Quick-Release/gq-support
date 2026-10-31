@@ -455,6 +455,7 @@ describe("GitHubReader", () => {
 
   it("exposes no mutating method", () => {
     // Checked by the type checker: the sweep's view cannot create, label or assign.
-    expectTypeOf<keyof GitHubReader["Service"]>().toEqualTypeOf<"repository" | "verifyRepository" | "listIssuesSince" | "readIssue">();
+    expectTypeOf<keyof GitHubReader["Service"]>().toEqualTypeOf<"repository" | "verifyRepository" | "listIssuesSince" | "readIssue"
+      | "listHookDeliveries">();
   });
 });

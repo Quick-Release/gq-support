@@ -35,20 +35,19 @@ final class GQ_Support_Service_Client {
 		if ( GQ_Support_Fail_Safe::disabled() && ! $privacy_request ) {
 			return new WP_Error( 'gq_support_disabled', 'Support is disabled by server configuration.' );
 		}
-		$base = defined( 'GQ_SUPPORT_SERVICE_URL' ) ? (string) constant( 'GQ_SUPPORT_SERVICE_URL' ) : self::BASE_URL;
-		if ( 'https' !== wp_parse_url( $base, PHP_URL_SCHEME ) ) {
+		$base = self::base_url();
+		if ( null === $base ) {
 			return new WP_Error( 'gq_support_not_configured', 'The support service URL must use HTTPS.' );
 		}
 
 		$body     = null === $payload ? '' : self::encode( $payload );
 		$response = wp_safe_remote_request(
-			untrailingslashit( $base ) . $path,
+			$base . $path,
 			array(
 				'method'              => $method,
 				'headers'             => array(
-					'Accept'                    => 'application/json',
-					'Content-Type'              => 'application/json',
-					'GQ-Support-Plugin-Version' => GQ_SUPPORT_VERSION,
+					'Accept'       => 'application/json',
+					'Content-Type' => 'application/json',
 				) + $signer->headers( $method, $path, $body ),
 				'body'                => '' === $body ? null : $body,
 				'timeout'             => $timeout,
@@ -72,6 +71,15 @@ final class GQ_Support_Service_Client {
 			'body'        => $decoded,
 			'retry_after' => (string) wp_remote_retrieve_header( $response, 'retry-after' ),
 		);
+	}
+
+	/**
+	 * The configured service origin without a trailing slash, or null unless it uses HTTPS.
+	 * The update path (GQ_Support_Updater) accepts packages from this origin only.
+	 */
+	public static function base_url(): ?string {
+		$base = defined( 'GQ_SUPPORT_SERVICE_URL' ) ? (string) constant( 'GQ_SUPPORT_SERVICE_URL' ) : self::BASE_URL;
+		return 'https' === wp_parse_url( $base, PHP_URL_SCHEME ) ? untrailingslashit( $base ) : null;
 	}
 
 	/**

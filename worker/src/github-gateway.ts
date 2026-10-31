@@ -89,6 +89,9 @@ export class IssueGone extends Data.TaggedError("IssueGone")<{}> {}
 /** Internal: no complete response (transport error, timeout or oversized body). */
 class NoResponse extends Data.TaggedError("NoResponse")<{}> {}
 
+/** One webhook delivery from GitHub's own log: when it was sent and the status our receiver answered (0 when none). */
+export interface HookDelivery { readonly guid: string; readonly deliveredAt: number; readonly statusCode: number }
+
 export type GatewayError =
   | AppAuthenticationFailed
   | InstallationUnavailable
@@ -292,6 +295,8 @@ export class GitHubReader extends Context.Service<GitHubReader, {
   readonly listIssuesSince: (target: GitHubTarget, since: number, page: number) =>
     Effect.Effect<{ readonly issues: readonly GitHubIssue[]; readonly hasNextPage: boolean }, GatewayError>;
   readonly readIssue: (target: GitHubTarget, number: number, etag?: string) => Effect.Effect<IssueRead, ReadIssueError>;
+  /** The App's most recent webhook deliveries as GitHub recorded them, newest first, with the App JWT. */
+  readonly listHookDeliveries: () => Effect.Effect<readonly HookDelivery[], GatewayError>;
 }>()("GitHubReader") {
   static readonly live = (config: GitHubAppConfig) => GitHubReader.layer(config).pipe(
     Layer.provide(FetchHttpClient.layer),
@@ -299,7 +304,8 @@ export class GitHubReader extends Context.Service<GitHubReader, {
   );
 
   static readonly layer = (config: GitHubAppConfig) => Layer.effect(GitHubReader, connect(config, READ).pipe(
-    Effect.map(({ repository, verifyRepository, listIssuesSince, readIssue }) => ({ repository, verifyRepository, listIssuesSince, readIssue })),
+    Effect.map(({ repository, verifyRepository, listIssuesSince, readIssue, listHookDeliveries }) =>
+      ({ repository, verifyRepository, listIssuesSince, readIssue, listHookDeliveries })),
   ));
 }
 
@@ -582,6 +588,31 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
       incomplete: body.incomplete_results !== false || typeof body.total_count !== "number" || body.total_count > items!.length });
   }));
 
+  /**
+   * One page of the App's webhook delivery log. Only GitHub's identifiers, times
+   * and status codes are kept: never events, payloads, headers or URLs.
+   */
+  const listHookDeliveries = () => Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    const jwt = yield* key.pipe(Effect.flatMap((cryptoKey) => Effect.tryPromise({
+      try: () => signJwt(cryptoKey, config.clientId, now),
+      catch: () => new AppAuthenticationFailed(),
+    })));
+    const { response, body } = yield* send(HttpClientRequest.get(`${API}/app/hook/deliveries`).pipe(
+      HttpClientRequest.setUrlParams({ per_page: "100" })), Redacted.make(jwt)).pipe(
+      Effect.mapError(() => new ProviderUnavailable({ status: null })));
+    if (response.status === 401) return yield* Effect.fail(new AppAuthenticationFailed());
+    if (response.status !== 200) return yield* Effect.fail(failure(response.status, response.headers, body, now));
+    const deliveries = Array.isArray(body) ? body.map((item): HookDelivery | undefined => {
+      if (!isRecord(item) || typeof item.guid !== "string" || !/^[0-9a-f-]{1,64}$/i.test(item.guid) ||
+        typeof item.delivered_at !== "string" || typeof item.status_code !== "number") return undefined;
+      const deliveredAt = Date.parse(item.delivered_at);
+      return Number.isFinite(deliveredAt) ? { guid: item.guid, deliveredAt, statusCode: item.status_code } : undefined;
+    }) : undefined;
+    if (!deliveries || deliveries.some((delivery) => delivery === undefined)) return yield* Effect.fail(new ProviderUnavailable({ status: 200 }));
+    return deliveries as HookDelivery[];
+  });
+
   /** Logs the failure's tag and safe fields only: no URL, header, body or credential. */
   const logged = <Args extends unknown[], A, E extends { readonly _tag: string }>(
     operation: string,
@@ -609,6 +640,7 @@ const connect = (config: GitHubAppConfig, permissions: Permissions) => Effect.ge
     addAssignees: logged("addAssignees", (target: GitHubTarget, number: number, assignees: readonly string[], authorize?: Effect.Effect<void, OutcomeUnknown>) =>
       repair(target, number, "assignees", assignees, authorize)),
     listIssuesSince: logged("listIssuesSince", listIssuesSince),
+    listHookDeliveries: logged("listHookDeliveries", listHookDeliveries),
     updateIssue: logged("updateIssue", updateIssue),
     setIssueState: logged("setIssueState", setIssueState),
     searchIssues: logged("searchIssues", searchIssues),

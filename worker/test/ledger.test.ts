@@ -57,6 +57,11 @@ const cleanup = (db: QueryDatabase = main()) => Effect.runPromise(sweepCleanup({
 const posts = () => github.requests.filter((request) => request.method === "POST" && request.path.endsWith("/issues"));
 const entry = async (kind: string, reference: string) => (await ledger().prepare("SELECT payload FROM ledger_entry WHERE kind = ? AND reference = ?")
   .bind(kind, reference).first<{ payload: string | null }>()) ?? undefined;
+/** A drained restore maintenance, recorded once the main database is restored (src/maintenance.ts). */
+const recordRestore = async () => {
+  advance(120_000);
+  return operator("restore-recorded", "operator-1", "time-travel-restore");
+};
 const operator = (...args: string[]) => runOperator(args, {
   query: async (sql, parameters) => (await main().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
   ledger: async (sql, parameters) => (await ledger().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
@@ -96,13 +101,16 @@ it("a recorded restore replays erasures and suspensions and makes restored work 
   advance(10_000);
   await cleanup();
   expect(github.issues[0]!.body).not.toContain("Private report text");
-  await Effect.runPromise(suspendRepository(main(), 42, "public", now));
+  await Effect.runPromise(suspendRepository(main(), 42, "public", now, []));
   await cleanup(); // mirrors the suspension
-  await restore(main(), image);
   const gate = restoreGate();
-  expect(await gate(main(), ledger(), now)).toBe(true); // nothing recorded yet: the ledger cannot tell
-  expect(await operator("restore-recorded", "operator-1", "time-travel-restore")).toMatch(/Restore recorded/);
-  expect(await restoreGate()(main(), ledger(), now)).toBe(true);
+  await operator("maintenance-begin", "operator-1", "restore", "inc-1");
+  await restore(main(), image);
+  expect(await gate(main(), ledger(), now)).toBe(false); // maintenance holds even before the restore is recorded
+  expect(await recordRestore()).toMatch(/Restore recorded/);
+  expect(await restoreGate()(main(), ledger(), now)).toBe(false); // replayed, still in maintenance
+  expect(JSON.parse(await operator("maintenance-end", "operator-1", "1", "inc-1"))).toMatchObject({ state: "serving" });
+  expect(await gate(main(), ledger(), now)).toBe(true);
   for (const id of [delivered, pending]) {
     expect(await main().prepare("SELECT 1 FROM delivery_suppression WHERE scope = 'request' AND reference = ?").bind(id).first()).not.toBeNull();
     expect((await installation.send("GET", `/v1/requests/${id}?reporter_subject=${subject}&scope=mine`)).status).toBe(404);
@@ -135,13 +143,13 @@ it("the mirror never drops an image; compaction records removals, which the ledg
   expect(await entry("cleanup", request)).toBeUndefined();
 });
 
-it("the restore gate fails closed without a recent verdict", async () => {
+it("the restore gate fails closed whenever the ledger cannot be read, however recent its last verdict", async () => {
   const broken = { prepare: () => { throw new Error("ledger unreachable"); }, batch: async () => [] } as unknown as QueryDatabase;
   const gate = restoreGate();
   expect(await gate(main(), broken, now)).toBe(false);
   expect(await gate(main(), ledger(), now)).toBe(true);
-  expect(await gate(main(), broken, now + 61_000)).toBe(true);
-  expect(await gate(main(), broken, now + 601_000)).toBe(false);
+  expect(await gate(main(), broken, now + 1)).toBe(false);
+  expect(await gate(main(), ledger(), now + 2)).toBe(true);
 });
 
 it("Operator erasure and offboarding refuse to run without the ledger", async () => {
@@ -150,16 +158,16 @@ it("Operator erasure and offboarding refuse to run without the ledger", async ()
     query: async (sql, parameters) => (await main().prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings: [mapping], now,
   });
-  await expect(without("offboard", mapping.slot, "operator-1")).rejects.toThrow("ledger database is required");
+  await expect(without("offboard", mapping.slot, "operator-1", "https://github.com/Quick-Release/gq-support/issues/147")).rejects.toThrow("ledger database is required");
   await expect(without("restore-recorded", "operator-1", "time-travel-restore")).rejects.toThrow("ledger database is required");
   expect(await main().prepare("SELECT COUNT(*) AS n FROM delivery_suppression").first("n")).toBe(0);
-  await operator("offboard", mapping.slot, "operator-1");
+  await operator("offboard", mapping.slot, "operator-1", "https://github.com/Quick-Release/gq-support/issues/147");
   expect(await entry("suppression", `slot:${mapping.slot}`)).toEqual({
     payload: JSON.stringify({ scope: "slot", reference: mapping.slot, reason: "offboarding" }) });
 });
 
 it("an Operator's lift is recorded, so a later replay does not suspend the repository again", async () => {
-  await Effect.runPromise(suspendRepository(main(), 42, "public", now));
+  await Effect.runPromise(suspendRepository(main(), 42, "public", now, []));
   await cleanup();
   expect((await entry("suspension", "42"))!.payload).toContain("public");
   advance(1000);
@@ -179,10 +187,11 @@ it("runtime key revocations survive a restore", async () => {
   for (const revoked of [installation.keyId, replacement.keyId]) {
     expect(JSON.parse((await entry("revocation", revoked))!.payload!)).toMatchObject({ key_id: revoked, revoked_at: now });
   }
+  await operator("maintenance-begin", "operator-1", "restore", "inc-1");
   await restore(main(), image);
   expect((await installation.send("GET", "/v1/installation")).status).toBe(200); // the restore revived the old key
-  await operator("restore-recorded", "operator-1", "time-travel-restore");
-  expect(await restoreGate()(main(), ledger(), now)).toBe(true);
+  await recordRestore();
+  expect(await restoreGate()(main(), ledger(), now)).toBe(false);
   expect((await installation.send("GET", "/v1/installation")).status).toBe(403);
 });
 

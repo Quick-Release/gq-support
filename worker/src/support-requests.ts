@@ -13,6 +13,11 @@ export interface Caller {
   readonly delivery?: { readonly githubInstallationId: number; readonly environment: string; readonly clientOriginLabel: string; readonly defaultDeveloper: string };
   /** A Suspended mapping takes no new Support requests; earlier ones still replay. */
   readonly suspended?: boolean;
+  /**
+   * The release policy refuses this plugin new intake (src/release-policy.ts):
+   * the response for a new create or status change. Accepted ones still replay.
+   */
+  readonly refused?: () => Response;
 }
 
 /**
@@ -244,6 +249,7 @@ const create = async (storage: SlotStorage, caller: Caller, body: string, now: n
     // An expired review envelope never authorizes a new acceptance.
     if (input.reconcile_only) return error("gq_support_context_expired", 412);
     if (caller.suspended) return error("gq_support_not_configured", 403);
+    if (caller.refused) return caller.refused();
     if (input.supersedes_id !== null && !await canSupersede()) return notFound();
     await storage.batch([
       storage.debitIntake(input.reporter_subject, now, REPORTER_QUOTAS),
@@ -423,6 +429,7 @@ const changeStatus = async (storage: SlotStorage, caller: Caller, id: string, bo
   const existing = await named();
   if (existing) return replay(row, existing);
   if (caller.suspended) return error("gq_support_not_configured", 403);
+  if (caller.refused) return caller.refused();
   if (row.state !== "delivered" || row.status === null || row.tracking !== "active") return error("gq_support_change_not_allowed", 409);
   if (row.change_seq > 0 && !["delivered", "failed"].includes(row.change_state)) return error("gq_support_change_pending", 409);
   const seq = row.change_seq + 1;

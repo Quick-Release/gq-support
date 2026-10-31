@@ -101,6 +101,63 @@ _Avoid_: Tenant ID, API key, pairing token
 **Operational record**:
 The durable mapping between a Support request, its Client, Slot, verified Reporter, and GitHub issue identity, plus delivery and reconciliation information. It supports authorization and operations without replacing GitHub as the issue record.
 
+**Operational incident**:
+A service failure tracked for the GETQUICK team to claim, investigate and resolve; one shared failure can affect multiple installations. It is separate from a Reporter's Support request.
+_Avoid_: Ticket, when the distinction from a Support request matters
+
+**Independent checker**:
+A scheduled check that runs outside the support service and observes its Worker, databases, GitHub, Discord and dashboard separately, so a failed component need not report its own outage. Its observations become Operational incidents only once the service can record them; it has no staff, Operator or installation authority.
+_Avoid_: Monitor, health check, when the service's own measured health is meant
+
+**Maintenance boundary**:
+The Operator-declared state, held outside the database a restore rewinds, in which the support service accepts no intake, makes no writes, dispatches nothing and refuses unsafe Operator changes, so a restore can be recorded, replayed and verified before service resumes. Ordinary WordPress pages are unaffected.
+_Avoid_: Delivery disabled, maintenance mode, when only the dispatch flag in the main database is meant
+
+**Release candidate**:
+A published plugin package recorded from its verified release artifacts: version, package hash and provenance. It is not supported merely by existing.
+_Avoid_: Release, when approval has not been recorded
+
+**Approved release**:
+The one plugin release an Operator explicitly approved for production, as an immutable record with its package, Worker commit, contract and schema range, previous approved release and recorded fleet dispatch. A verified earlier package re-approved after a bad release is a temporary recovery release.
+_Avoid_: Latest version, when an unapproved newer candidate exists
+
+**Release gates**:
+The package, compatibility, security, privacy, performance and staging checks a Release candidate must pass, read from GitHub's own workflow run records at its exact release and Worker commits, never typed in. Infrastructure and recovery are checked again at launch.
+_Avoid_: Sign-off, when only a person's statement is meant
+
+**Production readiness**:
+The state, checked for one exact commit, the prod stage and the Tipme account, in which every operations gate has fresh live evidence and a named reviewer has signed off that evidence before a Client is onboarded to production. Local or synthetic results, plans and checklists never establish it.
+_Avoid_: Ready, launched, when only tests or a deployment passed
+
+**Readiness sign-off**:
+A named, reviewed human's own GitHub comment quoting the digest of the exact readiness evidence they reviewed. It is never a typed field, a plan digest or a record made by an agent.
+_Avoid_: Approval, when a Release candidate's approval is meant
+
+**Fleet launch**:
+The single dispatch of an Approved release to every eligible Slot together, recorded at its actual start once its gates, the compatible Worker's gated deployment, the live migration state and a compatible recovery package check out. It starts the Compatibility window; it is not any installation's update.
+_Avoid_: Rollout complete, deployment, when completion is meant
+
+**Verified update**:
+A Slot whose installed plugin files are exactly an Approved release's, shown by a central read-back of every file or a native installation's signed files digest. A dispatch, an attempt or a matching version alone is not one; an unreachable or silent Slot is unknown.
+_Avoid_: Updated, observed, when only a version was seen
+
+**Withdrawn release**:
+An Approved release replaced by a recovery release after it proved bad. It is never offered, served, re-approved or recovered to again. Recovery uses only an earlier package that passed its Release gates, was launched before and is compatible with the live contract and schema; otherwise the service is repaired forward, never by reversing migrations.
+_Avoid_: Rolled back, when the schema is meant
+
+**Rollback boundary**:
+A recorded schema migration from which packages verified only against older schemas stop being recovery candidates, recorded only after every Slot verified the current release and its previous release's window ended. Only past it may a migration remove structures.
+
+**Update grant**:
+An Operator's grant of one native installation's update key to its Slot, until an expiry, letting it read only the Approved release's metadata and package bytes through WordPress's own updater. It is separate from the Installation credential, so disabling submissions or revoking that credential leaves updates working; it never authorizes reports, another Slot or an Operator. A newer grant supersedes the Slot's older key; revocation is permanent.
+_Avoid_: Licence key, API key, update token
+
+**Download grant**:
+Short-lived (15-minute) access to the bytes of one Approved release, issued only in answer to an authenticated update metadata request and renewed only by asking again; never part of a URL.
+
+**Compatibility window**:
+The up to 24 hours from an approved release's recorded fleet dispatch during which the previous approved release may still start new Support requests. It never affects work the service already accepted.
+
 **Visibility scope**:
 An explicit authorization boundary defining which Support requests a Reporter may see. By default, a Reporter sees only requests they submitted; an explicitly granted Support manager scope may cover approved installations. It is independent of WordPress role names and GitHub labels.
 

@@ -43,6 +43,13 @@ const scratch = () => process.env.GQ_D1_SCRATCH ?? tmpdir();
 // once, and every stage starts from a private copy. A set shares Miniflare's metadata file, so
 // templates are per set, not per database.
 const templates = new Map<string, Promise<string>>();
+const ledgers = new WeakMap<D1Database, D1Database>();
+/** The real local ledger paired with a test's main database, for the Operator seam. */
+export const operatorLedger = (main: D1Database) => async (sql: string, parameters: readonly (string | number)[]) => {
+  const ledger = ledgers.get(main);
+  if (!ledger) throw new Error("No local suppression ledger for this database");
+  return (await ledger.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results;
+};
 const template = (names: readonly string[]): Promise<string> => {
   const key = JSON.stringify(names);
   let directory = templates.get(key);
@@ -75,10 +82,13 @@ export const localStage = async <Name extends string>(
   dispose: () => Promise<void>;
 }> => {
   const persist = mkdtempSync(join(scratch(), "stage-"));
-  cpSync(await template(names), persist, { recursive: true });
-  const mf = new Miniflare(workerOptions(names, persist));
+  const allNames = [...new Set([...names, "ledger"])];
+  cpSync(await template(allNames), persist, { recursive: true });
+  const mf = new Miniflare(workerOptions(allNames, persist));
   const databases = {} as Record<Name, D1Database>;
   for (const name of names) databases[name] = (await mf.getD1Database(name)) as unknown as D1Database;
+  const ledger = (await mf.getD1Database("ledger")) as unknown as D1Database;
+  for (const database of Object.values(databases) as D1Database[]) ledgers.set(database, ledger);
   return {
     databases,
     dispose: async () => {

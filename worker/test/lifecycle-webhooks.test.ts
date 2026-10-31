@@ -12,7 +12,7 @@ import { scheduledTick } from "../src/scheduled.ts";
 import { handleWorkerRequest } from "../src/worker-http.ts";
 import { BOT, CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 
 // Two Slots share repository 42; globex has repository 77. Both are on installation 7.
 const START = Date.parse("2026-10-17T10:00:00Z");
@@ -74,7 +74,7 @@ const tick = () => {
     Effect.provide(Layer.mergeAll(GitHubGateway.layer(config), GitHubReader.layer(config)).pipe(Layer.provide(github.layer))),
     Effect.provide(Logger.layer([]))));
 };
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
   query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 const mappingState = async (installation: Installation) =>
   ((await (await installation.send("GET", "/v1/installation")).json()) as { mapping_state: string }).mapping_state;

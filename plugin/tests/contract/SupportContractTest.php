@@ -476,7 +476,10 @@ final class GQ_Support_Contract_Test extends TestCase {
 	public static function signing_cases(): array {
 		$fixtures = array();
 		foreach ( self::fixtures( 'signing' )['cases'] as $fixture ) {
-			$fixtures[ $fixture['name'] ] = array( $fixture );
+			// This signer writes only gq-support-v2; the v1 cases are what legacy plugins sent, which the Worker still verifies.
+			if ( 'gq-support-v2' === $fixture['scheme'] ) {
+				$fixtures[ $fixture['name'] ] = array( $fixture );
+			}
 		}
 		return $fixtures;
 	}
@@ -490,7 +493,7 @@ final class GQ_Support_Contract_Test extends TestCase {
 	public function test_signer_matches_shared_fixture( array $fixture ): void {
 		$keys    = self::fixtures( 'signing' );
 		$secret  = sodium_base642bin( $keys['secret_key'], SODIUM_BASE64_VARIANT_ORIGINAL );
-		$signer  = new GQ_Support_Signer( $secret, $fixture['headers']['GQ-Support-Key-Id'], $fixture['headers']['GQ-Support-Installation-Id'] );
+		$signer  = new GQ_Support_Signer( $secret, $fixture['headers']['GQ-Support-Key-Id'], $fixture['headers']['GQ-Support-Installation-Id'], $fixture['headers']['GQ-Support-Plugin-Version'] );
 		$headers = $signer->headers( $fixture['method'], $fixture['path'], $fixture['body'], (int) $fixture['headers']['GQ-Support-Timestamp'], $fixture['headers']['GQ-Support-Request-Id'] );
 		self::assertSame(
 			$fixture['headers'] + array(

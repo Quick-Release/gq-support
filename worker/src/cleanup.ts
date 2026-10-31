@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { GitHubGateway, OutcomeUnknown, type GitHubTarget } from "./github-gateway.ts";
 import { attributedIntent, reporterReference, supportIssues, type IssueIdentity, type ReconciliationProgress } from "./support-issues.ts";
-import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
+import { mappingFor, slotsOf, type RepositoryMapping } from "./repository-mappings.ts";
 import { imageOf, ledgerStore, mirrorToLedger, removal, type LedgerEntry } from "./ledger.ts";
 import { DAY, MUTATION_INTERVAL_MS } from "./delivery-store.ts";
 import { suspendRepository, unsafeReason } from "./repository-suspension.ts";
@@ -10,6 +10,9 @@ import type { OperatorOptions } from "./operator.ts";
 import type { QueryDatabase } from "./storage.ts";
 import { PURGED_TEXT as BLANK, STATUS_BUDGET, ulid } from "./support-requests.ts";
 
+/** Slot-scoped rows with no review purpose left once an offboarded Slot's grace ends (src/offboarding.ts). */
+const OFFBOARDED_SLOT_ROWS = ["slot_contact_verification", "slot_version_evidence", "slot_signed_version", "slot_installed_files",
+  "slot_update_attempt", "intake_debit", "request_rate"] as const;
 /** Never-confirmed-delivered text, and closed delivered requests after their last observed close. */
 export const RETENTION_MS = 365 * DAY;
 /** Resolved erasure tombstones outlive the 30-day Time Travel window. */
@@ -242,6 +245,37 @@ const cleanupStore = (db: QueryDatabase) => {
         WHERE o.purge_after <= ? AND NOT EXISTS (SELECT 1 FROM support_cleanup c WHERE c.request_id = r.id) LIMIT 100`)
         .bind(now).all<{ id: string; slot: string }>()).results;
       await queue("offboarding", rows, now);
+      // The Slot's restricted inventory and update observations, and its Reporters' quota rows, go at the same time,
+      // whether or not it is still mapped; every pass, so rows a restore brought back go again. A central application
+      // without a settled outcome may have changed the installation and stays for review; key revocations and the
+      // suppression stay so nothing can grant access again. Shared release records are never touched for one Slot.
+      const due = "slot IN (SELECT slot FROM offboarding WHERE purge_after <= ?)";
+      await run([...OFFBOARDED_SLOT_ROWS.map((table): Statement => [`DELETE FROM ${table} WHERE ${due}`, [now]]),
+        [`DELETE FROM central_deployment WHERE ${due} AND outcome IS NOT NULL AND outcome != 'unknown'`, [now]]]);
+    },
+    /**
+     * Rows of a Slot no longer mapped, and never offboarded, go 30 days after the
+     * pass first finds it unmapped; mapping it again clears that clock. A
+     * superseded contact route goes 30 days after the verification replacing it.
+     */
+    async unmapped(now: number, mapped: readonly string[]) {
+      // One read per table: D1 bounds the terms of a compound SELECT.
+      const offboarded = (await db.prepare("SELECT slot FROM offboarding").bind().all<{ slot: string }>()).results.map((row) => row.slot);
+      const found = [...new Set((await Promise.all([...OFFBOARDED_SLOT_ROWS, "central_deployment"].map(async (table) =>
+        (await db.prepare(`SELECT DISTINCT slot FROM ${table}`).bind().all<{ slot: string }>()).results.map((row) => row.slot)))).flat())]
+        .filter((slot) => !mapped.includes(slot) && !offboarded.includes(slot));
+      const due = `slot IN (SELECT slot FROM slot_unmapped WHERE first_seen_at <= ?)`;
+      await run([
+        ["DELETE FROM slot_unmapped WHERE slot NOT IN (SELECT value FROM json_each(?))", [JSON.stringify(found)]],
+        ...found.map((slot): Statement => ["INSERT INTO slot_unmapped (slot, first_seen_at) VALUES (?, ?) ON CONFLICT DO NOTHING", [slot, now]]),
+        ...OFFBOARDED_SLOT_ROWS.map((table): Statement => [`DELETE FROM ${table} WHERE ${due}`, [now - OFFBOARDING_GRACE_MS]]),
+        [`DELETE FROM central_deployment WHERE ${due} AND outcome IS NOT NULL AND outcome != 'unknown'`, [now - OFFBOARDING_GRACE_MS]],
+        // Purged: a row added later starts a new clock.
+        ["DELETE FROM slot_unmapped WHERE first_seen_at <= ?", [now - OFFBOARDING_GRACE_MS]],
+        [`DELETE FROM slot_contact_verification WHERE EXISTS (SELECT 1 FROM slot_contact_verification n WHERE n.slot = slot_contact_verification.slot
+          AND (n.verified_at > slot_contact_verification.verified_at OR (n.verified_at = slot_contact_verification.verified_at
+            AND n.rowid > slot_contact_verification.rowid)) AND n.recorded_at <= ?)`, [now - OFFBOARDING_GRACE_MS]],
+      ]);
     },
     /** Two index-bounded passes: never-confirmed-delivered by acceptance, delivered by last observed close. */
     async retain(now: number) {
@@ -492,7 +526,7 @@ const redactRecord = (record: CleanupRecord, target: GitHubTarget, options: Clea
   const error = result.failure;
   const reason = unsafeReason(error);
   if (reason) {
-    yield* suspendRepository(options.db, target.repositoryId, reason, now()).pipe(Effect.ignore);
+    yield* suspendRepository(options.db, target.repositoryId, reason, now(), slotsOf(options.mappings, target.repositoryId)).pipe(Effect.ignore);
     return { state: "unresolved", next: null, error: error._tag } satisfies Transition;
   }
   // A redaction can be repeated; an unauthorized one was never sent.
@@ -569,6 +603,7 @@ export const sweepCleanup = (options: CleanupOptions): Effect.Effect<void, never
   yield* isolated("repurge", io(() => store.repurge(now(), options.digestKey)));
   yield* isolated("offboarding", io(() => store.offboard(now())));
   yield* isolated("retention", io(() => store.retain(now())));
+  yield* isolated("unmapped", io(() => store.unmapped(now(), options.mappings.map((mapping) => mapping.slot))));
   yield* isolated("capture", Effect.gen(function* () {
     for (const row of yield* io(() => store.drained(now()))) {
       const change = afterDrain(row, now());

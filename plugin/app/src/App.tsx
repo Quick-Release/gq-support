@@ -147,6 +147,8 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
     await submission.send(draft);
   };
   const edit = () => { submission.edit(); setCopyState(""); };
+  // This plugin may no longer start new reports (GQ_Support_Release); reads and earlier requests stay available.
+  const outdated = window.gqSupportLauncher.intake === "closed";
   return (
     <section ref={panel} id="gq-support-panel" className="gq-support-panel" role="dialog" aria-modal="false" aria-labelledby="gq-support-title" hidden={!visible}>
       <div className="gq-support-header">
@@ -159,6 +161,15 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
       </div>
       <div id="gq-support-new" role="tabpanel" aria-labelledby="gq-support-new-tab" hidden={tab !== "new"}>
         <form onSubmit={submit} noValidate>
+          {outdated && (
+            <div className="gq-support-outdated">
+              <p role="status" className="gq-support-message">
+                {__("Support needs a plugin update.", "gq-support")}{" "}
+                {__("New reports are paused until this site is updated. Your requests stay in My requests.", "gq-support")}
+              </p>
+              <Contact />
+            </div>
+          )}
           <label htmlFor="gq-support-summary" className="gq-support-label">{__("Summary (optional)", "gq-support")}</label>
           <input id="gq-support-summary" className="gq-support-field" value={summary} disabled={submission.locked} onChange={(event) => { edit(); setSummary(event.target.value); }} />
           <label htmlFor="gq-support-description" className="gq-support-label">{__("Description", "gq-support")}</label>
@@ -194,7 +205,7 @@ export function App({ registerToggle, onVisibilityChange }: Props) {
               <textarea id="gq-support-copy" className="gq-support-field" ref={manual} readOnly value={draftText} />
             </div>
           )}
-          <button type="submit" disabled={session.paused || submission.locked || submission.waiting || context.loading} className="gq-support-submit">
+          <button type="submit" disabled={outdated || session.paused || submission.locked || submission.waiting || context.loading} className="gq-support-submit">
             {submission.retry ? __("Try again", "gq-support") : context.failed ? __("Send without optional information", "gq-support") : __("Send report", "gq-support")}
           </button>
         </form>

@@ -49,7 +49,7 @@ const send = async (body: string, path = "/v1/requests") => {
   authenticationValues.push(request.headers.get("GQ-Support-Request-Id")!, request.headers.get("GQ-Support-Signature")!);
   request.headers.set("Cookie", "private-cookie-canary");
   return Effect.runPromise(handleWorkerRequest(HttpServerRequest.fromWeb(request), Effect.succeed(stage.databases.shared),
-    [mapping], () => Effect.die("Not a webhook"), () => {}).pipe(Effect.provide(logger()), Effect.withTracer(tracer)));
+    [mapping], () => Effect.die("Not a webhook"), () => {}, undefined, { release: "staged" }).pipe(Effect.provide(logger()), Effect.withTracer(tracer)));
 };
 const sweep = () => Effect.runPromise(sweepDelivery({ db: stage.databases.shared, mappings: [mapping],
   botLogin: `${SLUG}[bot]`, now: () => now, random: () => 0 }).pipe(

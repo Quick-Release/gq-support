@@ -261,7 +261,7 @@ it("reports a due refresh backlog and sweep lag, and refuses to record a repair 
 
 it("lists suspensions as unacknowledged until a recorded repair acknowledges them", async () => {
   await delivered();
-  await Effect.runPromise(suspendRepository(db(), 77, "public", now).pipe(Effect.provide(Logger.layer([]))));
+  await Effect.runPromise(suspendRepository(db(), 77, "public", now, []).pipe(Effect.provide(Logger.layer([]))));
   advance(MINUTE);
   await tick();
   expect(await health()).toMatchObject({ healthy: false, suspensions: [{ repositoryId: 77, reason: "public", acknowledged: false }] });
@@ -284,6 +284,6 @@ it("lists suspensions as unacknowledged until a recorded repair acknowledges the
   // A later suspension of the same repository needs a new acknowledgement.
   await db().prepare("UPDATE repository_state SET suspended_reason = NULL, suspended_at = NULL WHERE repository_id = 77").run();
   advance(MINUTE);
-  await Effect.runPromise(suspendRepository(db(), 77, "archived", now).pipe(Effect.provide(Logger.layer([]))));
+  await Effect.runPromise(suspendRepository(db(), 77, "archived", now, []).pipe(Effect.provide(Logger.layer([]))));
   expect(await health()).toMatchObject({ healthy: false, suspensions: [{ repositoryId: 77, reason: "archived", acknowledged: false }] });
 });

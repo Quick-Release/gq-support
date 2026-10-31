@@ -3,7 +3,7 @@ import { handleRequest } from "../src/installation-api.ts";
 import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { keyPair, signed } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 
 const mappings: readonly RepositoryMapping[] = [{
   slot: "shop/production", client: "client-a", project: "shop", environment: "production",
@@ -18,11 +18,13 @@ describe("installation enrollment at the Worker boundary", () => {
   beforeEach(async () => { stage = await localStage(["shared"]); });
   afterEach(async () => { await stage.dispose(); });
   const operator = (command: string, slot = "shop/production", now?: number) =>
-    runOperator([command, slot], {
+    runOperator([command, slot], { ledger: operatorLedger(stage.databases.shared),
       query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
       recordRevocation: async () => {}, mappings, now,
     });
-  const send = (request: Request, config = mappings) => handleRequest(request, stage.databases.shared, config);
+  const send = (request: Request, config = mappings) => handleRequest(request, stage.databases.shared, config, { release: "staged" });
+  // Nothing approved, under explicitly staged enforcement (src/release-policy.ts).
+  const release = { enforcement: "staged", intake: "open", reason: "unavailable", plugin_version: null, approved_version: null, compatible_until: null };
   const enroll = async (code: string, pair: CryptoKeyPair, installationId = "installation-a", extra = {}) => {
     const body = JSON.stringify({ code, installation_id: installationId, origin: "https://shop.example",
       public_key: Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64"),
@@ -41,7 +43,7 @@ describe("installation enrollment at the Worker boundary", () => {
     expect(await (await enroll(code, pair)).json()).toEqual(binding);
     const status = await send(await signed(pair, "GET", "/v1/installation", "", binding.key_id));
     expect(status.status).toBe(200);
-    expect(await status.json()).toEqual({ ...binding, mapping_state: "active" });
+    expect(await status.json()).toEqual({ ...binding, mapping_state: "active", release });
   });
   it("rejects a used code with another key or installation and hides invalid-code reasons", async () => {
     const code = await operator("enroll");
@@ -167,7 +169,7 @@ describe("installation enrollment at the Worker boundary", () => {
     await stage.databases.shared.prepare("INSERT INTO repository_state (repository_id, suspended_reason, observed_at) VALUES (123, 'archived', 1)").run();
     const response = await send(await signed(pair, "GET", "/v1/installation", "", keyId));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ key_id: keyId, environment: "production", connected_at: expect.any(String), mapping_state: "suspended" });
+    expect(await response.json()).toEqual({ key_id: keyId, environment: "production", connected_at: expect.any(String), mapping_state: "suspended", release });
     expect((await send(await signed(pair, "DELETE", "/v1/installation", "", keyId))).status).toBe(200);
   });
 
@@ -247,12 +249,12 @@ describe("installation enrollment at the Worker boundary", () => {
     const { key_id: keyId } = await (await enroll(await operator("enroll"), pair)).json() as { key_id: string };
     const query = async (sql: string, parameters: readonly (string | number)[]) =>
       (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results;
-    await expect(runOperator(["revoke", "shop/production"], {
+    await expect(runOperator(["revoke", "shop/production"], { ledger: operatorLedger(stage.databases.shared),
       query, mappings, recordRevocation: async () => { throw new Error("log unavailable"); },
     })).rejects.toThrow("log unavailable");
     expect((await send(await signed(pair, "GET", "/v1/installation", "", keyId))).status).toBe(200);
     const records: string[] = [];
-    await runOperator(["revoke", "shop/production"], {
+    await runOperator(["revoke", "shop/production"], { ledger: operatorLedger(stage.databases.shared),
       query, mappings, recordRevocation: async (id) => { records.push(id); },
     });
     expect(records).toEqual([keyId]);

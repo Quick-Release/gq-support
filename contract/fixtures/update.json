@@ -1,0 +1,49 @@
+{
+  "offers": [
+    {
+      "name": "the approved release with download access",
+      "valid": true,
+      "body": { "plugin": "gq-support", "auto_update": true, "release": { "release_id": 3, "version": "0.2.0", "kind": "production", "files_sha256": "5be8c4f0a1d6e2b3c7f9a0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1", "package_sha256": "8f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392817", "package_path": "/v1/updates/gq-support/package?version=0.2.0&sha256=8f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392817" }, "grant": { "token": "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expires_at": "2026-10-20T10:15:00.000Z" } }
+    },
+    {
+      "name": "the approved recovery release, an earlier verified package",
+      "valid": true,
+      "body": { "plugin": "gq-support", "auto_update": true, "release": { "release_id": 4, "version": "0.1.9", "kind": "recovery", "files_sha256": "6ce8c4f0a1d6e2b3c7f9a0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c2", "package_sha256": "9f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392818", "package_path": "/v1/updates/gq-support/package?version=0.1.9&sha256=9f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392818" }, "grant": { "token": "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expires_at": "2026-10-20T10:15:00.000Z" } }
+    },
+    {
+      "name": "a recovery release of unknown kind",
+      "valid": false,
+      "body": { "plugin": "gq-support", "auto_update": true, "release": { "release_id": 4, "version": "0.1.9", "kind": "rollback", "files_sha256": "6ce8c4f0a1d6e2b3c7f9a0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c2", "package_sha256": "9f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392818", "package_path": "/v1/updates/gq-support/package?version=0.1.9&sha256=9f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392818" }, "grant": { "token": "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expires_at": "2026-10-20T10:15:00.000Z" } }
+    },
+    {
+      "name": "no approved, dispatched release",
+      "valid": true,
+      "body": { "plugin": "gq-support", "release": null, "grant": null, "auto_update": true }
+    },
+    {
+      "name": "a package on another origin",
+      "valid": false,
+      "body": { "plugin": "gq-support", "auto_update": true, "release": { "release_id": 3, "version": "0.2.0", "package_sha256": "8f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392817", "package_path": "https://attacker.example/gq-support.zip" }, "grant": { "token": "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expires_at": "2026-10-20T10:15:00.000Z" } }
+    },
+    {
+      "name": "a package path naming other bytes than the digest",
+      "valid": false,
+      "body": { "plugin": "gq-support", "auto_update": true, "release": { "release_id": 3, "version": "0.2.0", "package_sha256": "8f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392817", "package_path": "/v1/updates/gq-support/package?version=0.2.1&sha256=8f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392817" }, "grant": { "token": "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expires_at": "2026-10-20T10:15:00.000Z" } }
+    },
+    {
+      "name": "a release without a SHA-256",
+      "valid": false,
+      "body": { "plugin": "gq-support", "auto_update": true, "release": { "release_id": 3, "version": "0.2.0", "package_sha256": null, "package_path": "/v1/updates/gq-support/package?version=0.2.0&sha256=" }, "grant": { "token": "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "expires_at": "2026-10-20T10:15:00.000Z" } }
+    },
+    {
+      "name": "a release without download access",
+      "valid": false,
+      "body": { "plugin": "gq-support", "auto_update": true, "release": { "release_id": 3, "version": "0.2.0", "package_sha256": "8f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392817", "package_path": "/v1/updates/gq-support/package?version=0.2.0&sha256=8f0c3a1d6f0d1e1f4c6f2a1b0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a392817" }, "grant": null }
+    },
+    {
+      "name": "another plugin's offer",
+      "valid": false,
+      "body": { "plugin": "gq-design", "release": null, "grant": null, "auto_update": true }
+    }
+  ]
+}

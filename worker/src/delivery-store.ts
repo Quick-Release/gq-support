@@ -53,8 +53,8 @@ export const deliveryStore = (db: QueryDatabase) => {
         owner = NULL, lease_expires_at = NULL, last_error_class = 'DeliveryDeadline', context_json = NULL
         WHERE i.id IN (SELECT i.id FROM delivery_intent i WHERE i.state = 'pending' AND i.retry_deadline <= ?
           AND (i.owner IS NULL OR i.lease_expires_at <= ?) AND ${unsuppressed} LIMIT 100)
-        AND i.state = 'pending' AND i.retry_deadline <= ? RETURNING id, request_id, generation`, now, now, now)
-        .all<{ id: string; request_id: string; generation: number }>()).results;
+        AND i.state = 'pending' AND i.retry_deadline <= ? RETURNING id, slot, request_id, generation`, now, now, now)
+        .all<{ id: string; slot: string; request_id: string; generation: number }>()).results;
     },
     async due(now: number): Promise<DeliveryRow[]> {
       // One candidate per Slot before the global bound. Persisted least-recently
