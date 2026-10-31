@@ -735,7 +735,9 @@ the routes.
   public key. The Slot's newest grant supersedes its older keys, a key is never
   granted to a second Slot, and a revocation is never lifted. Revocations go to
   the suppression ledger first (`--ledger-database-id` is required), so a restore
-  of the main database cannot revive a grant. Every grant and revocation is one
+  of the main database cannot revive a grant. Rotation also requires the ledger
+  and revokes old keys before granting the replacement; failure leaves the old
+  keys revoked. Every grant and revocation is one
   audited append. The grant is independent of the Installation credential:
   `revoke <slot>`, `GQ_SUPPORT_DISABLED` and disconnecting leave it working.
 - **What it authorizes.** Only `GET /v1/updates/gq-support` (the approved release
@@ -757,7 +759,7 @@ the routes.
 
 ```sh
 pnpm operator update-access-status <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator update-access-grant <slot> <update-public-key> <expires-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator update-access-grant <slot> <update-public-key> <expires-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 pnpm operator update-access-revoke <slot> <key-id|all> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 

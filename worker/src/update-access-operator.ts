@@ -30,7 +30,8 @@ const USAGE = "Usage: operator update-access-status <slot>"
  *   (#147) revokes `all`.
  * - `update-access-status` shows the Slot's keys and their state; keys are public.
  */
-export const runUpdateAccessOperator = async (args: readonly string[], { query, mappings, now = Date.now(), ledger }: OperatorOptions): Promise<string> => {
+export const runUpdateAccessOperator = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
+  const { query, mappings, now = Date.now(), ledger } = options;
   const [command, slot] = args;
   const mapping = slot === undefined ? undefined : mappingFor(mappings, slot);
   if (!["update-access-status", "update-access-grant", "update-access-revoke"].includes(command ?? "")) throw new Error(USAGE);
@@ -56,11 +57,29 @@ export const runUpdateAccessOperator = async (args: readonly string[], { query, 
     // The reviewed deployment method decides: central and manual installations get no native update access.
     if (mapping.deployment !== "native") throw new Error("This Slot's reviewed deployment method is not native; set it by reviewed PR first.");
     const keyId = await updateKeyId(publicKey!);
+    const [existing] = await query(`SELECT g.slot, r.key_id AS revoked FROM update_access_grant g
+      LEFT JOIN update_access_revocation r ON r.key_id = g.key_id WHERE g.key_id = ?`, [keyId]);
+    if (existing) {
+      if (existing.slot !== slot) throw new Error("This update key is granted to another Slot; generate a new key on the installation.");
+      if (existing.revoked !== null) throw new Error("This update key was revoked; generate a new key on the installation.");
+      const [shown] = (await keys()).filter((key) => key.key_id === keyId);
+      return JSON.stringify({ slot, key_id: keyId, state: shown?.state, expires_at: shown?.expires_at });
+    }
+    const previous = await query(`SELECT g.key_id FROM update_access_grant g WHERE g.slot = ?
+      AND NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id)`, [slot!]);
+    if (previous.length) {
+      // Revocation first: a failed replacement leaves recovery to hosting access,
+      // but an older database snapshot can never reactivate a superseded key.
+      await runUpdateAccessOperator(["update-access-revoke", slot!, "all", evidence!, actor!], options);
+    }
     const [inserted] = await query(`INSERT INTO update_access_grant (key_id, slot, public_key, expires_at, evidence, granted_by, granted_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key_id) DO NOTHING RETURNING key_id`, [keyId, slot!, publicKey!, expiresAt, evidence!, actor!, now]);
+      SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM update_access_grant g WHERE g.slot = ?
+        AND NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id))
+      ON CONFLICT (key_id) DO NOTHING RETURNING key_id`, [keyId, slot!, publicKey!, expiresAt, evidence!, actor!, now, slot!]);
     if (!inserted) {
       const [existing] = await query(`SELECT g.slot, r.key_id AS revoked FROM update_access_grant g
         LEFT JOIN update_access_revocation r ON r.key_id = g.key_id WHERE g.key_id = ?`, [keyId]);
+      if (!existing) throw new Error("Update grant lost a concurrent rotation; inspect update-access-status before retrying.");
       if (existing?.slot !== slot) throw new Error("This update key is granted to another Slot; generate a new key on the installation.");
       if (existing?.revoked !== null) throw new Error("This update key was revoked; generate a new key on the installation.");
     }
@@ -78,9 +97,9 @@ export const runUpdateAccessOperator = async (args: readonly string[], { query, 
     await ledgerStore(asQueryDatabase(ledger)).record(targets.map((keyId) => imageOf("revocation", { key_id: keyId, revoked_at: now })), now);
     // One statement: every target key of the Slot not yet revoked, with its own audit row.
     const revoked = await query(`INSERT INTO update_access_revocation (key_id, slot, evidence, revoked_by, revoked_at)
-      SELECT g.key_id, g.slot, ?, ?, ? FROM update_access_grant g WHERE g.slot = ? AND (? = 'all' OR g.key_id = ?)
+      SELECT g.key_id, g.slot, ?, ?, ? FROM update_access_grant g WHERE g.slot = ? AND g.key_id IN (SELECT value FROM json_each(?))
         AND NOT EXISTS (SELECT 1 FROM update_access_revocation r WHERE r.key_id = g.key_id)
-      RETURNING key_id`, [evidence!, actor!, now, slot!, target!, target!]);
+      RETURNING key_id`, [evidence!, actor!, now, slot!, JSON.stringify(targets)]);
     return JSON.stringify({ slot, revoked: revoked.map((row) => row.key_id) });
   }
   throw new Error(USAGE);

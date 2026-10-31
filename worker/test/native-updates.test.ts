@@ -364,15 +364,18 @@ it("grants update access only to reviewed native Slots, one current key per Slot
   // Rotation: a newer grant supersedes the Slot's older key at once.
   await release("0.2.0", "none");
   const rotated = await updateKey();
+  await expect(runOperator(["update-access-grant", "shop/production", rotated.publicKey, at(now + DAY), "rotation", "alex"],
+    { mappings, now, query: query(stage.databases.shared), recordRevocation: async () => {} })).rejects.toThrow(/ledger/);
+  expect((await metadata(key)).status).toBe(200);
   await grant(rotated);
   expect((await metadata(key)).status).toBe(401);
   expect((await metadata(rotated)).status).toBe(200);
   const status = JSON.parse(await operator("update-access-status", "shop/production")) as { keys: { key_id: string; state: string }[] };
-  expect(status.keys.map(({ key_id: id, state }) => [id, state])).toEqual([[rotated.keyId, "active"], [key.keyId, "superseded"]]);
+  expect(status.keys.map(({ key_id: id, state }) => [id, state])).toEqual([[rotated.keyId, "active"], [key.keyId, "revoked"]]);
   expect(JSON.stringify(status)).not.toContain(TOKEN);
 });
 
-it("never revives revoked update access after a restore of the main database", async () => {
+it.each(["revocation", "rotation"])("never revives revoked update access after %s and a main database restore", async (action) => {
   await release("0.2.0", "none");
   const key = await updateKey();
   await grant(key);
@@ -380,7 +383,9 @@ it("never revives revoked update access after a restore of the main database", a
   const tables = ["update_access_grant", "update_access_revocation"];
   const image = await Promise.all(tables.map(async (table) => ({ table, rows: (await db.prepare(`SELECT * FROM ${table}`).all()).results })));
 
-  await operator("update-access-revoke", "shop/production", key.keyId, "https://github.com/Quick-Release/gq-support/issues/147", "alex");
+  if (action === "rotation") await grant(await updateKey());
+  else await operator("update-access-revoke", "shop/production", key.keyId,
+    "https://github.com/Quick-Release/gq-support/issues/147", "alex");
   // A Time Travel restore to before the revocation brings back the active grant.
   await db.batch([...tables.reverse().map((table) => db.prepare(`DELETE FROM ${table}`)),
     ...image.flatMap(({ table, rows }) => rows.map((row) => db.prepare(`INSERT INTO ${table} (${Object.keys(row).join(", ")})

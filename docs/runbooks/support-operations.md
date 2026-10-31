@@ -237,7 +237,9 @@ tooling and the Composer package instead. Commands are in the
    secret. Grant it with `update-access-grant` and an expiry of at most 400 days;
    then `wp gq-support update-check` must show the approved release.
 4. **Rotate or renew.** Run `wp gq-support update-key --rotate` and grant the new
-   key: the Slot's newest grant supersedes the old key at once. Renew before
+   key with `--ledger-database-id`: rotation first permanently revokes old keys
+   in the suppression ledger, then grants the replacement. If replacement fails,
+   use existing hosting access and retry; the old key stays revoked. Renew before
    expiry the same way; `update-access-status` and the inventory show each Slot's
    grant state and expiry.
 5. **Revoke.** `update-access-revoke <slot> <key-id|all>` with the ledger
