@@ -402,6 +402,10 @@ as Banquinha (`src/operations-api.ts`):
 - `GET /v1/operations/inventory`: the stage's [Slot inventory](#slot-inventory)
 - `GET /v1/operations/health`: [measured support-path health](#measured-health)
 
+The [independent checker's](#independent-outage-checks) probe and report under
+`/v1/operations/checker/` are not staff routes: they verify only the checker's
+own key, and no staff key verifies there.
+
 The dashboard authenticates its team member itself, then signs every request
 with its registered Ed25519 key over this canonical string, newline-separated
 without a trailing newline: `gq-support-operations-v1`, method, path/query,
@@ -468,8 +472,12 @@ page of 100, with the counts and the mark in one D1 batch. The log holds only
 GitHub's genuine deliveries, so a forged request is never counted, never routed
 and still never touches D1. While GitHub has the service in a rate-limit
 cooldown the log is read later. A `5xx` answered while D1 itself is down cannot be
-recorded then; it is counted once storage returns. Detecting a D1 or Worker
-outage while it lasts belongs to the independent checker (#139), not this phase.
+recorded then; it is counted once storage returns. A D1 or Worker outage while
+it lasts is detected by the [independent checker](#independent-outage-checks),
+not this phase. The two overlap by design: the checker's `component_unavailable`
+incident records the outage, and this phase's `webhook_failed` incident, opened
+once storage returns, records the deliveries it missed and the status repair
+they need. Each is one grouped incident, never one per tick.
 
 The 15-minute ledger rule is provisional, like any numerical rule not inherited
 from the [delivery design](../docs/support-delivery-design.md): tune it from
@@ -497,6 +505,10 @@ been recorded for any stage yet.
   cooldowns, per-Slot fairness (due Slots, never-served Slots, least recently
   served), and status freshness (tracked requests, oldest observation, refresh
   backlog, oldest sweep).
+- `independent` shows the [independent checker's](#independent-outage-checks)
+  last reported state of each component, `current` for an hour after its
+  observation and then `unknown` (`stale`), or `unknown` (`absent`) if never
+  reported. The hour is a display rule, not an objective.
 - `usage` attributes measured counts to a Client only through its reviewed
   mapping and verified credentials, and labels everything else shared and
   unestimated.
@@ -518,6 +530,84 @@ acknowledged delivery, and a resolution. Each step is `observed`/`sent` or
 local integration test proves the path with fake GitHub and Discord; it is not
 staging evidence. The staging run is gated on authorized Discord setup (see the
 [operations runbook](../docs/runbooks/support-operations.md#missed-or-broken-webhooks)).
+
+## Independent outage checks
+
+The independent checker (#139, `src/independent-checker.ts`) runs outside
+Cloudflare in the `Independent service check` GitHub Actions workflow
+(`.github/workflows/independent-check.yml`), every 5 minutes at best: GitHub
+runs schedules late at times and only from `main`. It observes each component
+separately, so an outage of one never implies another:
+
+| Component | Observed through | Failing when |
+|---|---|---|
+| `worker` | The signed probe below, from GitHub's network | No connection, timeout, a `5xx`, or an invalid answer. A `401` means the checker's key is not registered: `unknown`/`unauthorized`, not an outage |
+| `support_db`, `suppression_ledger` | The probe: each D1 answers `SELECT 1` within 2 s | It does not |
+| `restore_gate` | The probe: the [restore gate](#suppression-ledger-and-restores) | A recorded restore is not yet replayed (`pending`); `unknown` when a database is down |
+| `service_configuration` | The probe: whether the GitHub App and incident webhook secrets are set | Either is missing: the minute tick, and with it every Discord notification, cannot run |
+| `github` | `GET https://api.github.com/rate_limit` with the run's token | No connection, timeout or a `5xx`; a rate limit is `unknown`. This is GitHub's API as the runner sees it, not the App's permissions |
+| `discord` | `GET` of the stage's incident webhook, which posts nothing | No connection, `5xx`, or the webhook is gone (`destination_rejected`). A `429` is `unknown` and waited out |
+| `dashboard` | `GET` of an approved Banquinha endpoint; a redirect or refusal still answers | No connection or a `5xx`. No endpoint is approved yet (`APPROVED_DASHBOARD_ORIGINS` is empty), so it is `unknown`/`not_configured` |
+| `installation` | Nothing: WordPress is never probed, here or on page render | Never; see each Slot's [inventory](#slot-inventory) evidence instead |
+
+`unknown` is neither failure nor recovery, and quiet traffic is never observed
+at all. A failing observation opens an outage episode, extended by each later
+failure and ended by a healthy one.
+
+- **Reconciliation**: whenever the probe shows the Worker, main D1 and restore
+  gate healthy, the checker posts its observations and every episode it still
+  holds to `POST /v1/operations/checker/report`. The service records each
+  component's latest state and reconciles each episode into the component's
+  open `component_unavailable` incident (`detail` names the component), opening
+  one if none is open, with the episode's own first and last failure times.
+  An episode already recorded only extends its own incident while that stays
+  open, so a resent report, or one retried after a lost response, never opens
+  a second incident, even after the first was resolved. A reported healthy
+  component also ends its earlier episodes, including any the checker has lost
+  or expired. The claimant can resolve the incident once every episode in it has
+  ended.
+- **Notices**: while the service cannot record an episode, or records it but its
+  configuration keeps its notifier from announcing it, the checker posts its own
+  minimal notice to the stage's incident channel (stage, component, bounded
+  code, times, runbook link; no mentions) and edits it when the episode ends.
+  Once the service holds the incident, its own notifier announces it as usual:
+  expect one checker notice and one claimable incident message for a storage
+  outage. Nothing is posted through a Discord observed failing, and a Discord
+  outage itself is carried by the service's incident. A `429` defers every
+  checker request to Discord until Discord's `retry_after`, persisted across
+  runs. A lost response leaves the notice `outcome_unknown` and it is retried
+  up to 3 times, so Discord may show it twice; exactly-once is not promised.
+- **No path**: a failing episode with no confirmed notice that the service does
+  not hold and announce fails the run, so GitHub's failed-run notification is
+  the remaining signal. So does any missing or malformed checker configuration
+  or previous state; neither is ever shown as healthy.
+- **State and expiry**: the run's state (episodes, notice message IDs, the
+  Discord cooldown) and its sanitized summary are the `independent-check-<stage>`
+  artifact, kept 7 days and read by the next run from `main` only. The service
+  refuses evidence older than 7 days. An episode the service has not reconciled
+  within 7 days is dropped and listed as expired in the run summary, so follow
+  it up by hand from that run. Each run's summary is also its job summary.
+
+The probe, `GET /v1/operations/checker/probe`, is answered before the restore
+gate and records nothing of its own (like any request, it may let the gate run
+a pending ledger replay), so it works while storage is down. It returns
+only `worker`, `support_db`, `suppression_ledger`, `restore_gate`, configuration
+presence and the time, never a record, value or secret. Both checker routes need
+the checker's own signature: the operations API's wire format with label
+`gq-support-checker-v1` and `GQ-Checker-*` headers (`GQ-Checker-Run` names the
+workflow run), verified against the stage's `SUPPORT_OPERATIONS_CHECKER_KEYS`
+variable (a JSON object of key ID to base64 raw Ed25519 public key; unset or
+malformed closes both routes). The probe is signature-only, as a replay reveals
+nothing beyond those states; a report's request ID is single-use for 10
+minutes. A staff, Discord or installation identity never verifies here, and the
+checker key grants nothing else.
+
+Verification: `pnpm exec vitest run test/independent-check.test.ts` drives the
+runner against the Worker's HTTP entry over local D1, fake Discord and GitHub,
+with injected Worker, D1, ledger, restore-gate, configuration, GitHub, Discord
+and dashboard failures and a controlled clock. It is not staging evidence; see
+the [operations runbook](../docs/runbooks/support-operations.md#independent-outage-checks)
+for setup, drills and what has not been done.
 
 ## Slot inventory
 

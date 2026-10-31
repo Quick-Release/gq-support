@@ -10,7 +10,7 @@ import { SIGNALS, type SignalCategory } from "./signal-rules.ts";
  * here reminds, times out a claim or escalates: an unclaimed incident simply
  * stays visible. An incident holds no report content, identity or credential.
  */
-export type IncidentCategory = "repository_suspended" | SignalCategory;
+export type IncidentCategory = "repository_suspended" | "component_unavailable" | SignalCategory;
 export type Via = "service" | "api" | "operator";
 const RESOLUTIONS = ["recovered"] as const;
 export type Resolution = typeof RESOLUTIONS[number];
@@ -28,9 +28,14 @@ interface CategoryRule {
 const SUSPENDED: CategoryRule = { runbook: "worker/README.md#suspended-mappings",
   recovered: () => `NOT EXISTS (SELECT 1 FROM repository_state r
     WHERE r.repository_id = CAST(i.subject AS INTEGER) AND r.suspended_reason IS NOT NULL)` };
+// A component the independent checker saw failing (src/independent-check.ts): recovered once it
+// has reported every outage interval reconciled into the incident as over.
+const UNAVAILABLE: CategoryRule = { runbook: "docs/runbooks/support-operations.md#independent-outage-checks",
+  recovered: () => `NOT EXISTS (SELECT 1 FROM independent_episode e WHERE e.incident_id = i.id AND e.recovered_at IS NULL)` };
 // Read at call time: the signal rules import this module's observation.
 const ruleOf = (category: string): CategoryRule | undefined => {
   if (category === "repository_suspended") return SUSPENDED;
+  if (category === "component_unavailable") return UNAVAILABLE;
   if (!Object.hasOwn(SIGNALS, category)) return undefined;
   const signal = SIGNALS[category as SignalCategory];
   // A routed signal has recovered exactly when its own observation finds nothing for the cause (src/operational-signals.ts).
@@ -175,13 +180,14 @@ export const resolveIncident = async (db: QueryDatabase, id: string, actor: stri
     incident: project(before) };
 };
 
-/** Deletes a bounded batch of incidents resolved more than 90 days ago, with their Slots and audit. */
+/** Deletes a bounded batch of incidents resolved more than 90 days ago, with their Slots, audit and checker episodes. */
 export const expireIncidents = async (db: QueryDatabase, now: number): Promise<void> => {
   const expired = `SELECT id FROM incident WHERE state = 'resolved' AND resolved_at <= ? ORDER BY resolved_at LIMIT 100`;
   const cutoff = now - INCIDENT_RETENTION_MS;
   await db.batch([
     db.prepare(`DELETE FROM incident_slot WHERE incident_id IN (${expired})`).bind(cutoff),
     db.prepare(`DELETE FROM incident_audit WHERE incident_id IN (${expired})`).bind(cutoff),
+    db.prepare(`DELETE FROM independent_episode WHERE incident_id IN (${expired})`).bind(cutoff),
     db.prepare(`DELETE FROM incident WHERE id IN (${expired})`).bind(cutoff),
   ]);
 };

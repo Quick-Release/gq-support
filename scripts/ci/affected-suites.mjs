@@ -17,7 +17,7 @@ export const RULES = [
   // Local-only hooks and operator tools; CI never runs them on a pull request.
   { pattern: /^lefthook\.yml$|^scripts\/(phpcs-staged|pre-push-browser|sync-project-status)\.sh$|^scripts\/github-webhook-staging\.py$/, suites: [] },
   // Workflows that are not part of pull-request validation run and report on their own.
-  { pattern: /^\.github\/workflows\/(benchmark|compatibility|deploy-worker|dispatch-registry|github-app-spike|github-webhook-spike|project-status|release-plugin)\.yml$/, suites: [] },
+  { pattern: /^\.github\/workflows\/(benchmark|compatibility|deploy-worker|dispatch-registry|github-app-spike|github-webhook-spike|independent-check|project-status|release-plugin)\.yml$/, suites: [] },
   // Read only by the dependency audit, which runs on every change.
   { pattern: /^\.github\/dependency-audit-exceptions\.json$/, suites: [] },
   // Shared toolchain, the runtime matrix, the secret-scanning upload every job uses and this

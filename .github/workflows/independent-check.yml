@@ -1,0 +1,116 @@
+name: Independent service check
+
+# The independent checker (#139, worker/src/independent-checker.ts): runs outside Cloudflare, so a dead
+# Worker, D1 or dashboard need not report its own outage. See the operations runbook,
+# docs/runbooks/support-operations.md#independent-outage-checks, for setup and evidence.
+# GitHub runs schedules on the default branch only, every 5 minutes at best and sometimes late.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage and GitHub Environment to check
+        required: true
+        type: choice
+        options: [staging, prod]
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan stages
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      stages: ${{ steps.stages.outputs.stages }}
+    steps:
+      # Scheduled runs check the stages in the repository variable SUPPORT_INDEPENDENT_CHECK_STAGES,
+      # a JSON list such as ["staging"]; unset checks none. A malformed value fails the run.
+      - name: Stages
+        id: stages
+        env:
+          CONFIGURED: ${{ vars.SUPPORT_INDEPENDENT_CHECK_STAGES }}
+          REQUESTED: ${{ inputs.stage }}
+        run: |
+          node -e '
+            const requested = process.env.REQUESTED;
+            let stages;
+            try { stages = requested ? [requested] : JSON.parse(process.env.CONFIGURED || "[]"); } catch { stages = null; }
+            if (!Array.isArray(stages) || stages.some((stage) => !["staging", "prod"].includes(stage)) || new Set(stages).size !== stages.length) {
+              console.log("::error::SUPPORT_INDEPENDENT_CHECK_STAGES must be a JSON list of staging and/or prod");
+              process.exit(1);
+            }
+            if (!stages.length) console.log("::notice::No stage is enabled for the independent check: nothing is observed, which is not healthy");
+            require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, `stages=${JSON.stringify(stages)}\n`);
+          '
+
+  check:
+    name: Check ${{ matrix.stage }}
+    needs: plan
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.stages != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: ${{ fromJSON(needs.plan.outputs.stages) }}
+    environment: ${{ matrix.stage }}
+    # One run per stage at a time, so each run continues the previous run's state.
+    concurrency:
+      group: independent-check-${{ matrix.stage }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The newest unexpired state this workflow uploaded from main. A missing or unreadable state
+      # starts afresh and is reported; an artifact from any other branch is never trusted.
+      - name: Restore previous state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: independent-check-${{ matrix.stage }}
+        run: |
+          set -euo pipefail
+          mkdir -p previous
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME&per_page=20" --jq \
+            "[.artifacts[] | select(.expired == false and .workflow_run.head_branch == \"main\" and .workflow_run.repository_id == $GITHUB_REPOSITORY_ID and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)][0].workflow_run.id // empty" || true)
+          if [ -n "$run" ]; then
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "$NAME" --dir previous || echo "::warning::Previous state could not be downloaded"
+          fi
+
+      - name: Check
+        env:
+          INDEPENDENT_CHECK_STAGE: ${{ matrix.stage }}
+          INDEPENDENT_CHECK_SERVICE_URL: ${{ vars.SUPPORT_INDEPENDENT_CHECK_SERVICE_URL }}
+          INDEPENDENT_CHECK_KEY_ID: ${{ vars.SUPPORT_INDEPENDENT_CHECK_KEY_ID }}
+          INDEPENDENT_CHECK_DASHBOARD_URL: ${{ vars.SUPPORT_INDEPENDENT_CHECK_DASHBOARD_URL }}
+          # Credentials: the checker's own signing key, and the stage's existing incident webhook.
+          INDEPENDENT_CHECK_PRIVATE_KEY: ${{ secrets.SUPPORT_INDEPENDENT_CHECK_PRIVATE_KEY }}
+          DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/independent-check.ts --state previous/state.json --out ../independent-check
+
+      # The next run's state and this run's sanitized evidence, kept as long as unreconciled
+      # episodes are (EPISODE_RETENTION_MS, worker/src/independent-check.ts).
+      - uses: ./.github/actions/upload-scanned-artifact
+        if: always()
+        with:
+          name: independent-check-${{ matrix.stage }}
+          path: independent-check/
+          retention-days: 7
+          if-no-files-found: error

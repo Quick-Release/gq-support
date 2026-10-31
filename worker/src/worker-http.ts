@@ -11,22 +11,33 @@ import type { Destination } from "./notifications.ts";
 import type { StageInventory } from "./inventory.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
+import { handleProbe, handleReport, PROBE_PATH, REPORT_PATH, type ServiceOptions } from "./independent-check.ts";
 
 /** HTTP entry shared by the Alchemy adapter and request-boundary tests. */
 export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequest,
   database: Effect.Effect<CredentialDatabase, never, R>, mappings: readonly RepositoryMapping[], webhook: GitHubWebhookReceiver,
   waitUntil: (task: Promise<void>) => void, status?: StatusWebhookConfig, installation: InstallationApiOptions = {},
   operations: OperationsAccess = NO_OPERATIONS_ACCESS, notifications: readonly Destination[] = [],
-  inventory: StageInventory | null = null,
+  inventory: StageInventory | null = null, service: ServiceOptions | null = null,
 ) => Effect.gen(function* () {
   const web = HttpServerRequest.toWebResult(request);
   if (Result.isFailure(web)) return new Response(null, { status: 400 });
   const url = new URL(web.success.url);
+  if (service) {
+    const db = yield* database;
+    // The independent checker's probe answers before the restore gate, and while storage is down.
+    if (url.pathname === PROBE_PATH) return yield* Effect.promise(() => handleProbe(web.success, db, service, Date.now()));
+    // Nothing else is served until a recorded restore has been replayed (src/ledger.ts).
+    if (!(yield* Effect.promise(() => service.restored(db, service.ledger).catch(() => false)))) {
+      return Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } });
+    }
+  }
   if (url.pathname === GITHUB_WEBHOOK_PATH) {
     if (web.success.method !== "POST" || url.search) return new Response(null, { status: 404 });
     return yield* webhook(web.success, waitUntil, status);
   }
   const db = yield* database;
+  if (service && url.pathname === REPORT_PATH) return yield* Effect.promise(() => handleReport(web.success, db, service.checker, Date.now()));
   // Staff dashboards only; the installation API never answers here.
   if (url.pathname === "/v1/operations" || url.pathname.startsWith("/v1/operations/")) {
     return yield* Effect.promise(() => handleOperationsRequest(web.success, db, operations, Date.now(), notifications,

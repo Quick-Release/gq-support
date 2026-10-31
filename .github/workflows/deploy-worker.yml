@@ -57,6 +57,8 @@ jobs:
           # Public dashboard keys and opaque staff IDs; unset leaves the operations API closed.
           OPERATIONS_API_KEYS: ${{ vars.SUPPORT_OPERATIONS_API_KEYS }}
           OPERATIONS_STAFF: ${{ vars.SUPPORT_OPERATIONS_STAFF }}
+          # The independent checker's public key; unset closes its probe and report routes.
+          OPERATIONS_CHECKER_KEYS: ${{ vars.SUPPORT_OPERATIONS_CHECKER_KEYS }}
           # Discord webhook URLs are credentials, per stage environment. Unset closes that channel.
           DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL }}
           DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL }}

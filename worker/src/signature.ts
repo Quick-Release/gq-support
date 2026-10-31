@@ -50,3 +50,7 @@ export const verifySignature = async (request: Request, body: string, publicKey:
     return false;
   }
 };
+/** The independent checker's requests (src/independent-check.ts): its own label, so no staff or installation signature verifies here. */
+export const CHECKER_SIGNATURE: SignatureScheme = { label: "gq-support-checker-v1", keyId: "GQ-Checker-Key-Id",
+  principal: "GQ-Checker-Run", timestamp: "GQ-Checker-Timestamp", requestId: "GQ-Checker-Request-Id",
+  signature: "GQ-Checker-Signature" };

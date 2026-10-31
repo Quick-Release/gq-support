@@ -14,7 +14,8 @@ Routed signals and measured health are implemented (#138, [Worker README](../../
 delivery ambiguity, deadline and rejection, webhook `401`/`5xx`, status lag and
 privacy/ledger failures open grouped incidents from durable records, and
 `pnpm operator health` shows measured observations. No stage has recorded a
-baseline or tuned threshold yet.
+baseline or tuned threshold yet. The independent checker is implemented (#139, [below](#independent-outage-checks)),
+but no stage has it enabled until its setup is evidenced.
 
 ## Common procedure
 
@@ -64,8 +65,10 @@ Installation credential as Operator authority.
 
 ## Worker, D1 or Cloudflare outage
 
-- Use independently executed checks and available provider observations. Neither
-  a dead Worker nor a failed D1 can reliably persist its own incident.
+- Use the [independent checker](#independent-outage-checks)'s notice and run
+  summaries, and available provider observations. Neither a dead Worker nor a
+  failed D1 can reliably persist its own incident, and neither the CLI nor the
+  dashboard can claim one until storage returns.
 - Leave ordinary websites independent of the support outage. Before acceptance,
   preserve only the existing in-memory draft guarantees; do not promise eventual
   delivery or add a WordPress delivery outbox.
@@ -98,7 +101,8 @@ Use the documented status-health, reconciliation and repair evidence workflow.
 Webhook incidents come from GitHub's own delivery log, read each minute: a
 `401` opens `webhook_rejected`, a `5xx` or missing response `webhook_failed`.
 Forged requests are never counted. A `5xx` answered during a D1 outage is
-counted only once D1 is back; the independent checker (#139) must cover the outage.
+counted only once D1 is back; the [independent checker](#independent-outage-checks)
+covers the outage itself as a separate `component_unavailable` incident.
 
 The staging `scripts/github-webhook-staging.py break` drill must create the routed
 incident and Discord notification, then restore configuration and confirm
@@ -236,6 +240,66 @@ Discord, then replace the secret and redeploy), timestamps, opaque incident and
 request IDs, observed messages, and human sign-off. A configured secret is not
 evidence that a channel is connected until step 4 is observed.
 
+## Independent outage checks
+
+The `Independent service check` workflow runs the checker on GitHub-hosted
+runners, outside Cloudflare (see the [Worker README](../../worker/README.md#independent-outage-checks)
+for what it observes, its notices and reconciliation). It shares GitHub's
+failure domain: while GitHub Actions is down nothing runs, and the service's
+measured health shows the last observations going `stale`, never healthy.
+
+1. A GETQUICK Operator generates the stage's checker Ed25519 key pair on a
+   trusted workstation, e.g. `openssl genpkey -algorithm ed25519 -out checker.pem`;
+   the PKCS#8 DER, base64 without line breaks, is the private key and the raw
+   32-byte public key, base64, is the public key. Keep the private key out of
+   chats, issues, logs and command lines.
+2. Store the private key as the stage GitHub Environment secret
+   `SUPPORT_INDEPENDENT_CHECK_PRIVATE_KEY`, with its recoverable copy in the GQ
+   Support project of the approved secret manager, and delete the local file.
+   Set the stage variables `SUPPORT_INDEPENDENT_CHECK_KEY_ID` (e.g. `checker-staging`)
+   and `SUPPORT_OPERATIONS_CHECKER_KEYS` (`{"<key-id>":"<public-key>"}`), and
+   `SUPPORT_INDEPENDENT_CHECK_SERVICE_URL` to the stage Worker's origin from its
+   Alchemy outputs. Only `https://<name>.tipme.workers.dev` origins are accepted;
+   a custom domain needs a reviewed change first. Record the key's owner, stage,
+   location and rotation in the credential inventory by reviewed PR.
+3. The checker reuses the stage's existing `SUPPORT_DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL`
+   secret, so complete the [Discord setup](#discord-notification-setup) first.
+   Leave `SUPPORT_INDEPENDENT_CHECK_DASHBOARD_URL` unset until Banquinha's
+   endpoint is established and added to `APPROVED_DASHBOARD_ORIGINS` by reviewed PR.
+4. Run the authorized Worker deployment so it registers the public key, then
+   dispatch the workflow for the stage. If the stage Environment has required
+   reviewers or wait timers, a scheduled check would wait on them: decide its
+   protection deliberately before enabling the schedule. Then set the repository
+   variable `SUPPORT_INDEPENDENT_CHECK_STAGES` (e.g. `["staging"]`) to enable the
+   schedule.
+5. Verify: the run's summary shows every component `healthy` except `dashboard`
+   and `installation`; `GET /v1/operations/health` (or `pnpm operator health`)
+   shows `independent` components `current`; nothing was posted to Discord.
+
+Drill in staging only, never against production configuration, and only once
+the steps above are evidenced:
+
+- **Worker or D1 unavailable**: the workflow has no fault-injection input, and
+  no staging fault method is agreed yet. Review one before the drill; never
+  point it at production configuration. Then confirm one checker notice in
+  the staging incident channel, a failed run if Discord is also unavailable,
+  ordinary websites unaffected, and on recovery one `component_unavailable`
+  incident, the notice edited to recovered, and a claim and resolve.
+- **Discord outage**: rotate (delete) the staging incident webhook. Confirm the
+  checker posts nothing, the service holds a `discord` incident visible through
+  the API/CLI, and after restoring the webhook (Discord setup steps 2–3) no
+  second incident exists.
+- **Dashboard outage**: only once an endpoint is approved.
+
+Record the evidence: stage, Worker version, workflow run URLs, key ID (never the
+key), timestamps, observed component states, opaque incident IDs, Discord message
+observations and human sign-off. A local test pass is not this evidence.
+
+Not yet done for any stage: no checker key is generated or registered, no
+service URL or stage list is set, the schedule is not enabled, no run has
+executed against a real Worker, Discord destinations are not configured, no
+dashboard endpoint is approved and no drill has run.
+
 ## Drill and evidence checklist
 
 Run in staging with synthetic reports and approved credentials before production
@@ -249,7 +313,7 @@ signal/notification, recovery action, invariant checks, result and human sign-of
 | Ambiguous create and late GitHub success | 15-minute incident, 24-hour handoff, positive reconciliation and no duplicate create |
 | Credential replacement/revocation | Correct stage/Slot only, old key refused, independent update recovery still available |
 | Broken staging webhook | 401/5xx reaches incident store and Discord; `drill-verify webhook` passes; configuration restored; status repair evidence complete. Not yet run: staging Discord destinations are not configured |
-| Worker/D1 outage | Independent detection works; website requests remain independent; accepted work and incident state reconcile |
+| Worker/D1 outage | Independent detection works; website requests remain independent; accepted work and incident state reconcile into one `component_unavailable` incident. Not yet run: the [independent checker](#independent-outage-checks) is not set up for any stage |
 | D1 restore | Suppressions/revocations survive; erased text not served; stale delivered work never blindly replayed; unsafe resume refused |
 | Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused |
 | Discord/Banquinha outage | Incidents survive; CLI works when storage is healthy; notifications recover without duplicate incidents |

@@ -1,4 +1,5 @@
 import { HOUR, measuredSince } from "./operational-metrics.ts";
+import { COMPONENTS } from "./independent-check.ts";
 import { refreshEligible } from "./status-refresh.ts";
 import type { RepositoryMapping } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
@@ -50,6 +51,30 @@ const usageByClient = (mappings: readonly RepositoryMapping[], stored: readonly 
     clients: [...clients].sort(([a], [b]) => a.localeCompare(b)).map(([client, usage]) => ({ client, ...usage })),
     basis: "measured counts attributed to a Client only through its reviewed mapping and verified credentials",
     shared: "Worker requests and CPU, D1 storage and queries, scheduled ticks, webhooks and Discord delivery are shared across Clients: not attributed and not estimated",
+  };
+};
+
+/**
+ * The independent checker's last reported observation of each component
+ * (src/independent-check.ts). Current for an hour, a display rule rather than
+ * an objective since GitHub's scheduler runs it every few minutes at best;
+ * then unknown with reason `stale`, and never-reported ones `absent`. During
+ * an outage of this Worker or its D1 the checker cannot report here at all:
+ * it announces in Discord and reconciles later.
+ */
+const CHECKER_STALE_MS = HOUR;
+const independent = async (db: QueryDatabase, now: number) => {
+  const rows = (await db.prepare("SELECT component, state, code, observed_at FROM independent_component").bind()
+    .all<{ component: string; state: string; code: string; observed_at: number }>()).results;
+  const last = rows.reduce<number | null>((latest, row) => latest === null || row.observed_at > latest ? row.observed_at : latest, null);
+  return {
+    last_report_at: iso(last), stale_after_minutes: CHECKER_STALE_MS / 60_000,
+    components: COMPONENTS.map((component) => {
+      const row = rows.find((candidate) => candidate.component === component);
+      if (!row) return { component, state: null, code: null, observed_at: null, display: "unknown", reason: "absent" };
+      const observed = { component, state: row.state, code: row.code, observed_at: iso(row.observed_at) };
+      return now - row.observed_at > CHECKER_STALE_MS ? { ...observed, display: "unknown", reason: "stale" } : { ...observed, display: "current" };
+    }),
   };
 };
 
@@ -106,6 +131,7 @@ export const operationsHealth = async (db: QueryDatabase, mappings: readonly Rep
         oldest_refresh_due_at: iso(status?.oldest_due ?? null), oldest_sweep_at: iso(status?.swept ?? null) },
     },
     usage: usageByClient(mappings, stored, measured),
+    independent: await independent(db, now),
     // Aggregates are expired after 12 months (src/operational-metrics.ts); the oldest hour still kept.
     retention: { aggregate_months: 12, oldest_hour: iso(oldest?.hour ?? null) },
   };

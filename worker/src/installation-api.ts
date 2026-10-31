@@ -1,6 +1,7 @@
 import revocations from "../revocations.json";
 import type { CredentialDatabase } from "./operator.ts";
 import { mappingFor, type RepositoryMapping } from "./repository-mappings.ts";
+import { readBody } from "./request-body.ts";
 import { sha256, verifySignature } from "./signature.ts";
 import { createStorageFor, type QueryDatabase } from "./storage.ts";
 import { CREATE_BODY_BYTES, handleExport, handleSupportRequests } from "./support-requests.ts";
@@ -22,29 +23,12 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 const revocationRecords: readonly { keyId: string }[] = revocations;
 const recordedRevocation = (keyId: string) => revocationRecords.some((record) => record.keyId === keyId);
 const invalidCode = () => json({ code: "gq_support_code_not_valid", message: "Enrollment code not valid." }, 400);
+export { readBody };
+
 const rejected = () => json({ code: "gq_support_not_configured", message: "Installation rejected." }, 403);
 const binding = (key: InstallationKey, mapping: RepositoryMapping) => ({
   key_id: key.key_id, environment: mapping.environment, connected_at: new Date(key.enrolled_at).toISOString(),
 });
-
-// Streaming limit also bounds bodies without Content-Length.
-export const readBody = async (request: Request, limit: number): Promise<string | null> => {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) { await reader.cancel(); return null; }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-};
 
 const PLUGIN_VERSION = /^[0-9][A-Za-z0-9.+_-]{0,63}$/;
 

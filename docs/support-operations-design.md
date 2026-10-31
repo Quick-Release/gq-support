@@ -312,4 +312,9 @@ before onboarding, not values established by this interview.
   Webhook outcomes come from GitHub's authenticated delivery log, never from
   untrusted requests. No baseline, objective or additional threshold has been
   recorded, and the staging broken-webhook drill has not run: its Discord
-  destinations are not configured. Independent outage detection is #139.
+  destinations are not configured.
+- Independent outage detection (#139) runs on GitHub Actions, outside Cloudflare,
+  and reconciles what it saw into `component_unavailable` incidents once storage
+  returns ([Worker README](../worker/README.md#independent-outage-checks)). Its
+  state is a 7-day workflow artifact, not an incident authority. It is not set up
+  or rehearsed for any stage yet.

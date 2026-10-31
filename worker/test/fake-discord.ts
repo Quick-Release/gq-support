@@ -1,9 +1,9 @@
 /**
  * A fake Discord webhook transport (docs/support-operations-design.md): the
  * `fetch` the notification sweep calls, never the network. It keeps each
- * webhook's messages, answers execute (`POST ?wait=true`) and edit (`PATCH
- * …/messages/{id}`) like Discord's API, and lets a test script outages, rate
- * limits and lost responses.
+ * webhook's messages, answers execute (`POST ?wait=true`), edit (`PATCH
+ * …/messages/{id}`) and the read-only webhook lookup (`GET`) like Discord's
+ * API, and lets a test script outages, rate limits and lost responses.
  */
 export const webhookUrl = (id: string, token = `token-${id}-${"x".repeat(60)}`) =>
   `https://discord.com/api/webhooks/${id}/${token}`;
@@ -41,6 +41,8 @@ export const makeFakeDiscord = () => {
     const fault = faults.get(webhook!)?.shift();
     if (fault && "unreachable" in fault) throw new TypeError("fetch failed");
     if (fault && "status" in fault) return reply(fault.status, fault.body, fault.headers);
+    // Discord's webhook object includes its token; a caller must keep none of it.
+    if (method === "GET" && !messageId && !url.search) return reply(200, { id: webhook, type: 1, token: match[2] });
     const body = JSON.parse(String(init?.body)) as { content: string; allowed_mentions: unknown };
     const list = messages.get(webhook!) ?? [];
     messages.set(webhook!, list);

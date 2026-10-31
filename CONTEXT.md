@@ -105,6 +105,10 @@ The durable mapping between a Support request, its Client, Slot, verified Report
 A service failure tracked for the GETQUICK team to claim, investigate and resolve; one shared failure can affect multiple installations. It is separate from a Reporter's Support request.
 _Avoid_: Ticket, when the distinction from a Support request matters
 
+**Independent checker**:
+A scheduled check that runs outside the support service and observes its Worker, databases, GitHub, Discord and dashboard separately, so a failed component need not report its own outage. Its observations become Operational incidents only once the service can record them; it has no staff, Operator or installation authority.
+_Avoid_: Monitor, health check, when the service's own measured health is meant
+
 **Visibility scope**:
 An explicit authorization boundary defining which Support requests a Reporter may see. By default, a Reporter sees only requests they submitted; an explicitly granted Support manager scope may cover approved installations. It is independent of WordPress role names and GitHub labels.
 

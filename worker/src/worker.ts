@@ -20,6 +20,7 @@ import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
 import { restoreGate } from "./ledger.ts";
 import { operationsAccess } from "./operations-api.ts";
+import { checkerAccess } from "./independent-check.ts";
 import { DESTINATIONS, discordDestinations } from "./notifications.ts";
 import { inventoryForSlug } from "./inventory.ts";
 
@@ -55,6 +56,8 @@ export default Cloudflare.Worker(
     const operations = operationsAccess(
       yield* Config.String("OPERATIONS_API_KEYS").pipe(Config.withDefault("")),
       yield* Config.String("OPERATIONS_STAFF").pipe(Config.withDefault("")));
+    // The independent checker's public keys (src/independent-check.ts). Unset or malformed closes its probe and report.
+    const checker = checkerAccess(yield* Config.String("OPERATIONS_CHECKER_KEYS").pipe(Config.withDefault("")));
     // Status sweep cadence and bounds. Each unset or out-of-range value keeps its SWEEP_DEFAULTS entry.
     const setting = (name: string, minimum: number) => Config.Int(name).pipe(Config.option,
       Config.map(Option.filter((value) => value >= minimum)));
@@ -112,10 +115,7 @@ export default Cloudflare.Worker(
         const key = yield* Effect.promise(() => titleDigestKey ??= typeof env.GITHUB_APP_PRIVATE_KEY === "string"
           ? digestKey(env.GITHUB_APP_PRIVATE_KEY) : Promise.resolve(null));
         const ledger = yield* ledgerDatabase.raw;
-        const db = yield* database.raw;
-        if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) {
-          return HttpServerResponse.fromWeb(Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } }));
-        }
+        // The restore gate applies to every route but the independent checker's probe (src/worker-http.ts).
         const response = yield* handleWorkerRequest(request, database.raw, repositoryMappings, webhookReceiver,
           (task) => context.raw.waitUntil(task), {
             mappings: repositoryMappings, botLogin: `${slug}[bot]`,
@@ -128,7 +128,11 @@ export default Cloudflare.Worker(
             }).pipe(Effect.timeoutOption(12_000), Effect.asVoid,
               Effect.catchCause(() => Effect.logError("Support webhook status refresh failed")))),
           }, { digestKey: key, ledger }, operations, DESTINATIONS.filter((destination) => destinationsOf(env)[destination]),
-          inventoryForSlug(slug));
+          inventoryForSlug(slug), {
+            checker, ledger, restored: (db, ledger) => restored(db, ledger, Date.now()),
+            configuration: { github_app: !!clientId && !!slug && typeof env.GITHUB_APP_PRIVATE_KEY === "string",
+              operational_incidents: !!destinationsOf(env).operational_incidents },
+          });
         // A new create or status change wakes delivery at once; the minute sweep recovers a lost wake-up.
         if (request.method === "POST" && /^\/v1\/requests(?:\/[^/]+\/status)?$/.test(new URL(request.url, "https://support.invalid").pathname) &&
           response.status === 202) {
