@@ -550,6 +550,20 @@ it("a Slot unmapped without offboarding loses its contact routes 30 days after t
   expect(await routes(removed)).toEqual(["Returning route"]);
 });
 
+it("a superseded route of a mapped Slot goes 30 days after its replacement even when no Slot is unmapped", async () => {
+  const contact = (route: string) => db().prepare(`INSERT INTO slot_contact_verification (slot, route, evidence, verified_at,
+    verified_by, recorded_at) VALUES (?, ?, 'https://example.test/drill', ?, 'alex', ?)`).bind(mapping.slot, route, now, now).run();
+  const routes = async () => (await db().prepare("SELECT route FROM slot_contact_verification WHERE slot = ? ORDER BY rowid")
+    .bind(mapping.slot).all<{ route: string }>()).results.map((row) => row.route);
+  await contact("Old route");
+  advance(DAY);
+  await contact("Current route");
+  advance(30 * DAY);
+  await cleanup();
+  expect(await db().prepare("SELECT 1 FROM slot_unmapped").first()).toBeNull();
+  expect(await routes()).toEqual(["Current route"]);
+});
+
 it("an Operator erases by the issue's reporter reference, and the scheduled tick runs the cleanup", async () => {
   const request = await accept();
   const reference = `rs_${(await sha256(JSON.stringify([mapping.slot, subject]))).slice(0, 32)}`;
