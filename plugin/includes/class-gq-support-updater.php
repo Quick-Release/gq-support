@@ -29,6 +29,14 @@ if ( ! defined( 'ABSPATH' ) ) {
  * The package comes only from the configured HTTPS service, without redirects,
  * bounded in time and size, and is installed only if its SHA-256 matches the
  * approved release's.
+ *
+ * Metadata checks also sign the digest of the installed files (gq-support-update-v2),
+ * which is how GETQUICK verifies an update completed (#144); a version alone never
+ * does. Core never downgrades, so after a bad release is withdrawn the approved
+ * recovery release, an earlier verified package, is installed by `recover()`
+ * instead: only in scheduled or manual maintenance, only from the cached
+ * authenticated offer's exact verified bytes, never over a symlinked checkout,
+ * at most hourly and twice per recovery release.
  */
 final class GQ_Support_Updater {
 
@@ -44,6 +52,15 @@ final class GQ_Support_Updater {
 	public const METADATA_PATH = '/v1/updates/gq-support';
 
 	public const PACKAGE_PATH = '/v1/updates/gq-support/package';
+
+	/** The last recovery installation per recovery release: its attempts and when. */
+	public const RECOVERY_OPTION = 'gq_support_update_recovery';
+
+	/** Recovery installations of one recovery release before GETQUICK must look. */
+	public const RECOVERY_ATTEMPTS = 2;
+
+	/** The installed plugin is ~100 files; anything far beyond is not a plain package. */
+	private const MAX_FILES = 2000;
 
 	/** Maintenance asks the service at most this often, failures included. */
 	public const REFRESH_SECONDS = 3600;
@@ -207,6 +224,162 @@ final class GQ_Support_Updater {
 	}
 
 	/**
+	 * Scheduled maintenance (core's `wp_update_plugins` event): refresh the cached
+	 * offer and install an approved recovery release core will not, even when
+	 * core's own WordPress.org check failed and never asked this plugin.
+	 */
+	public static function maintain(): void {
+		if ( null === self::secret() || ! self::maintenance() ) {
+			return;
+		}
+		self::refresh( time(), false );
+		self::recover( time() );
+	}
+
+	/**
+	 * Install the cached approved recovery release when it is older than the
+	 * installed one: core's updater never downgrades. Only its exact verified
+	 * bytes, through core's own upgrader replacing the plugin directory, and only
+	 * in maintenance. Each recovery release is tried at most twice, hourly, so a
+	 * failing install never loops; the attempt is recorded before anything changes.
+	 *
+	 * @param int  $now    Epoch seconds.
+	 * @param bool $manual An Operator's WP-CLI run: not throttled, still bounded.
+	 * @return string `not_provisioned`, `not_needed`, `not_maintenance`, `symlinked_plugin`, `throttled`, `exhausted`,
+	 *                `installed`, `files_mismatch` or a `gq_support_update_*` download failure.
+	 */
+	public static function recover( int $now, bool $manual = false ): string {
+		if ( null === self::secret() ) {
+			return 'not_provisioned';
+		}
+		$offer   = self::cached();
+		$version = (string) ( $offer['version'] ?? '' );
+		if ( 'recovery' !== ( $offer['kind'] ?? null ) || '' === $version || ! is_string( $offer['files'] ?? null )
+			|| version_compare( GQ_SUPPORT_VERSION, $version, '<=' ) ) {
+			// Nothing to recover, or core's own update installs it.
+			return 'not_needed';
+		}
+		if ( ! self::maintenance() ) {
+			return 'not_maintenance';
+		}
+		$directory = WP_PLUGIN_DIR . '/' . dirname( self::basename() );
+		// A symlinked plugin directory is a development checkout, never replaced by a package.
+		if ( is_link( $directory ) ) {
+			return 'symlinked_plugin';
+		}
+		$state    = get_site_option( self::RECOVERY_OPTION, array() );
+		$same     = is_array( $state ) && ( $state['release_id'] ?? null ) === $offer['release_id'];
+		$attempts = $same ? (int) $state['attempts'] : 0;
+		if ( $attempts >= self::RECOVERY_ATTEMPTS ) {
+			return 'exhausted';
+		}
+		if ( $same && ! $manual && $now - (int) $state['at'] < self::REFRESH_SECONDS ) {
+			return 'throttled';
+		}
+		update_site_option(
+			self::RECOVERY_OPTION,
+			array(
+				'release_id' => $offer['release_id'],
+				'version'    => $version,
+				'attempts'   => $attempts + 1,
+				'at'         => $now,
+				'result'     => 'started',
+			)
+		);
+		$result = self::install_recovery( $version, (string) $offer['sha256'], (string) $offer['files'] );
+		update_site_option(
+			self::RECOVERY_OPTION,
+			array(
+				'release_id' => $offer['release_id'],
+				'version'    => $version,
+				'attempts'   => $attempts + 1,
+				'at'         => $now,
+				'result'     => $result,
+			)
+		);
+		return $result;
+	}
+
+	/**
+	 * The digest of the installed plugin's exact file set: the SHA-256 of each
+	 * `<path> NUL <sha256> LF` line, sorted by path, as the service computes it
+	 * from a package's entries. Null when the directory holds a symlink, too many
+	 * files or anything unreadable, so no partial view is ever reported.
+	 *
+	 * @param string|null $directory The plugin directory; the installed one by default.
+	 */
+	public static function installed_files( ?string $directory = null ): ?string {
+		$directory = untrailingslashit( $directory ?? WP_PLUGIN_DIR . '/' . dirname( self::basename() ) );
+		if ( ! is_dir( $directory ) || is_link( $directory ) ) {
+			return null;
+		}
+		$lines = array();
+		try {
+			$files = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $directory, FilesystemIterator::SKIP_DOTS ), RecursiveIteratorIterator::SELF_FIRST );
+			foreach ( $files as $path => $info ) {
+				if ( $info->isLink() || count( $lines ) >= self::MAX_FILES ) {
+					return null;
+				}
+				if ( $info->isFile() ) {
+					$digest = hash_file( 'sha256', $path );
+					if ( false === $digest ) {
+						return null;
+					}
+					$lines[ substr( $path, strlen( $directory ) + 1 ) ] = $digest;
+				}
+			}
+		} catch ( UnexpectedValueException $e ) {
+			return null;
+		}
+		ksort( $lines, SORT_STRING );
+		$text = '';
+		foreach ( $lines as $path => $digest ) {
+			$text .= $path . "\0" . $digest . "\n";
+		}
+		return hash( 'sha256', $text );
+	}
+
+	/**
+	 * Download the recovery package through the verified download path and let
+	 * core's upgrader replace the plugin directory with it, then check every file.
+	 *
+	 * @param string $version The recovery version.
+	 * @param string $sha256  Its package SHA-256.
+	 * @param string $files   Its files' digest.
+	 * @return string `installed`, `files_mismatch`, `install_failed` or a download failure code.
+	 */
+	private static function install_recovery( string $version, string $sha256, string $files ): string {
+		$package = self::package_url( $version, $sha256 );
+		$file    = null === $package ? self::error( 'gq_support_update_unavailable' ) : self::download( false, $package, null, array( 'plugin' => self::basename() ) );
+		if ( ! is_string( $file ) ) {
+			return is_wp_error( $file ) ? (string) $file->get_error_code() : 'gq_support_update_unavailable';
+		}
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		$network = is_multisite() && is_plugin_active_for_network( self::basename() );
+		$active  = $network || is_plugin_active( self::basename() );
+		// Core's own lock, so a concurrent maintenance run never installs twice.
+		if ( ! WP_Upgrader::create_lock( 'gq_support_recovery', 15 * MINUTE_IN_SECONDS ) ) {
+			wp_delete_file( $file );
+			return 'throttled';
+		}
+		$upgrader = new Plugin_Upgrader( new Automatic_Upgrader_Skin() );
+		// A local, already verified archive: core reads it directly, and the plugin directory is replaced.
+		$result = $upgrader->install( $file, array( 'overwrite_package' => true ) );
+		WP_Upgrader::release_lock( 'gq_support_recovery' );
+		wp_delete_file( $file );
+		wp_clean_plugins_cache();
+		if ( true !== $result ) {
+			return 'install_failed';
+		}
+		if ( $active && ! is_plugin_active( self::basename() ) ) {
+			activate_plugin( self::basename(), '', $network, true );
+		}
+		return self::installed_files() === $files ? 'installed' : 'files_mismatch';
+	}
+
+	/**
 	 * This installation's update key ID and public key, generating the key if
 	 * there is none or `$rotate`. GETQUICK grants it to this Slot; never the secret.
 	 *
@@ -254,20 +427,30 @@ final class GQ_Support_Updater {
 	 * @param int|null    $timestamp  Epoch seconds; now, except in fixtures.
 	 * @param string|null $request_id A single-use ID; a fresh UUID, except in fixtures.
 	 * @param string      $version    The installed version the request claims.
+	 * @param string|null $files      The installed files' digest, signed as `gq-support-update-v2`; null signs v1.
 	 * @return array<string, string>
 	 */
-	public static function headers( string $path, string $grant, string $secret, ?int $timestamp = null, ?string $request_id = null, string $version = GQ_SUPPORT_VERSION ): array {
-		$headers                        = array(
+	public static function headers( string $path, string $grant, string $secret, ?int $timestamp = null, ?string $request_id = null, string $version = GQ_SUPPORT_VERSION, ?string $files = null ): array {
+		$headers = array(
 			'GQ-Update-Key-Id'            => self::key_id( $secret ),
 			'GQ-Update-Installed-Version' => $version,
 			'GQ-Update-Grant'             => $grant,
-			'GQ-Update-Timestamp'         => (string) ( $timestamp ?? time() ),
-			'GQ-Update-Request-Id'        => $request_id ?? wp_generate_uuid4(),
-			'Content-Digest'              => GQ_Support_Signer::digest( '' ),
+		);
+		if ( null !== $files ) {
+			$headers['GQ-Update-Installed-Files'] = $files;
+		}
+		$headers                       += array(
+			'GQ-Update-Timestamp'  => (string) ( $timestamp ?? time() ),
+			'GQ-Update-Request-Id' => $request_id ?? wp_generate_uuid4(),
+			'Content-Digest'       => GQ_Support_Signer::digest( '' ),
 		);
 		$canonical                      = implode(
 			"\n",
-			array( 'gq-support-update-v1', 'GET', $path, $headers['GQ-Update-Key-Id'], $version, $grant, $headers['GQ-Update-Timestamp'], $headers['GQ-Update-Request-Id'], $headers['Content-Digest'] )
+			array_merge(
+				array( null === $files ? 'gq-support-update-v1' : 'gq-support-update-v2', 'GET', $path, $headers['GQ-Update-Key-Id'], $version, $grant ),
+				null === $files ? array() : array( $files ),
+				array( $headers['GQ-Update-Timestamp'], $headers['GQ-Update-Request-Id'], $headers['Content-Digest'] )
+			)
 		);
 		$headers['GQ-Update-Signature'] = GQ_Support_Signing_Key::encode( sodium_crypto_sign_detached( $canonical, $secret ) );
 		return $headers;
@@ -345,10 +528,12 @@ final class GQ_Support_Updater {
 		if ( null === $base ) {
 			return new WP_Error( 'gq_support_not_configured' );
 		}
+		// A metadata check reports what is installed, so GETQUICK can verify the update it offered.
+		$files    = self::METADATA_PATH === $path ? self::installed_files() : null;
 		$response = wp_safe_remote_get(
 			$base . $path,
 			array(
-				'headers'             => array( 'Accept' => null === $file ? 'application/json' : 'application/zip' ) + self::headers( $path, $grant, $secret ),
+				'headers'             => array( 'Accept' => null === $file ? 'application/json' : 'application/zip' ) + self::headers( $path, $grant, $secret, null, null, GQ_SUPPORT_VERSION, $files ),
 				'timeout'             => null === $file ? 10 : 60,
 				'redirection'         => 0,
 				'sslverify'           => true,
@@ -392,6 +577,8 @@ final class GQ_Support_Updater {
 		if ( ! is_array( $release ) || ! is_array( $grant ) || ! is_int( $release['release_id'] ?? null )
 			|| ! is_string( $release['version'] ?? null ) || ! preg_match( self::VERSION, $release['version'] )
 			|| ! is_string( $release['package_sha256'] ?? null ) || ! preg_match( '/^[a-f0-9]{64}\z/', $release['package_sha256'] )
+			|| ! in_array( $release['kind'] ?? 'production', array( 'production', 'recovery' ), true )
+			|| ! ( null === ( $release['files_sha256'] ?? null ) || ( is_string( $release['files_sha256'] ) && preg_match( '/^[a-f0-9]{64}\z/', $release['files_sha256'] ) ) )
 			|| ( $release['package_path'] ?? null ) !== self::PACKAGE_PATH . '?version=' . rawurlencode( $release['version'] ) . '&sha256=' . $release['package_sha256']
 			|| ! is_string( $grant['token'] ?? null ) || ! preg_match( '/^[A-Za-z0-9_-]{43}\z/', $grant['token'] )
 			|| ! is_string( $grant['expires_at'] ?? null ) || ! preg_match( self::ISO_TIME, $grant['expires_at'] ) ) {
@@ -401,6 +588,8 @@ final class GQ_Support_Updater {
 			'release_id'    => $release['release_id'],
 			'version'       => $release['version'],
 			'sha256'        => $release['package_sha256'],
+			'kind'          => $release['kind'] ?? 'production',
+			'files'         => $release['files_sha256'] ?? null,
 			'grant'         => $grant['token'],
 			'grant_expires' => (int) strtotime( $grant['expires_at'] ),
 			'auto_update'   => $data['auto_update'],

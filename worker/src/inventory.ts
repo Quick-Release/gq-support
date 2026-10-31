@@ -1,6 +1,7 @@
 import { stageForSlug, type DeployedStage, type RepositoryMapping } from "./repository-mappings.ts";
 import type { QueryDatabase } from "./storage.ts";
-import { releaseSummary, type ReleaseEnforcement } from "./release-policy.ts";
+import { offeredRelease, releaseSummary, type ReleaseEnforcement } from "./release-policy.ts";
+import { rolloutStatus } from "./fleet-rollout.ts";
 
 /**
  * Reviewed, non-secret references for one deployed stage: the Cloudflare account
@@ -178,6 +179,9 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
       at: new Date(row.finished_at ?? row.started_at).toISOString() } : null;
   };
   const releases = await releaseSummary(db, release);
+  // The dispatched release's rollout (src/fleet-rollout.ts): each Slot's verified outcome, apart from versions.
+  const offered = await offeredRelease(db);
+  const rollout = offered && await rolloutStatus(db, mappings, offered.sequence, now);
   const latest = [...recorded, ...signed, ...served, ...central];
   // The approved release is every Slot's desired version, unless a later Slot-specific record says otherwise.
   // Its dispatch is policy intent: never an attempt or observation of any one installation.
@@ -208,6 +212,9 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
   return {
     stage: inventory && { name: inventory.stage, account: inventory.account, resources: inventory.resources },
     release: releases,
+    fleet: rollout && { release_id: rollout.release_id, version: rollout.version, kind: rollout.kind, dispatched_at: rollout.dispatched_at,
+      compatibility_expires_at: rollout.compatibility_expires_at, previous_window: rollout.previous_window, converged: rollout.converged,
+      counts: Object.fromEntries(Object.entries(rollout.counts).filter(([, count]) => count > 0)) },
     slots: mappings.map((mapping) => ({
       slot: mapping.slot, client: mapping.client, project: mapping.project, environment: mapping.environment,
       repository: { id: mapping.repositoryId, name: mapping.repository ?? null, app_installation_id: mapping.githubInstallationId ?? null },
@@ -217,6 +224,8 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
       update: update(find(mapping.slot, "attempted"), find(mapping.slot, "observed"), find(mapping.slot, "failed")),
       update_access: updateAccess(mapping.slot),
       central_deployment: centralDeployment(mapping.slot),
+      rollout: (({ state, reason, verified_at }) => ({ state, reason, verified_at }))(rollout?.slots.find((slot) => slot.slot === mapping.slot)
+        ?? { state: "none", reason: null, verified_at: null }),
       contact: contact(mapping.slot),
     })),
     credentials: credentialCustody(inventory, now, { restricted }),

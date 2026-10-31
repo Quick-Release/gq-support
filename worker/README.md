@@ -689,14 +689,15 @@ the procedure.
   never approved by being recorded.
 - An **approval** names the approved release the Operator expects (`none` for
   the first), so a concurrent approval loses. `production` needs a version never
-  approved and, after the first, the approved release's recorded dispatch;
-  `recovery` re-approves an earlier approved package as the temporary approved
-  release. The Worker must serve its contract version. The previous approved
-  release is the one it replaced.
-- A **dispatch** is recorded once for the approved release, from its dispatch
-  evidence and actual time (no later than now, not before approval). The
-  previous release's 24-hour window runs from it; before it, the previous release
-  is still accepted. Nothing infers a dispatch.
+  approved and, after the first, the approved release's recorded dispatch. The
+  Worker must serve its contract version. The previous approved release is the
+  one it replaced. A `recovery` approval is made only by `release-withdraw`
+  ([fleet rollout](#fleet-rollout-and-recovery)).
+- A **dispatch** is recorded once for the approved release, only by
+  `fleet-launch` or `release-withdraw` at the actual start of distribution, after
+  the release's gates and deployment evidence check out. The previous release's
+  24-hour window runs from it; before it, the previous release is still accepted.
+  Nothing infers a dispatch, and no typed time or reference records one.
 - Every record is one append in a single statement, carrying its actor, time and
   evidence: its own audit row, never edited. No report content, Reporter ID or
   secret is stored. Release decisions touch no key, suppression or intent, so a
@@ -712,8 +713,7 @@ the procedure.
 ```sh
 pnpm operator release-status --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator release-candidate <artifact-directory> <worker-commit> <contract-version> <schema-from>-<schema-to> <signed|unsigned-legacy> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator release-approve <package-version> <production|recovery> <expected-current-release-id|none> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
-pnpm operator release-dispatch <release-id> <dispatched-at> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator release-approve <package-version> production <expected-current-release-id|none> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
 
 `artifact-directory` holds the downloaded `gq-support.zip`,
@@ -744,7 +744,10 @@ the routes.
   once its dispatch is recorded, and a 15-minute download grant) and the package
   download with that grant. Signed requests use their own `gq-support-update-v1`
   scheme and replay table; no installation signature verifies there, and no
-  update signature verifies anywhere else.
+  update signature verifies anywhere else. A plugin from #144 signs metadata
+  checks as `gq-support-update-v2`, which adds the digest of its installed files
+  (`GQ-Update-Installed-Files`): the only native evidence that verifies an update.
+  The offer names the release's `kind` and its verified `files_sha256`.
 - **Package bytes.** The Worker reads the approved version's `gq-support.zip`
   from the private repository's GitHub Release with the narrow
   `UPDATE_PACKAGE_TOKEN` secret (`src/package-source.ts`): the token goes only to
@@ -755,7 +758,8 @@ the routes.
   the stage Environment's `SUPPORT_UPDATE_PACKAGE_TOKEN` and removes it when unset.
 - **Inventory.** A served package is `attempted` (source `native-update`); the
   installed version the next signed check reports is `observed`. Staff see each
-  Slot's grant state and expiry, never a key.
+  Slot's grant state and expiry, never a key. A signed files digest is kept per
+  Slot (migration 0030), at most hourly unless it changes.
 
 ```sh
 pnpm operator update-access-status <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
@@ -774,7 +778,10 @@ submission disabled or the Installation credential revoked.
 
 - **Targets.** `stageCentralTargets` lists each Slot's reviewed runner (such as
   `ssh -o BatchMode=yes <alias>`), WP-CLI with its `--path`, the installed plugin
-  directory and an upload directory. Every token must be a shell-safe literal,
+  directory, an upload directory and its deployment `source`. Only
+  `plugin-directory`, where the installed files are what persists, is applied: a
+  `composer` site would reinstall its locked version on its own next deployment,
+  and no reviewed adapter updates that lock, so it is refused and shows blocked. Every token must be a shell-safe literal,
   because ssh joins its arguments into a remote command. The runner
   authenticates with the Operator's own configuration and agent; no credential,
   host secret or URL belongs in the file, and none is printed or recorded. No
@@ -810,6 +817,76 @@ submission disabled or the Installation credential revoked.
 pnpm operator central-apply <slot> <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator central-status <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```
+
+## Fleet rollout and recovery
+
+One approved release is dispatched to every eligible Slot together, and each
+Slot's outcome is tracked and verified on its own (#144, ADR 0021,
+`src/fleet-rollout.ts`, `src/release-gates.ts`, migration 0030); the
+[runbook](../docs/runbooks/support-operations.md#fleet-rollout-and-recovery) has
+the procedure. There are no canary cohorts and no per-installation approvals.
+
+- **Gates** (`release-verify`). From GitHub's own records, read with the
+  Operator's `gh` login, never typed in: the candidate's release workflow run
+  (named by its provenance) at the release commit for `package` and
+  `compatibility` (installed-package cells and pre-release compatibility); CI on
+  `main` at that commit for `security` (secret scan, dependency audit, PHPCS and
+  PHPStan), `privacy` (the Worker suite and required validation) and
+  `performance` (asset size gate); and the gated staging deployment of the
+  candidate's Worker commit for `staging`. Every gate passes or nothing is
+  recorded, and the refusal names each failure. The digest of the candidate's
+  files is computed from its exact bytes.
+- **Launch** (`fleet-launch`). Needs the recorded gates for the approved bytes;
+  the gated deployment of the release's Worker commit to this stage, with its
+  safe plan and apply record (`infrastructure`; the plan digest covers protected
+  resource identities and planned actions at that commit, not every
+  configuration value, and the recorded evidence says so); the live migration
+  state from `__alchemy_migrations`, which must be a gapless run of reviewed
+  migrations with their checksums inside the release's tested range; and a
+  compatible recovery package: the previous approved release, unless a recorded
+  rollback boundary gave it up. Destructive migrations after 0029 need such a
+  boundary. Each refusal lists what is missing. The launch and then the dispatch
+  are one conditional statement each; the dispatch time is the actual start.
+- **Status** (`fleet-status`, and `fleet` in `GET /v1/operations/inventory`).
+  Per Slot: `verified` only when the installed files are exactly the release's
+  (a central read-back of every file, or a native signed files digest); `failed`
+  for a confirmed mismatch; `unknown` for a lost or abandoned central outcome, a
+  native version signed without its files, or a Slot silent for 24 hours;
+  `attempted`, `applying`, `pending`, `unreachable`; `blocked` with why (no
+  deployment method, a manual install, no update access, no or an unsupported
+  central target); `offboarded` Slots are out of scope. `converged` needs every
+  in-scope Slot verified. The previous release's window state is shown.
+- **Central runs** (`fleet-run`). Applies the release to due central Slots, four
+  at a time, through the central adapter. An `unknown` or abandoned application
+  is reconciled by read-back only, never reinstalled blindly; a Slot with three
+  possibly-applied attempts is left for an Operator. Once an application finishes
+  with the release no longer approved, no further one starts.
+- **Withdrawal** (`release-withdraw`). Approves an earlier package as `recovery`
+  only if it passed its gates, was launched before, was never withdrawn, its
+  contract is served and the live schema is compatible with it (no live
+  destructive migration past its tested range, not below a rollback boundary);
+  then launches it. From that statement on, the bad release is neither offered
+  nor served. Nothing reverses a migration or restores D1: an incompatible
+  rollback is refused, and recovery is forward repair.
+- **Rollback boundary** (`release-boundary`). Recorded only once every in-scope
+  Slot verified the dispatched release and the previous release's window ended.
+- **Incidents.** `release_update_failed` groups confirmed failures of the
+  dispatched release by release; `release_migration_failed` is the last
+  Operator read of the live migration state not being `ok`. Unknown and
+  unreachable Slots are not alerted as failures. They follow the existing
+  grouping, claim and notification rules, with no reminders or escalation.
+
+```sh
+pnpm operator release-verify <package-version> <artifact-directory> <ci-run-id> <staging-deploy-run-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator fleet-launch <release-id> <deploy-run-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator fleet-status [release-id] --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator fleet-run <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator release-withdraw <release-id> <recovery-version> <deploy-run-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator release-boundary <release-id> <schema-floor> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+```
+
+The commands need `gh` logged in with read access to the repository's Actions,
+and a clean checkout: the reviewed migrations must match `migrations/checksums.txt`.
 
 ## Discord notifications
 

@@ -167,10 +167,12 @@ and rehearsed before this procedure is considered executable production recovery
 
 - Halt distribution of the bad release and inspect every targeted installation;
   there is no canary cohort to limit impact. Restore the previous verified
-  package automatically only when compatible with live data/API.
-- Mark the recovery package approved so automatic updates cannot loop back to the
-  withdrawn version. Do not reverse migrations or restore the shared database as
-  an automatic plugin rollback. Use forward repair or the separate restore path.
+  package automatically only when compatible with live data/API, with
+  `release-withdraw` ([fleet rollout and recovery](#fleet-rollout-and-recovery)).
+- Withdrawal approves the recovery package so automatic updates cannot loop back
+  to the withdrawn version. Do not reverse migrations or restore the shared
+  database as an automatic plugin rollback. Use forward repair or the separate
+  restore path.
 - For a broken local UI use `GQ_SUPPORT_DISABLED` or deactivate the plugin through
   existing admin/hosting access, per [outage recovery](../research/outage-draft-recovery.md)
   and #67. Implementation must be verified before relying on that constant.
@@ -190,14 +192,15 @@ Record only what reviewed artifacts and run evidence show.
    `provenance.json`. Record the candidate with the commit of the Worker deployed
    with it, the contract version and schema migration range its checks covered,
    and `signed` (or `unsigned-legacy` for a package before #141).
-2. After the release gates pass, approve it as `production`, naming the approved
-   release from `release-status`. Deploy the backward-compatible Worker first.
-3. When the fleet dispatch actually happens, record it with its time and evidence.
+2. Record its gates with `release-verify`, then approve it as `production`,
+   naming the approved release from `release-status`. Deploy the
+   backward-compatible Worker and its additive migrations first.
+3. Launch it with `fleet-launch`: the dispatch is recorded at that actual start.
    The previous release keeps new intake for 24 hours from that time, then gets
    426 at the service, and WordPress closes new reports itself once its cached
    policy says so. Unreachable sites stay `unknown` in the inventory.
-4. For a bad release, approve the earlier verified compatible package as
-   `recovery`, then record its dispatch. Accepted work, revocations and
+4. For a bad release, `release-withdraw` it to the earlier verified compatible
+   package, which dispatches that as `recovery`. Accepted work, revocations and
    suppressions are untouched.
 5. A stage starts `staged`. Switch it to `enforced` in `stageReleaseEnforcement`
    by reviewed PR only after its first approval and dispatch are recorded and
@@ -255,8 +258,12 @@ promise prompt completion. Serving a package records `attempted`; the next signe
 metadata check from the new version records `observed`. Neither alone is a
 completed update. A recovery approval withdraws the bad release at once: the
 service refuses its download (410) and offers only the approved package. Core
-does not downgrade through its updater, so installations already running a newer
-withdrawn release need the recovery path in #144.
+does not downgrade through its updater, so the plugin installs an approved
+recovery release older than the installed one itself, from core's scheduled
+update event or `wp gq-support update-recover` (#144): the exact verified bytes,
+never over a symlinked checkout, at most hourly and twice per recovery release.
+Metadata checks sign the installed files' digest, which is what verifies a native
+update; a plugin before #144 signs only its version and stays `unknown`.
 
 ## Central deployment
 
@@ -290,10 +297,61 @@ repository; collect them through the implementation workflow, never guess them.
    downgrade outside a recovery approval, a newer approval). `central-status`
    lists recent outcomes; an `abandoned` record may have changed the installation,
    so verify it with another run.
-4. **Recovery.** Approve the earlier verified compatible package as `recovery`,
-   record its dispatch, then apply it: only a recovery approval downgrades.
+4. **Recovery.** `release-withdraw` the bad release to the earlier verified
+   compatible package, then `fleet-run` it: only a recovery approval downgrades.
    Report-key revocation, `GQ_SUPPORT_DISABLED` and disconnecting do not affect
    this path; offboarding does, and refuses further applications.
+
+## Fleet rollout and recovery
+
+Commands are in the [Worker README](../../worker/README.md#fleet-rollout-and-recovery).
+Run them from a clean, reviewed checkout with `gh` logged in; every gate and
+deployment check reads GitHub's own run records, so nothing is typed in as proof.
+No release has been gated, launched or withdrawn for any stage yet.
+
+1. **Gates.** After the release workflow run, CI on `main` and the gated staging
+   deployment of the candidate's Worker commit have passed, run
+   `release-verify <version> <artifact-dir> <ci-run> <staging-deploy-run> <actor>`.
+   A refusal lists each failed gate; fix the cause and run new checks, never edit
+   records. Then approve the release.
+2. **Compatible Worker first.** Deploy the release's Worker commit to the stage
+   through the plan gate. Its migrations must be additive; a destructive one needs
+   a recorded rollback boundary (step 6) first.
+3. **Launch.** `fleet-launch <release-id> <deploy-run> <actor>` dispatches the
+   release to every Slot together. It refuses, listing what is missing, without
+   the gates, a safe applied deployment of that commit, a reviewed live migration
+   state inside the release's range, or a compatible recovery package. The
+   previous release's 24 hours run from the launch.
+4. **Converge.** Native Slots update from WordPress cron; run
+   `fleet-run <release-id> <artifact-dir> <actor>` for central ones, again after
+   unreachable hosts return. `fleet-status` shows each Slot. Only `verified`
+   counts: `unknown` (lost or abandoned outcome, version without files, silent for
+   a day), `unreachable` and `blocked` need follow-up through hosting or admin
+   access, never page-render checks. A `release_update_failed` incident lists
+   confirmed failures; claim it, investigate and resolve once the Slots verify.
+   After three possibly-applied attempts on one Slot, `fleet-run` leaves it to you.
+5. **Withdraw.** For a bad release, `release-withdraw <release-id> <recovery-version>
+   <deploy-run> <actor>`. Distribution of the bad release stops at once and the
+   recovery package is dispatched. It refuses a package that was never verified
+   and launched, was itself withdrawn, or is incompatible with the live contract
+   or schema: then repair forward or use the [D1 restore procedure](#d1-restore-or-corrupting-migration);
+   never reverse migrations. Inspect every Slot: all may have installed the bad
+   release. Native Slots install the recovery package themselves; `fleet-run` the
+   recovery release for central ones.
+6. **Rollback boundary.** Before a migration removes structures, once every Slot
+   verified the dispatched release and its previous release's window ended, record
+   `release-boundary <release-id> <schema-floor> <actor>`. Earlier packages are then
+   no longer recovery candidates.
+7. **Migration failure.** A `release_migration_failed` incident means the live
+   migration record was unreadable, unreviewed or differed from its checksum when
+   an Operator command read it. Stop launches, compare with `migrations/checksums.txt`
+   and repair forward; a later `ok` read resolves it.
+
+Composer-managed central targets are refused and shown blocked: no reviewed
+adapter updates their locked version, and a bare package install would be
+reverted by the site's next deployment. Stage evidence for the staging drill:
+`release-verify`, `fleet-launch`, `fleet-status` before and after convergence,
+`release-withdraw` and the recovered status, with the incident IDs raised.
 
 ## Inventory and credential custody
 
@@ -506,7 +564,7 @@ signal/notification, recovery action, invariant checks, result and human sign-of
 | Broken staging webhook | 401/5xx reaches incident store and Discord; `drill-verify webhook` passes; configuration restored; status repair evidence complete. Not yet run: staging Discord destinations are not configured |
 | Worker/D1 outage | Independent detection works; website requests remain independent; accepted work and incident state reconcile into one `component_unavailable` incident. Not yet run: the [independent checker](#independent-outage-checks) is not set up for any stage |
 | D1 restore | Suppressions/revocations survive; erased text not served; stale delivered work never blindly replayed; unsafe resume refused |
-| Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused. Central deployment's adapter is exercised only on the disposable test site (`package.sh central`): no reviewed central target exists for any stage |
+| Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused. Exercised locally only (`worker/test/fleet-rollout.test.ts`, `package.sh native` and `central` on the disposable test site): no gate, launch, central target or native grant exists for any stage, so the staging drill has not run |
 | Release window | Previous release accepted until exactly 24 hours after recorded dispatch, then 426 at the service; WordPress closes new reports from its cached policy; accepted retries replay; production `enforced` |
 | Discord/Banquinha outage | Incidents survive; CLI works when storage is healthy; notifications recover without duplicate incidents |
 | Local fail-safe and Client contact | Disable/re-enable through hosting/admin access; separate-device independent contact verified |

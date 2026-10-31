@@ -6,9 +6,9 @@
  * WordPress.org is answered or refused unrecorded: core's own checks are not the plugin's.
  *
  * The network option `native_update_test` configures it: the next release's ZIP
- * (relative to ABSPATH), version and SHA-256, a `mode` (ok, corrupt, expired-once,
- * withdrawn, unauthorized) and `disabled`, which sets GQ_SUPPORT_DISABLED before
- * the plugin loads.
+ * (relative to ABSPATH), version and SHA-256, its `kind` (production or recovery)
+ * and verified `files` digest, a `mode` (ok, corrupt, expired-once, withdrawn,
+ * unauthorized) and `disabled`, which sets GQ_SUPPORT_DISABLED before the plugin loads.
  *
  * @package GQ_Support
  */
@@ -46,6 +46,7 @@ function gq_support_native_update_test_service( $pre, $args, $url ) {
 		'context'       => wp_doing_cron() ? 'cron' : ( defined( 'WP_CLI' ) && WP_CLI ? 'cli' : 'web' ),
 		'key'           => $headers['GQ-Update-Key-Id'] ?? null,
 		'grant'         => $headers['GQ-Update-Grant'] ?? null,
+		'files'         => $headers['GQ-Update-Installed-Files'] ?? null,
 		'authorization' => isset( $headers['Authorization'] ),
 		'report_key'    => isset( $headers['GQ-Support-Key-Id'] ),
 		'redirection'   => $args['redirection'] ?? null,
@@ -77,6 +78,8 @@ function gq_support_native_update_test_service( $pre, $args, $url ) {
 						'release'     => array(
 							'release_id'     => 7,
 							'version'        => $config['version'],
+							'kind'           => $config['kind'] ?? 'production',
+							'files_sha256'   => $config['files'] ?? null,
 							'package_sha256' => $config['sha256'],
 							'package_path'   => GQ_Support_Updater::PACKAGE_PATH . '?version=' . rawurlencode( $config['version'] ) . '&sha256=' . $config['sha256'],
 						),

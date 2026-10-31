@@ -117,6 +117,25 @@ _Avoid_: Release, when approval has not been recorded
 The one plugin release an Operator explicitly approved for production, as an immutable record with its package, Worker commit, contract and schema range, previous approved release and recorded fleet dispatch. A verified earlier package re-approved after a bad release is a temporary recovery release.
 _Avoid_: Latest version, when an unapproved newer candidate exists
 
+**Release gates**:
+The package, compatibility, security, privacy, performance and staging checks a Release candidate must pass, read from GitHub's own workflow run records at its exact release and Worker commits, never typed in. Infrastructure and recovery are checked again at launch.
+_Avoid_: Sign-off, when only a person's statement is meant
+
+**Fleet launch**:
+The single dispatch of an Approved release to every eligible Slot together, recorded at its actual start once its gates, the compatible Worker's gated deployment, the live migration state and a compatible recovery package check out. It starts the Compatibility window; it is not any installation's update.
+_Avoid_: Rollout complete, deployment, when completion is meant
+
+**Verified update**:
+A Slot whose installed plugin files are exactly an Approved release's, shown by a central read-back of every file or a native installation's signed files digest. A dispatch, an attempt or a matching version alone is not one; an unreachable or silent Slot is unknown.
+_Avoid_: Updated, observed, when only a version was seen
+
+**Withdrawn release**:
+An Approved release replaced by a recovery release after it proved bad. It is never offered, served, re-approved or recovered to again. Recovery uses only an earlier package that passed its Release gates, was launched before and is compatible with the live contract and schema; otherwise the service is repaired forward, never by reversing migrations.
+_Avoid_: Rolled back, when the schema is meant
+
+**Rollback boundary**:
+A recorded schema migration from which packages verified only against older schemas stop being recovery candidates, recorded only after every Slot verified the current release and its previous release's window ended. Only past it may a migration remove structures.
+
 **Update grant**:
 An Operator's grant of one native installation's update key to its Slot, until an expiry, letting it read only the Approved release's metadata and package bytes through WordPress's own updater. It is separate from the Installation credential, so disabling submissions or revoking that credential leaves updates working; it never authorizes reports, another Slot or an Operator. A newer grant supersedes the Slot's older key; revocation is permanent.
 _Avoid_: Licence key, API key, update token

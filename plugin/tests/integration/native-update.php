@@ -36,13 +36,15 @@ $gq_support_upgrade   = static function () use ( $gq_support_basename ) {
 
 switch ( $gq_support_scenario ) {
 	case 'serve':
-		// The next release ZIP (relative to ABSPATH) and its version: what the service would offer.
+		// The next release ZIP (relative to ABSPATH) and its version, kind and files digest: what the service would offer.
 		update_site_option(
 			'native_update_test',
 			array(
 				'zip'     => $args[1],
 				'version' => $args[2],
 				'sha256'  => hash_file( 'sha256', ABSPATH . $args[1] ),
+				'kind'    => $args[3] ?? 'production',
+				'files'   => $args[4] ?? null,
 				'mode'    => 'ok',
 				'calls'   => array(),
 			)
@@ -183,6 +185,29 @@ switch ( $gq_support_scenario ) {
 		}
 		break;
 
+	case 'recovered':
+		// A new process after maintenance installed the recovery release core would not: exactly its files, still active.
+		$gq_support_recovery = (array) get_site_option( GQ_Support_Updater::RECOVERY_OPTION, array() );
+		if ( GQ_SUPPORT_VERSION !== $args[1] || GQ_Support_Updater::installed_files() !== $args[2] || 'installed' !== ( $gq_support_recovery['result'] ?? null ) ) {
+			$gq_support_fail( 'The recovery release is not installed exactly: ' . wp_json_encode( $gq_support_recovery ) );
+		}
+		if ( is_link( WP_PLUGIN_DIR . '/gq-support' ) || ! is_plugin_active( $gq_support_basename ) || ! GQ_Support_Updater::status()['provisioned'] ) {
+			$gq_support_fail( 'The recovery did not leave the installed copy active and provisioned.' );
+		}
+		if ( $gq_support_leftovers() ) {
+			$gq_support_fail( 'The recovery left temporary files: ' . implode( ', ', $gq_support_leftovers() ) );
+		}
+		// Asked only by maintenance, and every metadata check signed what was installed.
+		foreach ( $gq_support_calls as $gq_support_call ) {
+			if ( 'web' === $gq_support_call['context'] ) {
+				$gq_support_fail( 'A page asked the service during recovery.' );
+			}
+			if ( str_ends_with( $gq_support_call['url'], GQ_Support_Updater::METADATA_PATH ) && ! preg_match( '/^[a-f0-9]{64}$/', (string) $gq_support_call['files'] ) ) {
+				$gq_support_fail( 'A metadata check did not sign its installed files.' );
+			}
+		}
+		break;
+
 	case 'cleanup':
 		if ( isset( $gq_support_config['saved_state'] ) ) {
 			update_option( GQ_Support_State::OPTION, $gq_support_config['saved_state'], false );
@@ -193,6 +218,7 @@ switch ( $gq_support_scenario ) {
 		delete_site_option( 'native_update_test' );
 		delete_site_option( GQ_Support_Updater::OFFER_OPTION );
 		delete_site_option( GQ_Support_Updater::KEY_OPTION );
+		delete_site_option( GQ_Support_Updater::RECOVERY_OPTION );
 		delete_site_transient( 'update_plugins' );
 		break;
 

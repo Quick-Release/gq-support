@@ -157,6 +157,24 @@ discard an accepted request when restricting new intake.
    and the approved recovery path no longer requires them. Unreachable/stale sites
    do not count as confirmed. Record the new rollback boundary before cleanup.
 
+Implemented in #144 ([runbook](runbooks/support-operations.md#fleet-rollout-and-recovery)):
+release gates read from GitHub's own workflow run records at the candidate's
+release and Worker commits, never typed-in results; a fleet launch that needs
+them, the gated deployment of the release's Worker commit to the stage, a live
+migration state of reviewed migrations within the release's tested range and a
+compatible recovery package, and records the dispatch at its actual start; per-Slot
+outcomes in which only the installed files (a central read-back, or the native
+plugin's signed files digest) verify an update; a bounded central coordinator
+that reconciles unknown applications by read-back before any reinstall;
+withdrawal to a previously verified, launched package compatible with the live
+contract and schema, refusing otherwise; a guarded native recovery installer for
+the downgrade core will not do; a rollback boundary recorded only after verified
+convergence; and `release_update_failed`/`release_migration_failed` incidents.
+Not yet established: any real gate, deployment or launch record; a credentialed
+production plan and its reviewer's sign-off; staged update and rollback drills;
+central targets, Composer-managed deployment source updates (refused until a
+reviewed adapter exists); native grants; and production `enforced` policy.
+
 ## Private package access
 
 Use central deployment credentials centrally. Native WordPress updates require

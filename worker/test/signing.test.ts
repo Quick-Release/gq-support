@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import signing from "../../contract/fixtures/signing.json";
 import updateSigning from "../../contract/fixtures/update-signing.json";
 import { verifyInstallation, verifySignature } from "../src/signature.ts";
-import { UPDATE_SIGNATURE, updateKeyId } from "../src/update-access.ts";
+import { UPDATE_SIGNATURE, UPDATE_SIGNATURE_V2, updateKeyId } from "../src/update-access.ts";
 
 // The PHP signer produced these cases; PHPUnit re-signs the same inputs.
 type Case = (typeof signing.cases)[number];
@@ -88,16 +88,20 @@ it("matches the canonical string and digest the fixture records", async () => {
 // #142: native update requests, signed by an update key; never an installation signature.
 describe.each(updateSigning.cases)("shared update signing fixture: $name", (fixture) => {
   const request = (headers: Record<string, string> = {}, path = fixture.path) => new Request(`https://support.example${path}`, {
-    headers: { ...fixture.headers, "Content-Digest": fixture.content_digest, "GQ-Update-Signature": fixture.signature, ...headers },
+    headers: { ...fixture.headers as Record<string, string>, "Content-Digest": fixture.content_digest, "GQ-Update-Signature": fixture.signature, ...headers },
   });
   const now = Number(fixture.headers["GQ-Update-Timestamp"]) * 1000;
-  const verify = (candidate: Request) => verifySignature(candidate, "", updateSigning.public_key, now, UPDATE_SIGNATURE);
+  // A v2 request also signs the digest of the installed files (#144), under its own label.
+  const files = (fixture.headers as Record<string, string>)["GQ-Update-Installed-Files"];
+  const scheme = files === undefined ? UPDATE_SIGNATURE : UPDATE_SIGNATURE_V2;
+  const verify = (candidate: Request) => verifySignature(candidate, "", updateSigning.public_key, now, scheme);
 
   it("verifies the PHP signature, under the update key's ID", async () => {
     expect(await verify(request())).toBe(true);
     expect(await updateKeyId(updateSigning.public_key)).toBe(updateSigning.key_id);
-    // The installation schemes never accept it.
+    // The installation schemes never accept it, nor the other update scheme.
     expect(await verifyInstallation(request(), "", updateSigning.public_key, now)).toBeNull();
+    expect(await verifySignature(request(), "", updateSigning.public_key, now, files === undefined ? UPDATE_SIGNATURE_V2 : UPDATE_SIGNATURE)).toBe(false);
   });
 
   it.each([
@@ -108,7 +112,9 @@ describe.each(updateSigning.cases)("shared update signing fixture: $name", (fixt
     ["grant", { "GQ-Update-Grant": fixture.headers["GQ-Update-Grant"] ? "" : "fixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, undefined],
     ["timestamp", { "GQ-Update-Timestamp": String(Number(fixture.headers["GQ-Update-Timestamp"]) + 1) }, undefined],
     ["request ID", { "GQ-Update-Request-Id": "b1c2d3e4-0000-4000-8000-999999999999" }, undefined],
-  ] as const)("rejects an altered %s", async (_, headers, path) => {
+    ["installed files", { "GQ-Update-Installed-Files": "0".repeat(64) }, undefined],
+  ] as const)("rejects an altered %s", async (name, headers, path) => {
+    if (name === "installed files" && files === undefined) return;
     expect(await verify(request(headers, path))).toBe(false);
   });
 });

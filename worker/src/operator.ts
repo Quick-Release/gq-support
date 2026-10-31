@@ -10,6 +10,9 @@ import { runInventoryOperator } from "./inventory-operator.ts";
 import { runReleaseOperator, type ReleaseArtifact } from "./release-operator.ts";
 import { runUpdateAccessOperator } from "./update-access-operator.ts";
 import { runCentralOperator, type CentralTarget, type CentralTransport } from "./central-deployment.ts";
+import { runFleetOperator, type ReviewedMigration } from "./fleet-rollout.ts";
+import type { ReleaseEvidence } from "./release-gates.ts";
+import type { DeployedStage } from "./repository-mappings.ts";
 import type { PackageSource } from "./package-source.ts";
 import type { ReleaseEnforcement } from "./release-policy.ts";
 import type { StageInventory } from "./inventory.ts";
@@ -32,6 +35,12 @@ export interface OperatorOptions {
   readonly release?: ReleaseEnforcement;
   /** Central deployment (src/central-deployment.ts): the stage's reviewed targets, the hosting transport, and optionally another package source. */
   readonly central?: { readonly targets: readonly CentralTarget[]; readonly transport: CentralTransport; readonly packages?: PackageSource };
+  /** The stage this Operator command targets: fleet launches need its gated deployment. */
+  readonly stage?: DeployedStage;
+  /** GitHub's own workflow run records, read with the Operator's access (src/release-gates.ts). */
+  readonly evidence?: ReleaseEvidence;
+  /** The reviewed migrations in the Operator's checkout, compared with the live migration state (src/fleet-rollout.ts). */
+  readonly migrations?: readonly ReviewedMigration[];
 }
 
 /** A one-statement-at-a-time D1 view of an Operator query function, for shared store code. */
@@ -67,6 +76,9 @@ const enrollmentCode = (): string => {
 /** The operator command boundary; Cloudflare authentication belongs to the CLI adapter. */
 export const runOperator = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
   const { query, recordRevocation, mappings, now = Date.now(), ledger } = options;
+  if (args[0]?.startsWith("fleet-") || ["release-verify", "release-withdraw", "release-boundary"].includes(args[0] ?? "")) {
+    return runFleetOperator(args, { ...options, now });
+  }
   if (args[0]?.startsWith("release-")) return runReleaseOperator(args, { ...options, now });
   if (args[0]?.startsWith("update-access")) return runUpdateAccessOperator(args, { ...options, now });
   if (args[0]?.startsWith("central-")) return runCentralOperator(args, { ...options, now });
@@ -80,7 +92,7 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { ...options, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|approve|dispatch>, update-access-<status|grant|revoke> and central-<apply|status>");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|verify|approve|withdraw|boundary>, fleet-<launch|status|run>, update-access-<status|grant|revoke> and central-<apply|status>");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");

@@ -30,6 +30,7 @@ delete_option( 'gq_support_erasures' );
 // The native update key and offer belong to the installation, not a site of the network.
 delete_site_option( 'gq_support_update_key' );
 delete_site_option( 'gq_support_update_offer' );
+delete_site_option( 'gq_support_update_recovery' );
 wp_unschedule_hook( 'gq_support_retry_erasure' );
 // Options from before schema 4, for sites uninstalled before they migrated.
 delete_option( 'gq_support_administrator_grants' );

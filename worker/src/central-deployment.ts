@@ -47,6 +47,13 @@ export interface CentralTarget {
   readonly pluginDirectory: string;
   /** An absolute directory on the host for the uploaded package, removed after install. */
   readonly uploadDirectory: string;
+  /**
+   * What persists the installed plugin across the site's own deployments. Only
+   * `plugin-directory`, where the installed files are the deployment, is applied:
+   * a Composer-managed site would reinstall its locked version on its next
+   * deployment, and no reviewed adapter updates its lock, so it is refused.
+   */
+  readonly source: "plugin-directory" | "composer";
 }
 
 /**
@@ -95,7 +102,9 @@ export const targetProblem = (target: CentralTarget): string | null => {
   if (!directories.every((path) => DIRECTORY.test(path) && !path.split("/").some((segment) => segment === "." || segment === ".."))) {
     return "Its directories must be absolute plain paths";
   }
-  return target.pluginDirectory.endsWith("/gq-support") ? null : "Its plugin directory must be the installed gq-support directory";
+  if (!target.pluginDirectory.endsWith("/gq-support")) return "Its plugin directory must be the installed gq-support directory";
+  return target.source === "plugin-directory" ? null
+    : "Its deployment source is Composer-managed, and no reviewed adapter updates its locked version; a bare package install would not persist";
 };
 
 const hex = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>)))
@@ -152,6 +161,15 @@ export const packageFiles = async (zip: Uint8Array): Promise<Map<string, string>
   return files;
 };
 
+/**
+ * One digest of a package's exact file set: the SHA-256 of each `<path> NUL <sha256> LF`
+ * line, sorted by path. A native installation signs the same digest of its
+ * installed files (GQ_Support_Updater::installed_files), so any added, missing or
+ * changed file differs.
+ */
+export const filesDigest = async (files: ReadonlyMap<string, string>): Promise<string> =>
+  hex(new TextEncoder().encode([...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path, digest]) => `${path}\0${digest}\n`).join("")));
+
 /** Dotted numeric versions compared by segment; anything else is incomparable (null). */
 const compare = (left: string, right: string): number | null => {
   if (!/^\d+(\.\d+)*$/.test(left) || !/^\d+(\.\d+)*$/.test(right)) return left === right ? 0 : null;
@@ -176,6 +194,12 @@ export interface CentralApplication {
   readonly query: OperatorOptions["query"];
   readonly now: number;
   readonly clock?: () => number;
+  /**
+   * `reconcile` only reads the installation back, for an application whose outcome
+   * was lost or abandoned: verified if it holds exactly the release, failed
+   * (`not_installed`) if it holds another version. It never uploads or installs.
+   */
+  readonly mode?: "apply" | "reconcile";
 }
 
 /** What one application did, safe to print: versions, digests and bounded codes only. */
@@ -313,7 +337,9 @@ export const applyCentralRelease = async (application: CentralApplication): Prom
     const current = await readBack(wasActive);
     if (current.lost) return finish("unreachable", "unreachable", null);
     if (current.problem === null) return finish("verified", null, current.version);
+    if (application.mode === "reconcile") return finish("failed", current.problem, current.version);
   }
+  if (application.mode === "reconcile") return finish("failed", "not_installed", before);
 
   uploaded = true;
   const sent = await run(["cp", "/dev/stdin", upload], { stdin: read.bytes });

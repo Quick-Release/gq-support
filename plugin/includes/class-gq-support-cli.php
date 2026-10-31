@@ -166,4 +166,31 @@ final class GQ_Support_CLI {
 		wp_update_plugins();
 		WP_CLI::success( isset( $offer['version'] ) ? sprintf( 'Approved release: %s.', $offer['version'] ) : 'No approved release is offered.' );
 	}
+
+	/**
+	 * Install the approved recovery release now when it is older than the installed one.
+	 *
+	 * Core never downgrades; after GETQUICK withdraws a bad release, this installs the
+	 * approved earlier package's exact verified bytes, as scheduled maintenance does.
+	 * Each recovery release is tried at most twice.
+	 *
+	 * @subcommand update-recover
+	 */
+	public function update_recover(): void {
+		if ( ! GQ_Support_Updater::status()['provisioned'] ) {
+			WP_CLI::error( 'No update key. Run `wp gq-support update-key` and ask GETQUICK to grant it.' );
+		}
+		$offer = GQ_Support_Updater::refresh( time(), true );
+		if ( isset( $offer['error'] ) ) {
+			WP_CLI::error( sprintf( 'Update check: %s.', $offer['error'] ) );
+		}
+		$result = GQ_Support_Updater::recover( time(), true );
+		if ( 'installed' === $result ) {
+			WP_CLI::success( sprintf( 'Recovery release installed and verified: %s.', $offer['version'] ) );
+		} elseif ( 'not_needed' === $result ) {
+			WP_CLI::success( 'No recovery is needed.' );
+		} else {
+			WP_CLI::error( sprintf( 'Recovery: %s.', $result ) );
+		}
+	}
 }

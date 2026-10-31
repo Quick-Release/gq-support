@@ -47,6 +47,8 @@ spl_autoload_register(
 add_filter( 'update_plugins_support.getquick.io', array( GQ_Support_Updater::class, 'offer' ), 10, 3 );
 add_filter( 'upgrader_pre_download', array( GQ_Support_Updater::class, 'download' ), 10, 4 );
 add_filter( 'auto_update_plugin', array( GQ_Support_Updater::class, 'auto_update' ), 10, 2 );
+// Core's scheduled update event, after its own check: refreshes the offer and installs an approved recovery release.
+add_action( 'wp_update_plugins', array( GQ_Support_Updater::class, 'maintain' ), 20 );
 
 register_activation_hook( __FILE__, array( GQ_Support_Lifecycle::class, 'activate' ) );
 register_deactivation_hook( __FILE__, array( GQ_Support_Lifecycle::class, 'deactivate' ) );

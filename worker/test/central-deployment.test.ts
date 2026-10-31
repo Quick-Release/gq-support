@@ -7,6 +7,7 @@ import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { asQueryDatabase } from "../src/operator.ts";
 import { localStage } from "./local-d1.ts";
+import { fakeEvidence, recordLiveMigrations, reviewedMigrations, SCHEMA_RANGE, type FakeEvidence } from "./release-fixture.ts";
 
 // #143: centrally managed installations receive the exact approved package through
 // central hosting access, with each outcome recorded. Through the Operator CLI with
@@ -18,7 +19,7 @@ const mappings: RepositoryMapping[] = [
 ];
 const PLUGIN = "/srv/www/shop/web/app/plugins/gq-support";
 const target: CentralTarget = { slot: "shop/production", runner: ["ssh", "-o", "BatchMode=yes", "shop-production"], runnerFailureExit: 255,
-  wp: ["wp", "--path=/srv/www/shop/web/wp"], pluginDirectory: PLUGIN, uploadDirectory: "/tmp" };
+  wp: ["wp", "--path=/srv/www/shop/web/wp"], pluginDirectory: PLUGIN, uploadDirectory: "/tmp", source: "plugin-directory" };
 
 let stage: Awaited<ReturnType<typeof localStage<"shared" | "ledger">>>;
 let now: number;
@@ -127,6 +128,8 @@ beforeEach(async () => {
   now = START;
   stage = await localStage(["shared", "ledger"]);
   artifacts.clear();
+  evidence = fakeEvidence();
+  await recordLiveMigrations(stage.databases.shared);
 });
 afterEach(async () => { await stage.dispose(); vi.useRealTimers(); });
 
@@ -135,23 +138,34 @@ const query = (database: D1Database) => async (sql: string, parameters: readonly
 type D1Database = (typeof stage)["databases"]["shared"];
 
 let host: Host;
+let evidence: FakeEvidence;
 const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
-  query: query(stage.databases.shared), ledger: query(stage.databases.ledger),
+  query: query(stage.databases.shared), ledger: query(stage.databases.ledger), stage: "prod", evidence, migrations: reviewedMigrations(),
   readArtifact: async (directory) => artifacts.get(directory)!,
   central: { targets: [target], transport: host } });
-/** Publishes `version` as the release workflow would, approves it and records its dispatch. */
+/** Launches the approved release to the fleet (src/fleet-rollout.ts), after its compatible Worker's gated deployment. */
+const launch = (id: string) => operator("fleet-launch", id, evidence.deploy("prod"), "alex");
+/**
+ * Publishes `version` as the release workflow would, records its passing gates, approves it and launches it;
+ * `recovery` instead withdraws the approved release `expected` to this earlier verified version.
+ */
 const release = async (version: string, expected: string, { kind = "production", dispatch = true } = {}) => {
-  if (!artifacts.has(version)) {
-    const zip = zipOf(pluginFiles(version));
-    packages.set(sha256(zip), { version, files: pluginFiles(version) });
-    artifacts.set(version, { zip, manifest: JSON.stringify({ name: "gq-support", version, zip: { size: zip.length, sha256: sha256(zip) } }),
-      provenance: JSON.stringify({ version, commit: "b".repeat(40), run: "39000000001", zip_sha256: sha256(zip) }) });
-    await operator("release-candidate", version, "a".repeat(40), "1", "0001-0029", "signed", "alex");
+  if (kind === "recovery") {
+    const { recovery } = JSON.parse(await operator("release-withdraw", expected, version, evidence.deploy("prod"), "alex")) as { recovery: { release_id: number } };
+    return { id: String(recovery.release_id), sha256: sha256(artifacts.get(version)!.zip) };
   }
+  const zip = zipOf(pluginFiles(version));
+  packages.set(sha256(zip), { version, files: pluginFiles(version) });
+  const run = String(39_000_000_100 + artifacts.size);
+  artifacts.set(version, { zip, manifest: JSON.stringify({ name: "gq-support", version, zip: { size: zip.length, sha256: sha256(zip) } }),
+    provenance: JSON.stringify({ version, commit: "b".repeat(40), run, zip_sha256: sha256(zip) }) });
+  evidence.release(artifacts.get(version)!);
+  await operator("release-candidate", version, "a".repeat(40), "1", SCHEMA_RANGE, "signed", "alex");
+  await operator("release-verify", version, version, evidence.ci(), evidence.deploy("staging"), "alex");
   const { release_id: id } = JSON.parse(await operator("release-approve", version, kind, expected,
     "https://github.com/Quick-Release/gq-support/pull/143", "alex")) as { release_id: number };
-  if (dispatch) await operator("release-dispatch", String(id), at(now), "https://github.com/Quick-Release/gq-support/actions/runs/1", "alex");
-  return { id: String(id), sha256: sha256(artifacts.get(version)!.zip) };
+  if (dispatch) await launch(String(id));
+  return { id: String(id), sha256: sha256(zip) };
 };
 const apply = async (releaseId: string, version: string, slot = "shop/production") =>
   JSON.parse(await operator("central-apply", slot, releaseId, version, "alex")) as Record<string, unknown>;
@@ -185,7 +199,7 @@ it("refuses before contacting the installation unless the Slot, its reviewed tar
   // Approved but its dispatch not yet recorded, or no longer the approved release.
   await expect(apply(second.id, "0.3.0")).rejects.toThrow(/approved release with a recorded dispatch/);
   await expect(apply(first.id, "0.2.0")).rejects.toThrow(/approved release with a recorded dispatch/);
-  await operator("release-dispatch", second.id, at(now), "https://github.com/Quick-Release/gq-support/actions/runs/2", "alex");
+  await launch(second.id);
   // A native Slot, or a Slot without a reviewed target: no stage has one yet.
   await expect(apply(second.id, "0.3.0", "news/production")).rejects.toThrow(/not central/);
   const { stageCentralTargets } = await import("../src/central-deployment.ts");
@@ -293,7 +307,7 @@ it("applies nothing once a newer approval or an offboarding arrives, and never t
   expect((await inventory()).update).toEqual({ outcome: "none", at: null });
 
   // Likewise an offboarding recorded mid-way stops the install.
-  const newer = await operator("release-dispatch", "2", at(now), "https://github.com/Quick-Release/gq-support/actions/runs/2", "alex");
+  const newer = await launch("2");
   expect(JSON.parse(newer)).toMatchObject({ release_id: 2 });
   host.next((command) => command[0] === "cp", async (command, options) => {
     const result = await host.run([...target.runner, ...command], options);

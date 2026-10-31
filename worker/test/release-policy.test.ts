@@ -10,6 +10,7 @@ import { runOperator } from "../src/operator.ts";
 import type { ReleaseEnforcement } from "../src/release-policy.ts";
 import { harness, type Installation } from "./installation-client.ts";
 import { localStage } from "./local-d1.ts";
+import { fakeEvidence, pluginFiles, recordLiveMigrations, reviewedMigrations, SCHEMA_RANGE, zipOf, type FakeEvidence } from "./release-fixture.ts";
 
 // #141 (ADR 0021): approved releases, the 24-hour previous-release window and
 // service intake enforcement, through the Operator CLI and the signed installation API.
@@ -24,12 +25,15 @@ let stage: Awaited<ReturnType<typeof localStage<"shared">>>;
 let now: number;
 // Release artifacts as the release workflow writes them (scripts/ci/release-package.mjs), by directory.
 let artifacts: Map<string, { zip: Uint8Array; manifest: string; provenance: string }>;
+let evidence: FakeEvidence;
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"], now: START });
   now = START;
   stage = await localStage(["shared"]);
   artifacts = new Map();
+  evidence = fakeEvidence();
+  await recordLiveMigrations(stage.databases.shared);
 });
 afterEach(async () => { await stage.dispose(); vi.useRealTimers(); });
 
@@ -39,7 +43,7 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 
 /** A verified release workflow's output for `version`; returns its directory. */
 const published = (version: string, change: { manifest?: object; provenance?: object } = {}) => {
-  const zip = new TextEncoder().encode(`gq-support ${version} package bytes`);
+  const zip = zipOf(pluginFiles(version));
   const directory = `package-zip-${version}`;
   artifacts.set(directory, {
     zip,
@@ -47,10 +51,12 @@ const published = (version: string, change: { manifest?: object; provenance?: ob
       ...change.manifest }),
     provenance: JSON.stringify({ version, commit: "b".repeat(40), run: "39000000001", zip_sha256: sha256(zip), ...change.provenance }),
   });
+  evidence.release(artifacts.get(directory)!);
   return directory;
 };
 
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {}, stage: "prod", evidence,
+  migrations: reviewedMigrations(),
   // Like the Wrangler adapter: plain `?` parameters, one statement per call.
   query: async (sql, parameters) => sql.match(/\?\d/) ? Promise.reject(new Error("Numbered parameter"))
     : (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
@@ -60,13 +66,17 @@ const operator = (...args: string[]) => runOperator(args, { mappings, now, recor
     return artifact;
   } });
 
-/** Records a published candidate from its artifacts, approves it and records its fleet dispatch. */
-const candidate = (version: string, claim: "signed" | "unsigned-legacy" = "signed") =>
-  operator("release-candidate", published(version), WORKER_COMMIT, "1", "0001-0027", claim, "alex");
-const approve = (version: string, expected: string, kind = "production") =>
-  operator("release-approve", version, kind, expected, "https://github.com/Quick-Release/gq-support/pull/141", "alex");
-const dispatch = (release: string, dispatchedAt = now) =>
-  operator("release-dispatch", release, at(dispatchedAt), "https://github.com/Quick-Release/gq-support/actions/runs/39000000002", "alex");
+/** Records a published candidate from its artifacts with its passing gates; then it is approved and launched to the fleet. */
+const candidate = async (version: string, claim: "signed" | "unsigned-legacy" = "signed") => {
+  const recorded = await operator("release-candidate", published(version), WORKER_COMMIT, "1", SCHEMA_RANGE, claim, "alex");
+  await operator("release-verify", version, `package-zip-${version}`, evidence.ci(), evidence.deploy("staging"), "alex");
+  return recorded;
+};
+const approve = (version: string, expected: string) =>
+  operator("release-approve", version, "production", expected, "https://github.com/Quick-Release/gq-support/pull/141", "alex");
+/** The fleet launch: the dispatch is recorded at its actual start, after the compatible Worker's gated deployment. */
+const dispatch = (release: string) => operator("fleet-launch", release, evidence.deploy("prod"), "alex");
+const withdraw = (release: string, version: string) => operator("release-withdraw", release, version, evidence.deploy("prod"), "alex");
 
 const REPORTER = "11111111-1111-4111-8111-111111111111";
 const submission = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -175,19 +185,19 @@ it("lets an Operator approve an earlier verified package as the temporary recove
   // Re-enrolling the Slot revoked installation-a's key; no release decision revives it.
   advance(25 * HOUR);
   expect((await create(revoked, 1)).status).toBe(426);
-  expect(JSON.parse(await approve("0.1.9", "2", "recovery"))).toMatchObject({ release_id: 3, kind: "recovery", previous_release_id: 2 });
+  expect(JSON.parse(await withdraw("2", "0.1.9"))).toMatchObject({ recovery: { release_id: 3, kind: "recovery", dispatched_at: at(now) } });
+  expect(JSON.parse(await operator("release-status")).current).toMatchObject({ release_id: 3, kind: "recovery", previous_release_id: 2 });
   expect((await create(revoked, 2)).status).toBe(202);
   // The release it replaced is the previous one; it stays compatible only until the recovery's dispatch window ends.
   expect((await create(installation, 3)).status).toBe(403);
-  await dispatch("3");
   advance(24 * HOUR);
   expect((await create(revoked, 4)).status).toBe(202);
   expect((await create(revoked.running("0.2.0"), 5)).status).toBe(426);
 
-  // A recovery package must be an earlier approved one, never the approved release or an unapproved candidate.
+  // A recovery package must be an earlier launched one, never the approved release or an unlaunched candidate.
   await candidate("0.2.1");
-  await expect(approve("0.2.1", "3", "recovery")).rejects.toThrow(/earlier approved version/);
-  await expect(approve("0.1.9", "3", "recovery")).rejects.toThrow(/earlier approved version/);
+  await expect(withdraw("3", "0.2.1")).rejects.toThrow(/verified release launched before/);
+  await expect(withdraw("3", "0.1.9")).rejects.toThrow(/another version than the withdrawn one/);
 });
 
 it("refuses approvals and dispatches the evidence does not support, recording nothing", async () => {
@@ -211,21 +221,19 @@ it("refuses approvals and dispatches the evidence does not support, recording no
   await expect(approve("0.2.0", "none")).rejects.toThrow(/now 1, not none/);
   // Production waits for the approved release's recorded dispatch.
   await expect(approve("0.2.0", "1")).rejects.toThrow(/after the approved release's dispatch/);
-  await expect(dispatch("1", now + 1)).rejects.toThrow(/no later than now/);
-  await expect(dispatch("1", now - 1)).rejects.toThrow(/at or after its approval/);
   await dispatch("1");
-  await expect(dispatch("1")).rejects.toThrow(/first dispatch/);
+  await expect(dispatch("1")).rejects.toThrow(/already recorded/);
   await approve("0.2.0", "1");
-  await expect(dispatch("1")).rejects.toThrow(/first dispatch/);
+  await expect(dispatch("1")).rejects.toThrow(/Only the approved release is launched/);
   await expect(approve("0.1.10", "2")).rejects.toThrow(/never approved before/);
-  await expect(approve("0.2.0", "2", "production")).rejects.toThrow(/never approved before/);
+  await expect(approve("0.2.0", "2")).rejects.toThrow(/never approved before/);
   await expect(operator("release-approve", "0.2.0", "production", "2", "evidence", "alex smith")).rejects.toThrow(/Usage/);
   const { current, previous, enforcement } = await status();
   expect(enforcement).toBe("unconfigured");
   expect(current).toMatchObject({ release_id: 2, package_version: "0.2.0", kind: "production", previous_release_id: 1, dispatch: null,
     package_sha256: sha256(artifacts.get("package-zip-0.2.0")!.zip), worker_commit: WORKER_COMMIT, contract_version: 1,
-    schema: { from: 1, to: 27 }, signs_version: true, provenance: `release-plugin run 39000000001 at ${"b".repeat(40)}`, approved_by: "alex" });
-  expect(previous).toMatchObject({ release_id: 1, package_version: "0.1.10", dispatch: { dispatched_at: at(START), recorded_by: "alex" } });
+    schema: { from: 1, to: Number(SCHEMA_RANGE.slice(5)) }, signs_version: true, provenance: `release-plugin run 39000000001 at ${"b".repeat(40)}`, approved_by: "alex" });
+  expect(previous).toMatchObject({ release_id: 1, package_version: "0.1.10", dispatch: { dispatched_at: at(START), evidence: "fleet-launch", recorded_by: "alex" } });
 });
 
 it("fails closed without a well-formed approved release or a configured enforcement, and reports a staged one honestly", async () => {

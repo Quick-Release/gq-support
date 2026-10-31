@@ -31,6 +31,22 @@
             "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
             "canonical": "gq-support-update-v1\nGET\n/v1/updates/gq-support/package?version=0.2.0&sha256=37a0609135f24d429b262e9f824713497fd6f81de3118cd682ed4f46d934ec62\n34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e\n0.1.10\nfixture-grant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n1790000101\nb1c2d3e4-0000-4000-8000-000000000002\nsha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
             "signature": "KPKE6+XV/pYupjION/0L2WtoVrp2Zd67ZWBh1oWS4usNGzpfEIFWkO15kSqlQSWdPnKMATc60cKox5w0oUjPAw=="
+        },
+        {
+            "name": "a metadata request signs the digest of its installed files (gq-support-update-v2)",
+            "method": "GET",
+            "path": "/v1/updates/gq-support",
+            "headers": {
+                "GQ-Update-Key-Id": "34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e",
+                "GQ-Update-Installed-Version": "0.2.0",
+                "GQ-Update-Grant": "",
+                "GQ-Update-Installed-Files": "5be8c4f0a1d6e2b3c7f9a0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1",
+                "GQ-Update-Timestamp": "1790000102",
+                "GQ-Update-Request-Id": "b1c2d3e4-0000-4000-8000-000000000003"
+            },
+            "content_digest": "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "canonical": "gq-support-update-v2\nGET\n/v1/updates/gq-support\n34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e\n0.2.0\n\n5be8c4f0a1d6e2b3c7f9a0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1\n1790000102\nb1c2d3e4-0000-4000-8000-000000000003\nsha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+            "signature": "OM5cE/I+RfFMxIXC3mhPrsVeWlWeH4M5YM+qJAt5cnKF2vGXS5Pu6Kjfbfaa5MGbB4akN+r4jKqPn29ZQGSLBA=="
         }
     ]
 }

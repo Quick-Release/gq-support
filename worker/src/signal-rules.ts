@@ -11,7 +11,7 @@ import { REFRESH_DEFAULTS, refreshEligible } from "./status-refresh.ts";
  */
 export type SignalCategory = "delivery_unknown" | "delivery_deadline" | "delivery_rejected" | "webhook_rejected" | "webhook_failed"
   | "status_refresh_behind" | "status_sweep_behind" | "privacy_cleanup"
-  | "suppression_ledger_behind";
+  | "suppression_ledger_behind" | "release_update_failed" | "release_migration_failed";
 
 export interface Signal {
   readonly runbook: string;
@@ -61,6 +61,9 @@ const LEDGER_LAG_MS = 15 * MINUTE;
  */
 const SWEEP_LAG_ALERT_MS = 3_600_000;
 const DELIVERY_RUNBOOK = "docs/runbooks/support-operations.md#github-outage-or-stalled-delivery";
+const RELEASE_RUNBOOK = "docs/runbooks/support-operations.md#fleet-rollout-and-recovery";
+/** The dispatched approved release: only it is being distributed. */
+const DISPATCHED = "(SELECT MAX(sequence) FROM release_dispatch)";
 
 export const SIGNALS: Readonly<Record<SignalCategory, Signal>> = {
   // An uncertain create unresolved for 15 minutes, or at once with duplicate or suspicious matches
@@ -99,6 +102,20 @@ export const SIGNALS: Readonly<Record<SignalCategory, Signal>> = {
       OR (c.purpose = 'erasure' AND c.state = 'resolved' AND c.residual != ''
         AND EXISTS (SELECT 1 FROM erasure e WHERE e.id = c.erasure_id AND e.closed_at IS NULL))
     UNION ALL SELECT 'erasure', slot, NULL FROM erasure WHERE closed_at IS NULL AND search_state IN ('incomplete', 'failed')` },
+  // A confirmed failure to install the dispatched release (src/fleet-rollout.ts): a central read-back that found
+  // other files, version or a deactivated plugin, or a native installation signing other files under its version.
+  // Unknown, unreachable or stale Slots are not confirmed failures; fleet-status shows them.
+  release_update_failed: { runbook: RELEASE_RUNBOOK, affected: () => `SELECT CAST(d.release_sequence AS TEXT) AS subject, d.slot, NULL AS detail
+    FROM central_deployment d WHERE d.release_sequence = ${DISPATCHED} AND d.outcome = 'failed'
+      AND NOT EXISTS (SELECT 1 FROM central_deployment n WHERE n.slot = d.slot AND n.release_sequence = d.release_sequence AND n.rowid > d.rowid)
+    UNION ALL SELECT CAST(f.sequence AS TEXT), s.slot, NULL FROM fleet_launch f JOIN release_approval a ON a.sequence = f.sequence
+      JOIN release_verification v ON v.package_version = a.package_version
+      JOIN slot_installed_files s ON s.version = a.package_version AND s.files_sha256 <> v.files_sha256 AND s.observed_at >= f.launched_at
+    WHERE f.sequence = ${DISPATCHED}` },
+  // The live migration state an Operator command last read was not the reviewed migrations with their checksums.
+  release_migration_failed: { runbook: RELEASE_RUNBOOK, details: ["unreadable", "unreviewed", "mismatch"],
+    affected: () => `SELECT 'schema' AS subject, NULL AS slot, state AS detail FROM schema_observation
+      WHERE rowid = (SELECT MAX(rowid) FROM schema_observation) AND state <> 'ok'` },
   suppression_ledger_behind: { runbook: "docs/runbooks/support-operations.md#retention-erasure-or-private-data-exposure",
     affected: (now) => `SELECT 'mirror' AS subject, NULL AS slot, NULL AS detail FROM restore_state
       WHERE id = 1 AND mirrored_at > 0 AND mirrored_at < ${at(now - LEDGER_LAG_MS)}` },

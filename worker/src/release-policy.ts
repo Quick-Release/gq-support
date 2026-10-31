@@ -54,13 +54,16 @@ export interface ReleaseRow {
   compatibility_expires_at: number | null;
   dispatch_evidence: string | null;
   dispatched_by: string | null;
+  /** The verified digest of the package's files (src/fleet-rollout.ts), once its gates are recorded. */
+  files_sha256: string | null;
 }
 
 const RELEASES = `SELECT a.sequence, a.package_version, a.kind, a.previous_sequence, a.evidence, a.approved_by, a.approved_at,
   c.package_sha256, c.provenance, c.worker_commit, c.contract_version, c.schema_from, c.schema_to, c.signs_version,
-  d.dispatched_at, d.compatibility_expires_at, d.evidence AS dispatch_evidence, d.recorded_by AS dispatched_by
+  d.dispatched_at, d.compatibility_expires_at, d.evidence AS dispatch_evidence, d.recorded_by AS dispatched_by, v.files_sha256
   FROM release_approval a LEFT JOIN release_candidate c ON c.package_version = a.package_version
-  LEFT JOIN release_dispatch d ON d.sequence = a.sequence`;
+  LEFT JOIN release_dispatch d ON d.sequence = a.sequence
+  LEFT JOIN release_verification v ON v.package_version = c.package_version AND v.package_sha256 = c.package_sha256`;
 
 /** The approved production release and the previous approved one, as recorded. */
 export const approvedReleases = async (db: QueryDatabase) => {

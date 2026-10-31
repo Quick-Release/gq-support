@@ -104,7 +104,8 @@ PHP
     cookies=$(mktemp -d)
     mkdir -p "$(dirname "$service")"
     cp plugin/tests/integration/native-update-service.php "$service"
-    trap 'rm -rf "$service" "$cookies" ".test-site/$next_zip"' EXIT
+    recovery_zip=native-update-recovery.zip
+    trap 'rm -rf "$service" "$cookies" ".test-site/$next_zip" ".test-site/$recovery_zip"' EXIT
     native() { wp eval-file plugin/tests/integration/native-update.php "$@"; }
 
     # The approved next release: the installed candidate's files under a higher version.
@@ -151,6 +152,24 @@ PHP
     wp plugin update gq-support
     native renewed
     native upgraded "$next_version" "$next_main"
+
+    # The next release is withdrawn: the approved recovery release is the earlier verified candidate (#144).
+    # Core never downgrades, so its scheduled update event installs it through the guarded recovery path,
+    # from the exact verified bytes, then the installed files must be exactly the candidate's.
+    cp "$zip" ".test-site/$recovery_zip"
+    candidate_files=$(python3 - ".test-site/$recovery_zip" <<'PY'
+import hashlib, sys, zipfile
+archive = zipfile.ZipFile(sys.argv[1])
+files = sorted((info.filename[len("gq-support/"):], hashlib.sha256(archive.read(info)).hexdigest()) for info in archive.infolist() if not info.is_dir())
+print(hashlib.sha256("".join(f"{path}\0{digest}\n" for path, digest in files).encode()).hexdigest())
+PY
+)
+    native serve "$recovery_zip" "$version" recovery "$candidate_files"
+    native mode ok disabled
+    wp cron event run wp_update_plugins >/dev/null
+    native recovered "$version" "$candidate_files"
+    # Recovered once: nothing loops back to the withdrawn release or reinstalls the recovery.
+    [[ "$(wp gq-support update-recover)" == *'No recovery is needed'* ]]
 
     native cleanup
     wp plugin install "$zip" --force

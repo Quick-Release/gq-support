@@ -100,8 +100,9 @@ final class GQ_Support_Updater_Test extends TestCase {
 	 * @param string $version The approved version.
 	 * @param string $sha256  Its package digest.
 	 * @param int    $expires Grant expiry, epoch seconds.
+	 * @param string $kind    `production`, or `recovery` for an earlier verified package.
 	 */
-	private static function offered( string $version, string $sha256, int $expires = 0 ): array {
+	private static function offered( string $version, string $sha256, int $expires = 0, string $kind = 'production' ): array {
 		return array(
 			200,
 			(string) wp_json_encode(
@@ -111,6 +112,8 @@ final class GQ_Support_Updater_Test extends TestCase {
 					'release'     => array(
 						'release_id'     => 3,
 						'version'        => $version,
+						'kind'           => $kind,
+						'files_sha256'   => str_repeat( 'c', 64 ),
 						'package_sha256' => $sha256,
 						'package_path'   => GQ_Support_Updater::PACKAGE_PATH . '?version=' . $version . '&sha256=' . $sha256,
 					),
@@ -159,7 +162,7 @@ final class GQ_Support_Updater_Test extends TestCase {
 	public function test_headers_match_shared_fixture( array $fixture ): void {
 		$keys    = self::fixtures( 'signing' );
 		$secret  = sodium_base642bin( $keys['secret_key'], SODIUM_BASE64_VARIANT_ORIGINAL );
-		$headers = GQ_Support_Updater::headers( $fixture['path'], $fixture['headers']['GQ-Update-Grant'], $secret, (int) $fixture['headers']['GQ-Update-Timestamp'], $fixture['headers']['GQ-Update-Request-Id'], $fixture['headers']['GQ-Update-Installed-Version'] );
+		$headers = GQ_Support_Updater::headers( $fixture['path'], $fixture['headers']['GQ-Update-Grant'], $secret, (int) $fixture['headers']['GQ-Update-Timestamp'], $fixture['headers']['GQ-Update-Request-Id'], $fixture['headers']['GQ-Update-Installed-Version'], $fixture['headers']['GQ-Update-Installed-Files'] ?? null );
 		self::assertSame(
 			$fixture['headers'] + array(
 				'Content-Digest'      => $fixture['content_digest'],
@@ -364,5 +367,78 @@ final class GQ_Support_Updater_Test extends TestCase {
 		foreach ( $this->calls as list( , $args ) ) {
 			self::assertArrayNotHasKey( 'GQ-Support-Key-Id', $args['headers'] );
 		}
+	}
+
+	/**
+	 * The installed files' digest is the one the service computes from the package's
+	 * own entries (worker/src/central-deployment.ts filesDigest): any added, missing or
+	 * changed file differs, and a directory it cannot read exactly has none.
+	 */
+	public function test_installed_files_digest_matches_the_package_digest(): void {
+		// Not `gq-support*`: package.sh treats those temporary files as the updater's leftovers.
+		$directory = get_temp_dir() . 'gqs-files-test-' . wp_generate_password( 8, false );
+		wp_mkdir_p( $directory . '/includes' );
+		file_put_contents( $directory . '/gq-support.php', '<?php // main' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Test fixture.
+		file_put_contents( $directory . '/includes/b.php', '<?php // b' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Test fixture.
+		$expected = hash( 'sha256', "gq-support.php\0" . hash( 'sha256', '<?php // main' ) . "\nincludes/b.php\0" . hash( 'sha256', '<?php // b' ) . "\n" );
+		self::assertSame( $expected, GQ_Support_Updater::installed_files( $directory ) );
+		file_put_contents( $directory . '/extra.php', '' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Test fixture.
+		self::assertNotSame( $expected, GQ_Support_Updater::installed_files( $directory ) );
+		symlink( $directory . '/gq-support.php', $directory . '/linked.php' );
+		self::assertNull( GQ_Support_Updater::installed_files( $directory ) );
+		self::assertNull( GQ_Support_Updater::installed_files( $directory . '/missing' ) );
+		foreach ( array( 'linked.php', 'extra.php', 'includes/b.php', 'gq-support.php' ) as $file ) {
+			unlink( $directory . '/' . $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- Test cleanup.
+		}
+		rmdir( $directory . '/includes' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Test cleanup.
+		rmdir( $directory ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Test cleanup.
+	}
+
+	/** A metadata check signs its installed files' digest when it can read them exactly (gq-support-update-v2). */
+	public function test_metadata_signs_the_installed_files(): void {
+		$this->replies = array( self::offered( '99.0.0', self::SHA256 ) );
+		GQ_Support_Updater::refresh( time(), true );
+		$files   = GQ_Support_Updater::installed_files();
+		$headers = $this->calls[0][1]['headers'];
+		self::assertSame( $files, $headers['GQ-Update-Installed-Files'] ?? null );
+		if ( null !== $files ) {
+			self::assertMatchesRegularExpression( '/^[a-f0-9]{64}$/', $files );
+		}
+	}
+
+	/** A recovery offer is cached with its kind and verified files, like any other. */
+	public function test_recovery_offer_is_cached(): void {
+		$this->replies = array( self::offered( '0.0.1', self::SHA256, 0, 'recovery' ) );
+		$offer         = GQ_Support_Updater::refresh( time(), true );
+		self::assertSame( array( 'recovery', str_repeat( 'c', 64 ) ), array( $offer['kind'], $offer['files'] ) );
+		$this->replies = array( array( 200, str_replace( '"recovery"', '"rollback"', self::offered( '0.0.1', self::SHA256, 0, 'recovery' )[1] ) ) );
+		self::assertSame( 'unavailable', GQ_Support_Updater::refresh( time(), true )['error'] );
+	}
+
+	/**
+	 * Core never downgrades, so only an approved recovery offer older than the installed
+	 * release runs the recovery installer, and never over a symlinked development checkout.
+	 */
+	public function test_recovery_runs_only_for_an_older_approved_recovery_release(): void {
+		$cases = array(
+			array( '99.0.0', 'recovery', 'not_needed' ),
+			array( '0.0.1', 'production', 'not_needed' ),
+			array( GQ_SUPPORT_VERSION, 'recovery', 'not_needed' ),
+		);
+		// run.sh links the plugin/ checkout into the site; an installed package's recovery is package.sh native's.
+		if ( is_link( WP_PLUGIN_DIR . '/' . dirname( plugin_basename( GQ_SUPPORT_PLUGIN_FILE ) ) ) ) {
+			$cases[] = array( '0.0.1', 'recovery', 'symlinked_plugin' );
+		}
+		foreach ( $cases as list( $version, $kind, $outcome ) ) {
+			$this->calls   = array();
+			$this->replies = array( self::offered( $version, self::SHA256, 0, $kind ) );
+			GQ_Support_Updater::refresh( time(), true );
+			self::assertSame( $outcome, GQ_Support_Updater::recover( time() ), "{$kind} {$version}" );
+			// Nothing was downloaded for it.
+			self::assertCount( 1, $this->calls );
+		}
+		delete_site_option( GQ_Support_Updater::RECOVERY_OPTION );
+		delete_site_option( GQ_Support_Updater::KEY_OPTION );
+		self::assertSame( 'not_provisioned', GQ_Support_Updater::recover( time() ) );
 	}
 }

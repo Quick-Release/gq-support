@@ -10,8 +10,11 @@ import { stageMappings } from "../src/repository-mappings.ts";
 import { stageReleaseEnforcement } from "../src/release-policy.ts";
 import { stageCentralTargets } from "../src/central-deployment.ts";
 import { commandTransport } from "./central-transport.ts";
+import { githubEvidence } from "./release-evidence.ts";
+import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|release-status|release-candidate|release-approve|release-dispatch|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|release-status|release-candidate|release-verify|release-approve|release-withdraw|release-boundary|fleet-launch|fleet-status|fleet-run|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
@@ -53,6 +56,20 @@ try {
     mappings: stageMappings[stage],
     inventory: stageInventories[stage],
     release: stageReleaseEnforcement[stage],
+    stage,
+    // GitHub's own run records for release gates, read with the Operator's `gh` login.
+    evidence: githubEvidence(),
+    // The reviewed migrations in this checkout, by their checksum (migrations/checksums.txt), compared with the live record.
+    migrations: (() => {
+      const migrations = new URL("../migrations/", import.meta.url);
+      const locked = new Map(readFileSync(new URL("checksums.txt", migrations), "utf8").trim().split("\n").map((line) => line.split(/\s+/).reverse() as [string, string]));
+      return readdirSync(migrations).filter((name) => name.endsWith(".sql")).sort().map((name) => {
+        const sql = readFileSync(new URL(name, migrations), "utf8");
+        const sha256 = createHash("sha256").update(sql).digest("hex");
+        if (locked.get(name) !== sha256) throw new Error(`Migration ${name} does not match migrations/checksums.txt; use a clean reviewed checkout.`);
+        return { name, sha256, sql };
+      });
+    })(),
     // The stage's reviewed central targets, reached with the Operator's own hosting access.
     central: { targets: stageCentralTargets[stage], transport: commandTransport() },
     // A downloaded release workflow artifact: the exact ZIP and the manifest and provenance recorded with it.

@@ -77,6 +77,14 @@ offers the update only after its own WordPress.org update check succeeds, and
 WordPress cron cannot promise prompt installation. `wp gq-support update-key
 --rotate` replaces the key; updates resume once GETQUICK grants the new one.
 
+Each check also signs the digest of the installed plugin files, which is how
+GETQUICK confirms an update completed. If GETQUICK withdraws a bad release, the
+approved recovery release is an earlier verified package. WordPress never
+downgrades on its own, so the plugin installs it from core's scheduled update
+event, even when the WordPress.org check fails: the exact verified bytes, through
+WordPress's own upgrader, never over a symlinked checkout, at most hourly and
+twice per recovery release. `wp gq-support update-recover` does the same now.
+
 ## Native extensions and Site Health
 
 See [Native Support extensions](https://github.com/Quick-Release/gq-support/blob/main/docs/support-extension-hooks.md) for the

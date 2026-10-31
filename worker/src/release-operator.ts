@@ -1,11 +1,10 @@
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
-import { approvedReleases, COMPATIBILITY_WINDOW_MS, SUPPORTED_CONTRACTS, type ReleaseRow } from "./release-policy.ts";
+import { approvedReleases, SUPPORTED_CONTRACTS, type ReleaseRow } from "./release-policy.ts";
 import { PLUGIN_VERSION } from "./signature.ts";
 
 const ACTOR = /^[A-Za-z0-9_-]{1,64}$/;
 /** A reference to where the evidence lives, such as a reviewed PR or CI run URL; never a credential. */
 const EVIDENCE = /^[\x21-\x7e]{1,256}$/;
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{3})?)?Z$/;
 const COMMIT = /^[a-f0-9]{40}$/;
 
 /** The release workflow's output (scripts/ci/release-package.mjs): the ZIP's bytes and its two JSON records. */
@@ -48,8 +47,8 @@ const record = (row: ReleaseRow | null) => row && {
 };
 
 const USAGE = "Usage: operator release-status | release-candidate <artifact-directory> <worker-commit> <contract-version> <schema-from>-<schema-to> <signed|unsigned-legacy> <opaque-actor>"
-  + " | release-approve <package-version> <production|recovery> <expected-current-release-id|none> <evidence-ref> <opaque-actor>"
-  + " | release-dispatch <release-id> <dispatched-at> <evidence-ref> <opaque-actor>";
+  + " | release-approve <package-version> production <expected-current-release-id|none> <evidence-ref> <opaque-actor>"
+  + "; release-verify, fleet-launch and release-withdraw (src/fleet-rollout.ts) dispatch and recover";
 
 /**
  * The Operator CLI for approved releases (src/release-policy.ts). Each mutation is
@@ -60,9 +59,12 @@ const USAGE = "Usage: operator release-status | release-candidate <artifact-dire
  *   migration range it was verified with. A candidate is not approved.
  * - `release-approve` makes a candidate the approved production release, if the
  *   approved release is still `expected` (so a concurrent approval loses) and
- *   was dispatched. `recovery` re-approves an earlier approved, compatible package.
- * - `release-dispatch` records the approved release's fleet dispatch, from its
- *   dispatch evidence: the previous release's 24-hour window starts there.
+ *   was dispatched.
+ *
+ * Dispatch and recovery approvals are not typed in here: `fleet-launch` records a
+ * dispatch only from verified gates and deployment evidence, at its actual start,
+ * and `release-withdraw` approves only a verified, compatible recovery package
+ * (src/fleet-rollout.ts).
  */
 export const runReleaseOperator = async (args: readonly string[], { query, now = Date.now(), readArtifact, release }: OperatorOptions): Promise<string> => {
   const db = asQueryDatabase(query);
@@ -92,6 +94,12 @@ export const runReleaseOperator = async (args: readonly string[], { query, now =
     }
     return JSON.stringify({ package_version: verified.version, package_sha256: verified.sha256, provenance: verified.provenance, state: "candidate" });
   }
+  if (command === "release-dispatch") {
+    throw new Error("release-dispatch no longer records a dispatch from a typed time and reference: launch the approved release with fleet-launch");
+  }
+  if (command === "release-approve" && args[2] === "recovery") {
+    throw new Error("A recovery release is approved only by release-withdraw, which checks the package is verified and compatible with the live service");
+  }
   if (command === "release-approve" && args.length === 6) {
     const [, version, kind, expected, evidence, actor] = args;
     if (!PLUGIN_VERSION.test(version!) || !["production", "recovery"].includes(kind!) || !/^(none|[1-9][0-9]{0,8})$/.test(expected!) ||
@@ -118,21 +126,6 @@ export const runReleaseOperator = async (args: readonly string[], { query, now =
         : "A recovery approval needs an earlier approved version other than the approved release");
     }
     return JSON.stringify({ release_id: approved.sequence, package_version: version, kind, previous_release_id: base || null, approved_at: new Date(now).toISOString() });
-  }
-  if (command === "release-dispatch" && args.length === 5) {
-    const [, release, time, evidence, actor] = args;
-    const dispatchedAt = ISO.test(time!) ? Date.parse(time!) : NaN;
-    if (!/^[1-9][0-9]{0,8}$/.test(release!) || !(dispatchedAt <= now) || !EVIDENCE.test(evidence!) || !ACTOR.test(actor!)) {
-      throw new Error(`${USAGE}; dispatched-at is the ISO UTC time of the recorded dispatch, no later than now`);
-    }
-    const expires = dispatchedAt + COMPATIBILITY_WINDOW_MS;
-    const [dispatched] = await query(`INSERT INTO release_dispatch (sequence, dispatched_at, compatibility_expires_at, evidence, recorded_by, recorded_at)
-      SELECT sequence, ?, ?, ?, ?, ? FROM release_approval
-      WHERE sequence = ? AND sequence = (SELECT MAX(sequence) FROM release_approval) AND approved_at <= ?
-      ON CONFLICT (sequence) DO NOTHING RETURNING sequence`, [dispatchedAt, expires, evidence!, actor!, now, Number(release), dispatchedAt]);
-    if (!dispatched) throw new Error("Only the approved release's first dispatch, at or after its approval, can be recorded; check release-status");
-    return JSON.stringify({ release_id: Number(release), dispatched_at: new Date(dispatchedAt).toISOString(),
-      compatibility_expires_at: new Date(expires).toISOString() });
   }
   throw new Error(USAGE);
 };

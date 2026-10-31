@@ -11,6 +11,7 @@ import { handleWorkerRequest } from "../src/worker-http.ts";
 import { handleUpdateRequest } from "../src/update-access.ts";
 import { harness, keyPair, publicKeyOf } from "./installation-client.ts";
 import { localStage } from "./local-d1.ts";
+import { fakeEvidence, filesSha256, pluginFiles, recordLiveMigrations, reviewedMigrations, SCHEMA_RANGE, zipOf, type FakeEvidence } from "./release-fixture.ts";
 import updateFixtures from "../../contract/fixtures/update.json";
 
 // #142: native WordPress updates of approved, verified package bytes, under a narrow
@@ -32,7 +33,8 @@ let github: FakeReleases;
 const advance = (milliseconds: number) => { now += milliseconds; vi.setSystemTime(now); };
 const at = (time: number) => new Date(time).toISOString();
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-const bytesOf = (version: string) => new TextEncoder().encode(`PK gq-support ${version} approved package bytes`);
+/** A release ZIP of the plugin's files at `version`. */
+const bytesOf = (version: string) => zipOf(pluginFiles(version));
 
 /**
  * GitHub's release API as the package source uses it: a release by tag with its
@@ -86,6 +88,8 @@ beforeEach(async () => {
   now = START;
   stage = await localStage(["shared", "ledger"]);
   github = fakeReleases();
+  evidence = fakeEvidence();
+  await recordLiveMigrations(stage.databases.shared);
 });
 afterEach(async () => { await stage.dispose(); vi.useRealTimers(); });
 
@@ -96,19 +100,24 @@ type D1Database = (typeof stage)["databases"]["shared"];
 
 // Release artifacts as the release workflow writes them, by directory (src/release-operator.ts).
 const artifacts = new Map<string, { zip: Uint8Array; manifest: string; provenance: string }>();
+let evidence: FakeEvidence;
 const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
-  query: query(stage.databases.shared), ledger: query(stage.databases.ledger),
+  query: query(stage.databases.shared), ledger: query(stage.databases.ledger), stage: "prod", evidence, migrations: reviewedMigrations(),
   readArtifact: async (directory) => artifacts.get(directory)! });
-/** Publishes `version` as the release workflow would, approves it and records its dispatch. */
+/** Launches the approved release to the fleet (src/fleet-rollout.ts), after its compatible Worker's gated deployment. */
+const launch = (id: string) => operator("fleet-launch", id, evidence.deploy("prod"), "alex");
+/** Publishes `version` as the release workflow would, records its passing gates, approves it and launches it. */
 const release = async (version: string, expected: string, { dispatch = true } = {}) => {
   const zip = bytesOf(version);
   artifacts.set(version, { zip, manifest: JSON.stringify({ name: "gq-support", version, zip: { size: zip.length, sha256: sha256(zip) } }),
-    provenance: JSON.stringify({ version, commit: "b".repeat(40), run: "39000000001", zip_sha256: sha256(zip) }) });
+    provenance: JSON.stringify({ version, commit: "b".repeat(40), run: String(39_000_000_100 + artifacts.size), zip_sha256: sha256(zip) }) });
   github.assets.set(version, zip);
-  await operator("release-candidate", version, "a".repeat(40), "1", "0001-0028", "signed", "alex");
+  evidence.release(artifacts.get(version)!);
+  await operator("release-candidate", version, "a".repeat(40), "1", SCHEMA_RANGE, "signed", "alex");
+  await operator("release-verify", version, version, evidence.ci(), evidence.deploy("staging"), "alex");
   const { release_id: id } = JSON.parse(await operator("release-approve", version, "production", expected,
     "https://github.com/Quick-Release/gq-support/pull/142", "alex")) as { release_id: number };
-  if (dispatch) await operator("release-dispatch", String(id), at(now), "https://github.com/Quick-Release/gq-support/actions/runs/1", "alex");
+  if (dispatch) await launch(String(id));
   return { id: String(id), sha256: sha256(zip) };
 };
 
@@ -166,11 +175,11 @@ it("offers only the dispatched approved release, and serves its exact verified b
   // An approval alone is not a dispatch: native installations see it once dispatch is recorded.
   const first = await release("0.2.0", "none", { dispatch: false });
   expect((await offer(key)).release).toBeNull();
-  await operator("release-dispatch", first.id, at(now), "https://github.com/Quick-Release/gq-support/actions/runs/1", "alex");
+  await launch(first.id);
 
   const current = await offer(key);
   expect(current).toEqual({ plugin: "gq-support", auto_update: true,
-    release: { release_id: 1, version: "0.2.0", package_sha256: first.sha256,
+    release: { release_id: 1, version: "0.2.0", kind: "production", files_sha256: filesSha256(pluginFiles("0.2.0")), package_sha256: first.sha256,
       package_path: `/v1/updates/gq-support/package?version=0.2.0&sha256=${first.sha256}` },
     grant: { token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), expires_at: at(now + 15 * MINUTE) } });
 
@@ -242,8 +251,7 @@ it("refuses a package that is no longer the approved release, and never offers i
   expect(withdrawnOffer.release!.version).toBe("0.2.1");
 
   // Recovery re-approves 0.2.0: 0.2.1 is withdrawn while an installation still holds its offer.
-  await operator("release-approve", "0.2.0", "recovery", "2", "https://github.com/Quick-Release/gq-support/issues/142", "alex");
-  await operator("release-dispatch", "3", at(now), "https://github.com/Quick-Release/gq-support/actions/runs/2", "alex");
+  await operator("release-withdraw", "2", "0.2.0", evidence.deploy("prod"), "alex");
   const withdrawn = await download(key, withdrawnOffer);
   expect(withdrawn.status).toBe(410);
   expect(await withdrawn.json()).toEqual({ code: "gq_support_update_withdrawn" });
