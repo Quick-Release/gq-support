@@ -12,7 +12,7 @@ import type { PackageSource } from "../src/package-source.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { handleWorkerRequest } from "../src/worker-http.ts";
 import { keyPair, publicKeyOf } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { artifactOf, fakeEvidence, filesSha256, pluginFiles, recordLiveMigrations, reviewedMigrations, SCHEMA_RANGE, sha256, WORKER_COMMIT,
   type Artifact, type FakeEvidence } from "./release-fixture.ts";
 
@@ -208,7 +208,7 @@ it("refuses to record gates or launch until every gate passed at the release's o
   await observeSignals(stage.databases.shared, now);
   expect((await listIncidents(stage.databases.shared, now)).map((incident) => [incident.category, incident.detail])).toEqual([["release_migration_failed", "mismatch"]]);
   // Unconfigured access fails closed, naming what is missing.
-  await expect(runOperator(["fleet-launch", String(id), evidence.deploy("prod"), "alex"], { mappings, now, recordRevocation: async () => {},
+  await expect(runOperator(["fleet-launch", String(id), evidence.deploy("prod"), "alex"], { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
     query: query(stage.databases.shared), migrations: reviewed })).rejects.toThrow(/Not configured: the Operator's target stage/);
   expect(JSON.parse(await operator("release-status")).current.dispatch).toBeNull();
   // The free-form dispatch and recovery approval are gone.
@@ -377,7 +377,7 @@ it("refuses a rollback that merely exists or is incompatible with the live schem
   const reviewed = reviewedMigrations();
   const destructive = { name: "0032_drop_legacy.sql", sql: "DROP TABLE slot_update_attempt;", sha256: sha256("DROP TABLE slot_update_attempt;") };
   await recordLiveMigrations(stage.databases.shared, [...reviewed, destructive]);
-  const withdraw = runOperator(["release-withdraw", String(second.id), "0.2.0", evidence.deploy("prod"), "alex"], { mappings, now, recordRevocation: async () => {},
+  const withdraw = runOperator(["release-withdraw", String(second.id), "0.2.0", evidence.deploy("prod"), "alex"], { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
     query: query(stage.databases.shared), stage: "prod", evidence, migrations: [...reviewed, destructive] });
   await expect(withdraw)
     .rejects.toThrow(/not compatible with the live service \(live migration 0032 removes structures.*never rolled back/);

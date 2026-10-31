@@ -9,7 +9,7 @@ import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { suspendRepository } from "../src/repository-suspension.ts";
 import { scheduledTick } from "../src/scheduled.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { BOT, CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 
 // The staging probe as the Reporter's installation, against the real installation API,
@@ -47,7 +47,7 @@ const tick = () => {
     .pipe(Effect.provide(Layer.mergeAll(GitHubGateway.layer(config), GitHubReader.layer(config)).pipe(Layer.provide(github.layer))),
       Effect.provide(Logger.layer([]))));
 };
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
   query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 
 /** Each poll waits ten simulated seconds, during which the minute Cron runs on the minute. */

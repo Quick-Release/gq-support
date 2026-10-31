@@ -3,7 +3,7 @@ import { handleRequest } from "../src/installation-api.ts";
 import { runOperator } from "../src/operator.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { keyPair, signed } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 
 const mappings: readonly RepositoryMapping[] = [{
   slot: "shop/production", client: "client-a", project: "shop", environment: "production",
@@ -18,7 +18,7 @@ describe("installation enrollment at the Worker boundary", () => {
   beforeEach(async () => { stage = await localStage(["shared"]); });
   afterEach(async () => { await stage.dispose(); });
   const operator = (command: string, slot = "shop/production", now?: number) =>
-    runOperator([command, slot], {
+    runOperator([command, slot], { ledger: operatorLedger(stage.databases.shared),
       query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
       recordRevocation: async () => {}, mappings, now,
     });
@@ -249,12 +249,12 @@ describe("installation enrollment at the Worker boundary", () => {
     const { key_id: keyId } = await (await enroll(await operator("enroll"), pair)).json() as { key_id: string };
     const query = async (sql: string, parameters: readonly (string | number)[]) =>
       (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results;
-    await expect(runOperator(["revoke", "shop/production"], {
+    await expect(runOperator(["revoke", "shop/production"], { ledger: operatorLedger(stage.databases.shared),
       query, mappings, recordRevocation: async () => { throw new Error("log unavailable"); },
     })).rejects.toThrow("log unavailable");
     expect((await send(await signed(pair, "GET", "/v1/installation", "", keyId))).status).toBe(200);
     const records: string[] = [];
-    await runOperator(["revoke", "shop/production"], {
+    await runOperator(["revoke", "shop/production"], { ledger: operatorLedger(stage.databases.shared),
       query, mappings, recordRevocation: async (id) => { records.push(id); },
     });
     expect(records).toEqual([keyId]);

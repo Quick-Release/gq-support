@@ -404,3 +404,12 @@ it("a poisoned D1 record is isolated on every tick, while another Client's repor
   expect(posts()).toHaveLength(3);
   expect(await intentOf(poisoned)).not.toMatchObject({ state: "delivered" });
 });
+
+it("refuses every guarded library command when the ledger was omitted, before querying main", async () => {
+  const query = vi.fn(async () => []);
+  for (const command of ["enroll", "resume", "reconcile", "unsuspend", "release-candidate", "release-approve", "fleet-launch"]) {
+    await expect(runOperator([command, mapping.slot], { query, mappings, recordRevocation: async () => {} }))
+      .rejects.toThrow("ledger database is required");
+  }
+  expect(query).not.toHaveBeenCalled();
+});

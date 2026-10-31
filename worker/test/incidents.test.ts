@@ -11,7 +11,7 @@ import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { handleWorkerRequest } from "../src/worker-http.ts";
 import { CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 import { harness, signed, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { operationsClient, type OperationsClient } from "./operations-client.ts";
 import type { QueryDatabase } from "../src/storage.ts";
 
@@ -94,7 +94,7 @@ const incidents = async (actor = "alex") => {
   expect(response.status).toBe(200);
   return ((await response.json()) as { incidents: Record<string, unknown>[] }).incidents;
 };
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
   // Like the Wrangler adapter, which substitutes plain `?` in order and has no numbered parameters.
   query: async (sql, parameters) => sql.match(/\?\d/) ? Promise.reject(new Error("Numbered parameter")) : (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 
@@ -250,7 +250,7 @@ it("resolves an incident only for its claimant, after an Operator's recovery is 
 
 it("gives Operators an audited CLI fallback to inspect and claim incidents when the dashboard is unavailable", async () => {
   const id = await shopIncident();
-  expect(JSON.parse(await operator("incidents"))).toEqual({ incidents: [expect.objectContaining({ id, state: "open", claimant: null })] });
+  expect(JSON.parse(await operator("incidents"))).toEqual({ incidents: [expect.objectContaining({ id, state: "open", claimant: null })], next_cursor: null });
   await expect(operator("incident-claim", id, "not an actor")).rejects.toThrow("Usage");
   expect(JSON.parse(await operator("incident-claim", id, "operator-7"))).toMatchObject({ incident: { id, state: "claimed", claimant: "operator-7" } });
   await expect(operator("incident-claim", id, "operator-8")).rejects.toThrow("already claimed by operator-7");
@@ -325,4 +325,26 @@ it("projects incidents without report content, Reporter identity, credentials or
   ].join("\n");
   for (const forbidden of ["Checkout fails", "Private report text", subject, production.keyId, production.installationId,
     banquinha.publicKey, '"subject"', "https://"]) expect(views).not.toContain(forbidden);
+});
+
+it("pages the complete incident list through both staff HTTP and Operator CLI without silently hiding the 201st", async () => {
+  const db = stage.databases.shared;
+  for (let start = 0; start < 201; start += 50) {
+    await db.batch(Array.from({ length: Math.min(50, 201 - start) }, (_, offset) => {
+      const index = start + offset;
+      return db.prepare(`INSERT INTO incident (id, category, subject, state, first_observed_at, last_observed_at)
+        VALUES (?, 'repository_suspended', ?, 'open', ?, ?)`)
+        .bind(crypto.randomUUID(), String(index), now + index, now + index);
+    }));
+  }
+  const first = await (await staff("GET", "/v1/operations/incidents")).json() as { incidents: { id: string }[]; next_cursor: string | null };
+  expect(first.incidents).toHaveLength(200);
+  expect(first.next_cursor).toEqual(expect.any(String));
+  const second = await (await staff("GET", `/v1/operations/incidents?cursor=${first.next_cursor}`)).json() as typeof first;
+  expect(second.incidents).toHaveLength(1);
+  expect(second.next_cursor).toBeNull();
+  expect(new Set([...first.incidents, ...second.incidents].map((item) => item.id)).size).toBe(201);
+  const cli = JSON.parse(await operator("incidents")) as typeof first;
+  expect(JSON.parse(await operator("incidents", cli.next_cursor!))).toEqual(second);
+  expect((await staff("GET", "/v1/operations/incidents?cursor=bad")).status).toBe(400);
 });

@@ -1,5 +1,5 @@
 import { readBody } from "./installation-api.ts";
-import { claimIncident, findIncident, isResolution, listIncidents, resolveIncident } from "./incidents.ts";
+import { claimIncident, findIncident, incidentPage, isResolution, resolveIncident } from "./incidents.ts";
 import { slotInventory, type StageInventory } from "./inventory.ts";
 import type { ReleaseEnforcement } from "./release-policy.ts";
 import { notificationStatus, type Destination } from "./notifications.ts";
@@ -69,7 +69,7 @@ export const handleOperationsRequest = async (request: Request, db: QueryDatabas
     const requests = request.method === "GET" && url.pathname === "/v1/operations/requests";
     const match = INCIDENT.exec(url.pathname);
     const action = match?.[2]?.slice(1);
-    if ((!requests && url.search) || !(list || delivery || slots || health || requests || (match && request.method === (action ? "POST" : "GET")))) return notFound();
+    if ((!requests && !list && url.search) || !(list || delivery || slots || health || requests || (match && request.method === (action ? "POST" : "GET")))) return notFound();
     if (url.protocol !== "https:") return unauthorized();
     const body = await readBody(request, BODY_BYTES);
     if (body === null) return json({ code: "request_too_large" }, 413);
@@ -86,7 +86,11 @@ export const handleOperationsRequest = async (request: Request, db: QueryDatabas
     ]);
     if (nonce!.meta.changes !== 1) return unauthorized();
 
-    if (list) return json({ incidents: await listIncidents(db, now) });
+    if (list) {
+      if ([...url.searchParams.keys()].some((key) => key !== "cursor") || url.searchParams.getAll("cursor").length > 1) return json({ code: "invalid_request" }, 400);
+      const page = await incidentPage(db, now, url.searchParams.get("cursor"));
+      return page ? json(page) : json({ code: "invalid_request" }, 400);
+    }
     if (delivery) return json(await notificationStatus(db, notifications));
     if (slots) return json(await slotInventory(db, mappings, inventory, now, { release }));
     if (health) return json(await operationsHealth(db, mappings, now));

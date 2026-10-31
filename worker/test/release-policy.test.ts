@@ -9,7 +9,7 @@ import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { runOperator } from "../src/operator.ts";
 import type { ReleaseEnforcement } from "../src/release-policy.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { fakeEvidence, pluginFiles, recordLiveMigrations, reviewedMigrations, SCHEMA_RANGE, zipOf, type FakeEvidence } from "./release-fixture.ts";
 
 // #141 (ADR 0021): approved releases, the 24-hour previous-release window and
@@ -55,7 +55,7 @@ const published = (version: string, change: { manifest?: object; provenance?: ob
   return directory;
 };
 
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {}, stage: "prod", evidence,
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {}, stage: "prod", evidence,
   migrations: reviewedMigrations(),
   // Like the Wrangler adapter: plain `?` parameters, one statement per call.
   query: async (sql, parameters) => sql.match(/\?\d/) ? Promise.reject(new Error("Numbered parameter"))

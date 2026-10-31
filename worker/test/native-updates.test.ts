@@ -511,3 +511,25 @@ it("update access ends as soon as the main database suppresses the Slot, before 
   expect((await metadata(key)).status).toBe(401);
   expect((await download(key, pending)).status).toBe(401);
 });
+
+it("concurrent first offboards preserve one ledger-held grace period in every result and replay", async () => {
+  let arrived = 0;
+  let releaseBoth!: () => void;
+  const both = new Promise<void>((resolve) => { releaseBoth = resolve; });
+  const ledger = async (sql: string, parameters: readonly (string | number)[]) => {
+    const rows = await query(stage.databases.ledger)(sql, parameters);
+    if (sql.startsWith("SELECT payload FROM ledger_entry") && arrived < 2) {
+      if (++arrived === 2) releaseBoth();
+      await both;
+    }
+    return rows;
+  };
+  const offboard = (time: number) => runOperator(["offboard", "shop/production", "alex", EVIDENCE_147], {
+    query: query(stage.databases.shared), ledger, mappings, now: time, recordRevocation: async () => {},
+  });
+  const results = (await Promise.all([offboard(now), offboard(now + DAY)])).map((value) => JSON.parse(value));
+  expect(results[0].purge_after).toBe(results[1].purge_after);
+  await replayLedger(stage.databases.shared, stage.databases.ledger, 1, now + DAY);
+  const row = await stage.databases.shared.prepare("SELECT purge_after FROM offboarding WHERE slot = ?").bind("shop/production").first<{ purge_after: number }>();
+  expect(new Date(row!.purge_after).toISOString()).toBe(results[0].purge_after);
+});

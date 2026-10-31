@@ -116,8 +116,29 @@ const row = (db: QueryDatabase, id: string, now: number) =>
 /** Open incidents first, oldest first, then unexpired resolved ones. */
 // Positional `?` only: the Operator CLI's Wrangler adapter substitutes them in order (scripts/operator.ts).
 export const listIncidents = async (db: QueryDatabase, now: number): Promise<IncidentProjection[]> =>
-  (await db.prepare(`${SELECT} ORDER BY i.state = 'resolved', i.first_observed_at, i.id LIMIT 200`)
-    .bind(now - INCIDENT_RETENTION_MS).all<IncidentRow>()).results.map(project);
+  (await incidentPage(db, now))!.incidents;
+
+/** A bounded team view with a stable continuation across equal observation times. */
+export const incidentPage = async (db: QueryDatabase, now: number, cursor: string | null = null) => {
+  let after: [number, number, string] = [-1, 0, ""];
+  if (cursor !== null) {
+    try {
+      if (!/^[A-Za-z0-9_-]{1,256}$/.test(cursor)) return null;
+      const parsed: unknown = JSON.parse(atob(cursor.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - cursor.length % 4) % 4)));
+      if (!Array.isArray(parsed) || parsed.length !== 3 || ![0, 1].includes(parsed[0]) ||
+        !Number.isSafeInteger(parsed[1]) || parsed[1] < 0 || typeof parsed[2] !== "string" || !/^[0-9a-f-]{36}$/.test(parsed[2])) return null;
+      after = parsed as [number, number, string];
+    } catch { return null; }
+  }
+  const rows = (await db.prepare(`${SELECT} AND (i.state = 'resolved', i.first_observed_at, i.id) > (?, ?, ?)
+    ORDER BY i.state = 'resolved', i.first_observed_at, i.id LIMIT 201`)
+    .bind(now - INCIDENT_RETENTION_MS, ...after).all<IncidentRow>()).results;
+  const page = rows.slice(0, 200);
+  const last = page.at(-1);
+  return { incidents: page.map(project), next_cursor: rows.length > 200 && last
+    ? btoa(JSON.stringify([last.state === "resolved" ? 1 : 0, last.first_observed_at, last.id]))
+      .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "") : null };
+};
 
 export const findIncident = async (db: QueryDatabase, id: string, now: number): Promise<IncidentProjection | null> => {
   const found = await row(db, id, now);

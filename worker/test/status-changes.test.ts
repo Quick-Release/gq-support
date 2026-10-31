@@ -9,7 +9,7 @@ import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { scheduledTick } from "../src/scheduled.ts";
 import { requestStatusRefresh } from "../src/status-refresh.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { BOT, CLIENT_ID, makeFakeGitHub, SLUG, type FakeIssue } from "./fake-github.ts";
 
 // Reporter close and reopen (#28, ADR 0020): ordered, idempotent status-change
@@ -308,7 +308,7 @@ describe("delivery", () => {
     issue().deleted = true;
     await tick();
     const intent = await stage.databases.shared.prepare("SELECT id FROM delivery_intent WHERE seq = 1").first<{ id: string }>();
-    const resume = runOperator(["resume", production.slot, intent!.id, new Date(now + 3_600_000).toISOString(), "operator-1", "provider-recovered"], {
+    const resume = runOperator(["resume", production.slot, intent!.id, new Date(now + 3_600_000).toISOString(), "operator-1", "provider-recovered"], { ledger: operatorLedger(stage.databases.shared),
       query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
       recordRevocation: async () => {}, mappings: [production], now,
     });

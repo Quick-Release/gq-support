@@ -77,7 +77,8 @@ const inChunks = async (db: QueryDatabase, list: readonly (readonly [string, rea
 export const ledgerStore = (ledger: QueryDatabase) => ({
   async record(entries: readonly LedgerEntry[], now: number) {
     await inChunks(ledger, entries.map((entry) => [`INSERT INTO ledger_entry (kind, reference, payload, recorded_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT (kind, reference) DO UPDATE SET payload = excluded.payload, recorded_at = excluded.recorded_at`,
+      ON CONFLICT (kind, reference) DO UPDATE SET payload = excluded.payload, recorded_at = excluded.recorded_at
+      WHERE ledger_entry.kind != 'offboarding' OR ledger_entry.payload IS NULL`,
       [entry.kind, entry.reference, entry.payload === null ? null : JSON.stringify(entry.payload), now]] as const));
   },
   async epoch() {

@@ -14,7 +14,7 @@ import { handleWorkerRequest } from "../src/worker-http.ts";
 import { makeFakeDiscord, webhookUrl } from "./fake-discord.ts";
 import { CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { operationsClient, type OperationsClient } from "./operations-client.ts";
 
 const START = Date.parse("2026-10-30T10:00:00Z");
@@ -74,7 +74,7 @@ const tick = () => {
     random: () => 0, refresh: { readsPerTick: 0 }, notifications: { destinations, fetch: discord.fetch } }).pipe(
     Effect.provide(Layer.mergeAll(GitHubGateway.layer(config), GitHubReader.layer(config)).pipe(Layer.provide(github.layer)))));
 };
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
   query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 const access = () => operationsAccess(JSON.stringify({ [banquinha.keyId]: banquinha.publicKey }), "alex,sam");
 const staff = async (method: string, path: string, actor = "alex", body = "") => Effect.runPromise(handleWorkerRequest(

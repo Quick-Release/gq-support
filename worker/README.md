@@ -496,7 +496,9 @@ from durable records each minute.
 `/v1/operations/*` is the one authenticated boundary for a staff dashboard such
 as Banquinha (`src/operations-api.ts`):
 
-- `GET /v1/operations/incidents` and `GET /v1/operations/incidents/{id}`
+- `GET /v1/operations/incidents[?cursor=…]` returns up to 200 incidents and
+  `next_cursor` (null on the last page); use that cursor to reach later incidents.
+  `GET /v1/operations/incidents/{id}` reads one incident.
 - `POST /v1/operations/incidents/{id}/claim` (empty body): `200`, or `409`
   `incident_claimed` / `incident_resolved`
 - `POST /v1/operations/incidents/{id}/resolve` with `{"resolution":"recovered"}`:
@@ -537,6 +539,7 @@ and claim incidents with the usual account and database flags:
 
 ```sh
 pnpm operator incidents --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator incidents <next_cursor> --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator incident <incident-id> --stage <stage> --account-id <account-id> --database-id <database-id>
 pnpm operator incident-claim <incident-id> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
 ```

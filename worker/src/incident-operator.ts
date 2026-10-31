@@ -1,5 +1,5 @@
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
-import { claimIncident, findIncident, incidentAudit, listIncidents } from "./incidents.ts";
+import { claimIncident, findIncident, incidentAudit, incidentPage } from "./incidents.ts";
 import { DESTINATIONS, notificationStatus, retryNotifications, type Destination } from "./notifications.ts";
 import { operationsHealth } from "./operations-health.ts";
 import { verifyWebhookDrill } from "./drill-verify.ts";
@@ -25,7 +25,11 @@ const ID = /^[0-9a-f-]{36}$/;
 export const runIncidentOperator = async (args: readonly string[], { query, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
   const db = asQueryDatabase(query);
   const [command, id, actor] = args;
-  if (command === "incidents" && args.length === 1) return JSON.stringify({ incidents: await listIncidents(db, now) });
+  if (command === "incidents" && args.length <= 2) {
+    const page = await incidentPage(db, now, id ?? null);
+    if (!page) throw new Error("Invalid incident cursor; start again with operator incidents");
+    return JSON.stringify(page);
+  }
   if (command === "incident" && args.length === 2 && ID.test(id!)) {
     const incident = await findIncident(db, id!, now);
     if (!incident) throw new Error("Unknown incident");

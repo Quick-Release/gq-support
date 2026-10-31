@@ -1,3 +1,4 @@
+import { operatorLedger } from "./local-d1.ts";
 import type { D1Database } from "@cloudflare/workers-types";
 import { handleRequest, type InstallationApiOptions } from "../src/installation-api.ts";
 import { runOperator } from "../src/operator.ts";
@@ -54,6 +55,7 @@ export interface Installation {
 export const harness = (db: D1Database, mappings: readonly RepositoryMapping[], options: InstallationApiOptions = {}) => {
   const send = (request: Request, config = mappings) => handleRequest(request, db, config, { release: "staged", ...options });
   const operator = (command: string, slot: string, now?: number) => runOperator([command, slot], {
+    ledger: options.ledger ? async (sql, parameters) => (await options.ledger!.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results : operatorLedger(db),
     query: async (sql, parameters) => (await db.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings, now,
   });

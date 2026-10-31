@@ -8,7 +8,7 @@ import { sweepDelivery } from "../src/delivery.ts";
 import { GitHubGateway } from "../src/github-gateway.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { CLIENT_ID, makeFakeGitHub, SLUG } from "./fake-github.ts";
 
 const START = Date.parse("2026-10-17T10:00:00Z");
@@ -240,7 +240,7 @@ it("disabled delivery does no provider work", async () => {
 
 const resume = async (id: string) => {
   const row = await stage.databases.shared.prepare('SELECT id FROM delivery_intent WHERE request_id = ?').bind(id).first<{ id: string }>();
-  return runOperator(['resume', mapping.slot, row!.id, new Date(now + 3_600_000).toISOString(), 'operator-1', 'permissions-restored'], {
+  return runOperator(['resume', mapping.slot, row!.id, new Date(now + 3_600_000).toISOString(), 'operator-1', 'permissions-restored'], { ledger: operatorLedger(stage.databases.shared),
     query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings: [mapping], now,
   });
@@ -329,7 +329,7 @@ it("audited read-only Operator recovery can resolve a late positive after 24 hou
   expect(await read(request.id)).toMatchObject({ delivery: 'outcome-unknown' });
   const db = stage.databases.shared;
   const row = await db.prepare('SELECT id FROM delivery_intent WHERE request_id = ?').bind(request.id).first<{ id: string }>();
-  expect(await runOperator(['reconcile', mapping.slot, row!.id, 'operator-1', 'positive-evidence'], {
+  expect(await runOperator(['reconcile', mapping.slot, row!.id, 'operator-1', 'positive-evidence'], { ledger: operatorLedger(stage.databases.shared),
     query: async (sql, parameters) => (await db.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results,
     recordRevocation: async () => {}, mappings: [mapping], now,
   })).toBe('Reconciliation scheduled');

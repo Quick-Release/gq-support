@@ -81,12 +81,14 @@ export const runOffboardingOperator = async (args: readonly string[], options: O
     (id, slot, actor, evidence, phase, effects, occurred_at) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?)`,
   [crypto.randomUUID(), slot!, actor!, evidence!, phase, effects === null ? "" : JSON.stringify(effects), now]);
   await audit("begin");
-  const [recorded] = await ledger("SELECT payload FROM ledger_entry WHERE kind = 'offboarding' AND reference = ? AND payload IS NOT NULL", [slot!]);
-  const first = recorded ? JSON.parse(String(recorded.payload)) as { recorded_at: number; purge_after: number }
-    : { recorded_at: now, purge_after: now + OFFBOARDING_GRACE_MS };
   const store = ledgerStore(asQueryDatabase(ledger));
   await store.record([imageOf("suppression", { scope: "slot", reference: slot, reason: "offboarding" }),
-    imageOf("offboarding", { slot, ...first })], now);
+    imageOf("offboarding", { slot, recorded_at: now, purge_after: now + OFFBOARDING_GRACE_MS })], now);
+  // The first ledger image wins across Operator checkouts as well as retries.
+  // Read that canonical value before writing main or reporting an audit result.
+  const [recorded] = await ledger("SELECT payload FROM ledger_entry WHERE kind = 'offboarding' AND reference = ? AND payload IS NOT NULL", [slot!]);
+  if (!recorded) throw new Error("Offboarding was not recorded in the suppression ledger");
+  const first = JSON.parse(String(recorded.payload)) as { recorded_at: number; purge_after: number };
   await query(`INSERT INTO delivery_suppression (scope, reference, reason, changed_at) VALUES ('slot', ?, 'offboarding', ?) ON CONFLICT DO NOTHING`, [slot!, now]);
   await query(`INSERT INTO offboarding (slot, recorded_at, purge_after, changed_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
     [slot!, first.recorded_at, first.purge_after, now]);

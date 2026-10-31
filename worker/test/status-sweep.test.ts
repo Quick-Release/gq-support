@@ -10,7 +10,7 @@ import { requestStatusRefresh } from "../src/status-refresh.ts";
 import { scheduledTick } from "../src/scheduled.ts";
 import type { SweepConfig } from "../src/status-sweep.ts";
 import { harness, type Installation } from "./installation-client.ts";
-import { localStage } from "./local-d1.ts";
+import { localStage, operatorLedger } from "./local-d1.ts";
 import { BOT, CLIENT_ID, makeFakeGitHub, SLUG, type FakeIssue } from "./fake-github.ts";
 
 const START = Date.parse("2026-10-17T10:00:00Z");
@@ -356,7 +356,7 @@ it("suspends a public mapped repository without any Support request or webhook",
 });
 
 
-const operator = (...args: string[]) => runOperator(args, { mappings, now, recordRevocation: async () => {},
+const operator = (...args: string[]) => runOperator(args, { ledger: operatorLedger(stage.databases.shared), mappings, now, recordRevocation: async () => {},
   query: async (sql, parameters) => (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 
 it("requires a passing sweep after suspension before an Operator can lift it", async () => {
