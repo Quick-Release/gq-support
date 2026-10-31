@@ -593,8 +593,7 @@ failure and ended by a healthy one.
   it up by hand from that run. Each run's summary is also its job summary.
 
 The probe, `GET /v1/operations/checker/probe`, is answered before the restore
-gate and records nothing of its own (like any request, it may let the gate run
-a pending ledger replay), so it works while storage is down. It returns
+gate and performs no recovery, so it works while storage is down. It returns
 only `worker`, `support_db`, `suppression_ledger`, `restore_gate`, configuration
 presence and the time, never a record, value or secret. Both checker routes need
 the checker's own signature: the operations API's wire format with label
@@ -1006,3 +1005,17 @@ response bodies or tokens enter them.
 
 Verification: `pnpm exec vitest run test/status-refresh.test.ts` exercises the
 scheduled entry, local workerd D1, fake GitHub and the signed installation API.
+
+### Staff Support request feed
+
+`GET /v1/operations/requests` uses the same signed dashboard identity, staff
+roster and replay protection as the other operations routes. It returns
+`{ items, next_cursor }`, with optional `limit` (1–200, default 50) and opaque
+`cursor` query parameters for stable newest-first pagination. Query parameters
+are part of the signed path. Each item contains only the opaque request ID,
+Slot/Client/project/environment, acceptance time, actual delivery outcome,
+last-observed Support status and a trusted GitHub issue link when the reviewed
+repository mapping still matches. Submitted text, Reporter identity, erased
+and superseded reports, and requests outside the current reviewed mappings are
+excluded. Responses are `no-store`; this is a staff operational view, not an
+alternate Reporter API or incident store.

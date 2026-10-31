@@ -98,6 +98,29 @@ const operator = (...args: string[]) => runOperator(args, { mappings, now, recor
   // Like the Wrangler adapter, which substitutes plain `?` in order and has no numbered parameters.
   query: async (sql, parameters) => sql.match(/\?\d/) ? Promise.reject(new Error("Numbered parameter")) : (await stage.databases.shared.prepare(sql).bind(...parameters).all<Record<string, unknown>>()).results });
 
+it("lists Support request metadata separately for staff, with bounded pagination and no Reporter content", async () => {
+  await accept(production);
+  advance(1_000);
+  await accept(globex);
+  const first = await staff("GET", "/v1/operations/requests?limit=1");
+  expect(first.status).toBe(200);
+  const page = await first.json() as { items: { id: string; slot: string; delivery: string }[]; next_cursor: string | null };
+  expect(page.items).toEqual([expect.objectContaining({ slot: "globex/production", delivery: "accepted-pending" })]);
+  expect(page.next_cursor).toEqual(expect.any(String));
+  const next = await staff("GET", `/v1/operations/requests?limit=1&cursor=${page.next_cursor}`);
+  expect(next.status).toBe(200);
+  const last = await next.json() as { items: { id: string; slot: string }[]; next_cursor: string | null };
+  expect(last.items).toEqual([expect.objectContaining({ slot: "shop/production" })]);
+  expect(last.items[0]!.id).not.toBe(page.items[0]!.id);
+  expect(last.next_cursor).toBeNull();
+  const shown = JSON.stringify([page, last]);
+  for (const hidden of ["Checkout fails", "Private report text", subject, "reporter_subject", "summary", "description"])
+    expect(shown).not.toContain(hidden);
+  expect((await staff("GET", "/v1/operations/requests?limit=201")).status).toBe(400);
+  expect((await staff("GET", "/v1/operations/requests?cursor=invalid")).status).toBe(400);
+  expect((await staff("GET", "/v1/operations/requests", "discord-member")).status).toBe(403);
+});
+
 it("groups a shared repository failure into one incident listing every affected Slot, apart from unrelated failures", async () => {
   github.update(42, { private: false });
   await accept(production);
