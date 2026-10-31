@@ -115,12 +115,12 @@ const operator = (...args: string[]) => runOperator(args, { mappings, now, recor
 const json = async (...args: string[]) => JSON.parse(await operator(...args));
 
 /** Builds and publishes `version` as the release workflow does, with a passing release run. */
-const publish = (version: string, files = pluginFiles(version)) => {
+const publish = (version: string, files = pluginFiles(version), signing = "signed") => {
   const artifact = artifactOf(version, files);
   artifacts.set(version, artifact);
   builds.set(sha256(artifact.zip), { version, files });
   evidence.release(artifact);
-  return operator("release-candidate", version, WORKER_COMMIT, "1", SCHEMA_RANGE, "signed", "alex");
+  return operator("release-candidate", version, WORKER_COMMIT, "1", SCHEMA_RANGE, signing, "alex");
 };
 const verify = (version: string) => json("release-verify", version, version, evidence.ci(), evidence.deploy("staging"), "alex");
 const approve = (version: string, expected: string) =>
@@ -446,4 +446,17 @@ it("an offboarded Slot is not a launch target, gets no fleet application and sta
   const run = await json("fleet-run", String(id), "0.2.0", "alex") as { applications: { slot: string }[] };
   expect(run.applications.map((application) => application.slot)).toEqual(["shop/production"]);
   expect(await slotState("blog/production")).toMatchObject({ state: "offboarded" });
+});
+
+
+it("refuses recovery to the unsigned bootstrap after a signed release was approved", async () => {
+  await publish("0.1.9", undefined, "unsigned-legacy");
+  await verify("0.1.9");
+  const bootstrap = await approve("0.1.9", "none");
+  await launch(bootstrap.release_id);
+  const current = await ship("0.2.0", String(bootstrap.release_id));
+  await expect(operator("release-withdraw", String(current.id), "0.1.9", evidence.deploy("prod"), "alex"))
+    .rejects.toThrow(/unsigned legacy recovery/);
+  expect((await json("release-status")).current.package_version).toBe("0.2.0");
+  expect(await stage.databases.ledger.prepare("SELECT COUNT(*) AS n FROM release_withdrawal").first()).toEqual({ n: 0 });
 });

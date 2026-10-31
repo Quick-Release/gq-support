@@ -20,7 +20,7 @@ const ID = /^[0-9a-f-]{36}$/;
  * - `health` shows measured support-path health, as the operations API does;
  * - `drill-verify webhook <ISO-start>` checks the broken-webhook drill's recorded evidence since its start.
  *
- * Resolution stays with the claimant through the operations API.
+ * Staff resolve claimed incidents through the operations API once recovery is verified.
  */
 export const runIncidentOperator = async (args: readonly string[], { query, mappings, now = Date.now() }: OperatorOptions): Promise<string> => {
   const db = asQueryDatabase(query);

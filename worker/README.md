@@ -478,7 +478,7 @@ from durable records each minute.
 - A claim atomically records its immutable actor, channel, time and audit identity
   in one conditional write, so exactly one concurrent claimant wins, including
   through remote CLI queries. Repeating your own claim succeeds.
-- Only the claimant can resolve (`recovered`), and only once trusted records show
+- Any authenticated staff member can resolve a claimed incident (`recovered`), and only once trusted records show
   the cause recovered, checked in the same conditional write. For a suspension
   that means the Operator's audited `unsuspend` has lifted it. A recurrence after
   resolution opens a new incident.
@@ -555,7 +555,7 @@ The minute tick's signal phase (#138, `src/operational-signals.ts`) reads
 trusted durable records, never log text, and records what it observes as
 grouped [Operational incidents](#operational-incidents), which the
 [Discord notifier](#discord-notifications) then announces. Each category's
-observation query is also its recovery check, so the claimant can resolve the
+observation query is also its recovery check, so any staff member can resolve the
 incident only once the signal no longer observes its cause. One cause is one
 incident whose affected Slots grow with each observation; a recurrence after
 resolution opens a new incident. No signal retries, replays or force-creates work.
@@ -671,7 +671,7 @@ failure and ended by a healthy one.
   open, so a resent report, or one retried after a lost response, never opens
   a second incident, even after the first was resolved. A reported healthy
   component also ends its earlier episodes, including any the checker has lost
-  or expired. The claimant can resolve the incident once every episode in it has
+  or expired. Any staff member can resolve the incident once every episode in it has
   ended.
 - **Notices**: while the service cannot record an episode, or records it but its
   configuration keeps its notifier from announcing it, the checker posts its own
@@ -798,7 +798,9 @@ the procedure.
   `provenance.json` must both match, and the provenance names the run and source
   commit. The Operator adds the Worker commit, contract version and schema
   migration range it was verified with, and whether the package signs its
-  version (`signed`) or is a pre-#141 `unsigned-legacy` package. A candidate is
+  version (`signed`) or is a pre-#141 `unsigned-legacy` package. Once any signed
+  release has been approved, production and recovery approvals refuse unsigned
+  legacy packages; legacy evidence is only for bootstrapping. A candidate is
   never approved by being recorded.
 - An **approval** names the approved release the Operator expects (`none` for
   the first), so a concurrent approval loses. `production` needs a version never

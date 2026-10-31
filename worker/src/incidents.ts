@@ -155,7 +155,7 @@ export const incidentAudit = async (db: QueryDatabase, id: string) =>
     .bind(id, id).all<Record<string, unknown>>()).results;
 
 export type ClaimOutcome = "claimed" | "not_found" | "claimed_by_other" | "resolved";
-export type ResolveOutcome = "resolved" | "not_found" | "not_claimant" | "already_resolved" | "recovery_not_verified";
+export type ResolveOutcome = "resolved" | "not_found" | "not_claimed" | "already_resolved" | "recovery_not_verified";
 export interface Mutation<Outcome> { readonly outcome: Outcome; readonly incident: IncidentProjection | null }
 
 /**
@@ -174,7 +174,7 @@ export const claimIncident = async (db: QueryDatabase, id: string, actor: string
 };
 
 /**
- * Resolution by the incident's claimant, once trusted records show its cause
+ * Resolution by any staff member, once trusted records show its cause
  * recovered. The recovery check is part of the same conditional write.
  */
 export const resolveIncident = async (db: QueryDatabase, id: string, actor: string, via: Via, resolution: Resolution,
@@ -182,22 +182,22 @@ export const resolveIncident = async (db: QueryDatabase, id: string, actor: stri
   const before = await row(db, id, now);
   if (!before) return { outcome: "not_found", incident: null };
   const rule = ruleOf(before.category);
-  if (before.state === "open" && before.claimant === actor && rule) {
+  if (before.state === "open" && before.claimant !== null && rule) {
     const audit = crypto.randomUUID();
     await db.batch([
       db.prepare(`INSERT INTO incident_audit (id, incident_id, actor, via, action, previous_state, new_state, occurred_at)
         SELECT ?, i.id, ?, ?, 'resolve', 'claimed', 'resolved', ? FROM incident i
-        WHERE i.id = ? AND i.state = 'open' AND i.claimant = ? AND ${rule.recovered(now)}`).bind(audit, actor, via, now, id, actor),
+        WHERE i.id = ? AND i.state = 'open' AND i.claimant IS NOT NULL AND ${rule.recovered(now)}`).bind(audit, actor, via, now, id),
       db.prepare(`UPDATE incident SET state = 'resolved', resolution = ?, resolved_at = ?, resolve_audit_id = ?
-        WHERE id = ? AND state = 'open' AND claimant = ? AND EXISTS (SELECT 1 FROM incident_audit WHERE id = ?)`)
-        .bind(resolution, now, audit, id, actor, audit),
+        WHERE id = ? AND state = 'open' AND claimant IS NOT NULL AND EXISTS (SELECT 1 FROM incident_audit WHERE id = ?)`)
+        .bind(resolution, now, audit, id, audit),
     ]);
     const after = (await row(db, id, now))!;
     if (after.resolve_audit_id === audit) return { outcome: "resolved", incident: project(after) };
-    return { outcome: after.state === "resolved" ? "already_resolved" : after.claimant === actor ? "recovery_not_verified" : "not_claimant",
+    return { outcome: after.state === "resolved" ? "already_resolved" : after.claimant !== null ? "recovery_not_verified" : "not_claimed",
       incident: project(after) };
   }
-  return { outcome: before.state === "resolved" ? "already_resolved" : before.claimant !== actor ? "not_claimant" : "recovery_not_verified",
+  return { outcome: before.state === "resolved" ? "already_resolved" : before.claimant === null ? "not_claimed" : "recovery_not_verified",
     incident: project(before) };
 };
 

@@ -317,3 +317,12 @@ it("shows staff the approved release as each Slot's desired version, and only a 
     Effect.succeed(stage.databases.shared), mappings, () => Effect.die("Not a webhook"), () => {}, undefined, { release: "enforced" }, access));
   expect(mutation.status).toBe(404);
 });
+
+it("never approves an unsigned legacy release after a signed release was approved", async () => {
+  await candidate("0.2.0");
+  await approve("0.2.0", "none");
+  await dispatch("1");
+  await candidate("0.3.0", "unsigned-legacy");
+  await expect(approve("0.3.0", "1")).rejects.toThrow(/unsigned legacy/i);
+  expect(JSON.parse(await operator("release-status")).current.package_version).toBe("0.2.0");
+});

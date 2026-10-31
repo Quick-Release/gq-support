@@ -115,7 +115,7 @@ export const handleOperationsRequest = async (request: Request, db: QueryDatabas
     const { outcome, incident } = await resolveIncident(db, id, actor, "api", resolution, now);
     if (outcome === "not_found") return notFound();
     return outcome === "resolved" ? json({ incident }) : json({ code: {
-      not_claimant: "incident_not_claimed", already_resolved: "incident_resolved", recovery_not_verified: "recovery_not_verified",
+      not_claimed: "incident_not_claimed", already_resolved: "incident_resolved", recovery_not_verified: "recovery_not_verified",
     }[outcome], incident }, 409);
   } catch {
     // Neither SQL errors nor request data enter logs or responses.

@@ -209,7 +209,7 @@ it("lets exactly one of two concurrent team members claim an incident, and audit
   expect((await staff("POST", `/v1/operations/incidents/${crypto.randomUUID()}/claim`)).status).toBe(404);
 });
 
-it("resolves an incident only for its claimant, after an Operator's recovery is verified", async () => {
+it("lets another staff member resolve a claimed incident after verified recovery, retaining its claimant and auditing its resolver", async () => {
   const id = await shopIncident();
   const resolve = (actor = "alex", body = JSON.stringify({ resolution: "recovered" })) =>
     staff("POST", `/v1/operations/incidents/${id}/resolve`, actor, body);
@@ -226,9 +226,8 @@ it("resolves an incident only for its claimant, after an Operator's recovery is 
   advance(60_000);
   await tick();
   await operator("unsuspend", "shop/production", "operator-7", "verified-private");
-  expect(await (await resolve("sam")).json()).toMatchObject({ code: "incident_not_claimed" });
   advance(1_000);
-  const resolved = await resolve();
+  const resolved = await resolve("sam");
   expect(resolved.status).toBe(200);
   expect(await resolved.json()).toEqual({ incident: expect.objectContaining({ state: "resolved", claimant: "alex",
     resolution: "recovered", resolved_at: new Date(now).toISOString() }) });
@@ -236,7 +235,7 @@ it("resolves an incident only for its claimant, after an Operator's recovery is 
   expect(await audit()).toEqual([
     expect.objectContaining({ action: "open" }),
     { actor: "alex", via: "api", action: "claim", previous_state: "open", new_state: "claimed" },
-    { actor: "alex", via: "api", action: "resolve", previous_state: "claimed", new_state: "resolved" },
+    { actor: "sam", via: "api", action: "resolve", previous_state: "claimed", new_state: "resolved" },
   ]);
 
   // The same cause failing again is a new incident, not a reopened one.

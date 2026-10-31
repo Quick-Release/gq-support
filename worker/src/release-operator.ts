@@ -1,5 +1,5 @@
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
-import { approvedReleases, SUPPORTED_CONTRACTS, type ReleaseRow } from "./release-policy.ts";
+import { approvedReleases, SIGNED_AFTER_BOOTSTRAP, SUPPORTED_CONTRACTS, type ReleaseRow } from "./release-policy.ts";
 import { PLUGIN_VERSION } from "./signature.ts";
 
 const ACTOR = /^[A-Za-z0-9_-]{1,64}$/;
@@ -104,16 +104,20 @@ export const runReleaseOperator = async (args: readonly string[], { query, now =
     const [, version, kind, expected, evidence, actor] = args;
     if (!PLUGIN_VERSION.test(version!) || !["production", "recovery"].includes(kind!) || !/^(none|[1-9][0-9]{0,8})$/.test(expected!) ||
       !EVIDENCE.test(evidence!) || !ACTOR.test(actor!)) throw new Error(USAGE);
-    const [candidate] = await query("SELECT contract_version FROM release_candidate WHERE package_version = ?", [version!]);
+    const [candidate] = await query("SELECT contract_version, signs_version FROM release_candidate WHERE package_version = ?", [version!]);
     if (!candidate) throw new Error("No published candidate records this version; record its verified artifacts with release-candidate first");
     if (Number(candidate.contract_version) < SUPPORTED_CONTRACTS.min || Number(candidate.contract_version) > SUPPORTED_CONTRACTS.max) {
       throw new Error("This Worker does not serve the candidate's contract version; it cannot be approved");
     }
     const base = expected === "none" ? 0 : Number(expected);
+    if (Number(candidate.signs_version) !== 1 && (await query(`SELECT 1 FROM release_approval a JOIN release_candidate c
+      ON c.package_version = a.package_version WHERE c.signs_version = 1 LIMIT 1`, [])).length) {
+      throw new Error("An unsigned legacy release cannot be approved after a signed release; use a signed compatible package");
+    }
     // One statement: the compare-and-set on the approved release, the kind's rule and the audit row commit together or not at all.
     const [approved] = await query(`INSERT INTO release_approval (sequence, package_version, kind, previous_sequence, evidence, approved_by, approved_at)
       SELECT ? + 1, c.package_version, ?, NULLIF(?, 0), ?, ?, ? FROM release_candidate c
-      WHERE c.package_version = ? AND (SELECT COALESCE(MAX(sequence), 0) FROM release_approval) = ?
+      WHERE c.package_version = ? AND (SELECT COALESCE(MAX(sequence), 0) FROM release_approval) = ? AND ${SIGNED_AFTER_BOOTSTRAP}
         AND ${kind === "production"
     ? "NOT EXISTS (SELECT 1 FROM release_approval WHERE package_version = c.package_version) AND (? = 0 OR EXISTS (SELECT 1 FROM release_dispatch WHERE sequence = ?))"
     : "EXISTS (SELECT 1 FROM release_approval WHERE package_version = c.package_version) AND NOT EXISTS (SELECT 1 FROM release_approval WHERE sequence = ? AND package_version = c.package_version)"}

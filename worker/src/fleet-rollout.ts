@@ -1,7 +1,7 @@
 import { applyCentralRelease, CENTRAL_LEASE_MS, CentralRefusal, filesDigest, packageFiles, targetProblem, artifactPackages,
   type CentralResult, type CentralTarget } from "./central-deployment.ts";
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
-import { approvedReleases, COMPATIBILITY_WINDOW_MS, offeredRelease, SUPPORTED_CONTRACTS, type ReleaseRow } from "./release-policy.ts";
+import { approvedReleases, COMPATIBILITY_WINDOW_MS, offeredRelease, SIGNED_AFTER_BOOTSTRAP, SUPPORTED_CONTRACTS, type ReleaseRow } from "./release-policy.ts";
 import { deploymentEvidence, GateRefusal, verifyReleaseGates, type ReleaseEvidence } from "./release-gates.ts";
 import type { DeployedStage, DeploymentMethod, RepositoryMapping } from "./repository-mappings.ts";
 import { PLUGIN_VERSION } from "./signature.ts";
@@ -413,6 +413,7 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
     if (!current || current.sequence !== Number(release)) throw new FleetRefusal("Only the approved release is withdrawn; check release-status for its release ID.");
     if (current.package_version === version) throw new FleetRefusal("The recovery package must be another version than the withdrawn one.");
     const [candidate] = await query(`SELECT c.package_version, c.contract_version, c.schema_from, c.schema_to, ${WITHDRAWN} AS withdrawn,
+        ${SIGNED_AFTER_BOOTSTRAP} AS signing_allowed,
         EXISTS (SELECT 1 FROM release_verification v WHERE v.package_version = c.package_version AND v.package_sha256 = c.package_sha256) AS verified,
         EXISTS (SELECT 1 FROM release_approval a JOIN fleet_launch f ON f.sequence = a.sequence WHERE a.package_version = c.package_version) AS launched
       FROM release_candidate c WHERE c.package_version = ?`, [version!]);
@@ -421,6 +422,7 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
       throw new FleetRefusal("Refused: the recovery package must be a verified release launched before; nothing was changed.");
     }
     if (Number(candidate.withdrawn) === 1) throw new FleetRefusal("Refused: that version was itself withdrawn; nothing was changed.");
+    if (Number(candidate.signing_allowed) !== 1) throw new FleetRefusal("Refused: an unsigned legacy recovery cannot follow a signed release. Repair forward with a signed compatible package.");
     const schema = await readLiveSchema(query, options.migrations);
     await recordSchema(query, schema, actor!, now);
     const problem = recoveryProblem(candidate as unknown as Package, schema, await boundaryFloor(query));
@@ -441,7 +443,7 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
     // bad release is withdrawn: nothing offers or serves it, though the recovery is not dispatched until the launch below.
     const [approved] = await query(`INSERT INTO release_approval (sequence, package_version, kind, previous_sequence, evidence, approved_by, approved_at)
       SELECT ? + 1, c.package_version, 'recovery', ?, ?, ?, ? FROM release_candidate c
-      WHERE c.package_version = ? AND (SELECT MAX(sequence) FROM release_approval) = ? AND NOT ${WITHDRAWN}
+      WHERE c.package_version = ? AND (SELECT MAX(sequence) FROM release_approval) = ? AND NOT ${WITHDRAWN} AND ${SIGNED_AFTER_BOOTSTRAP}
         AND EXISTS (SELECT 1 FROM release_verification v WHERE v.package_version = c.package_version AND v.package_sha256 = c.package_sha256)
         AND EXISTS (SELECT 1 FROM release_approval a JOIN fleet_launch f ON f.sequence = a.sequence WHERE a.package_version = c.package_version)
       RETURNING sequence`, [current.sequence, current.sequence, `withdraws release ${current.sequence}`, actor!, now, version!, current.sequence]);

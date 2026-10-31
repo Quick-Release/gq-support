@@ -224,7 +224,9 @@ Record only what reviewed artifacts and run evidence show.
 1. Download the release workflow run's `gq-support.zip`, manifest and
    `provenance.json`. Record the candidate with the commit of the Worker deployed
    with it, the contract version and schema migration range its checks covered,
-   and `signed` (or `unsigned-legacy` for a package before #141).
+   and `signed` (or `unsigned-legacy` for a package before #141). After any
+   signed release has been approved, unsigned legacy packages cannot receive
+   production or recovery approval.
 2. Record its gates with `release-verify`, then approve it as `production`,
    naming the approved release from `release-status`. Deploy the
    backward-compatible Worker and its additive migrations first.

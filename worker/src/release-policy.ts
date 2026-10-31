@@ -2,6 +2,13 @@ import { stageForSlug, type DeployedStage } from "./repository-mappings.ts";
 import { PLUGIN_VERSION } from "./signature.ts";
 import type { QueryDatabase } from "./storage.ts";
 
+/** Alias `c` is the candidate being approved. Legacy is bootstrap-only: once
+ * any signed package was approved, no later production or recovery approval
+ * may make indistinguishable v1 installations count as current again. */
+export const SIGNED_AFTER_BOOTSTRAP = `(c.signs_version = 1 OR NOT EXISTS (
+  SELECT 1 FROM release_approval signed_approval JOIN release_candidate signed_candidate
+    ON signed_candidate.package_version = signed_approval.package_version WHERE signed_candidate.signs_version = 1))`;
+
 /**
  * Plugin release policy (ADR 0021, docs/support-operations-design.md#release-and-compatibility-procedure).
  * Only the approved production release takes new intake, with the previous approved
