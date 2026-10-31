@@ -304,8 +304,10 @@ before onboarding, not values established by this interview.
 - Delivery recovery uses the D1 outbox; Queues and DLQ are deferred.
 - Website rendering must remain independent of support-service availability.
 - Existing release CI verifies packaged bytes and installed upgrades, but does
-  not establish automatic delivery to client installations. Existing Worker
-  deploy CI does not establish the required non-destructive production plan gate.
+  not establish automatic delivery to client installations. Worker deploy CI
+  plans through the [deployment plan gate](runbooks/support-operations.md#deployment-plan-gate)
+  (#140), which refuses protected-resource replacement/deletion and applies only
+  a retained, identical plan. No credentialed production plan has been recorded.
 - Existing webhook runbooks describe log signals. #138 routes the delivery,
   webhook, status-lag and privacy signals above as grouped incidents and reports
   measured health ([Worker README](../worker/README.md#routed-operational-signals)).

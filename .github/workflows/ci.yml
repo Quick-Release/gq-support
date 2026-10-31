@@ -217,7 +217,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Check deployment CLI startup
-        run: pnpm exec alchemy deploy --help
+        run: |
+          pnpm exec alchemy deploy --help
+          # The deploy gate loads under Alchemy's loader and refuses a bare invocation, touching nothing.
+          status=0
+          pnpm deploy-gate > deploy-gate.out 2>&1 || status=$?
+          cat deploy-gate.out
+          [ "$status" = 2 ] && grep -q '^Usage: deploy-gate' deploy-gate.out
       - run: pnpm typecheck
       - run: pnpm test
 

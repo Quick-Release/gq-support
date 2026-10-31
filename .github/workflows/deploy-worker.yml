@@ -1,6 +1,11 @@
 name: Deploy Support Worker
-run-name: Deploy Support Worker (${{ inputs.stage }}) ${{ inputs.request_id }}
+run-name: Deploy Support Worker (${{ inputs.stage }}, ${{ inputs.operation }}) ${{ inputs.request_id }}
 
+# Every staging/prod deployment goes through the plan gate (worker/deploy/plan-gate.ts; operations
+# runbook, "Deployment plan gate"): the plan job records the credentialed Alchemy plan, refuses
+# replacement or deletion of protected resources, and retains the sanitized plan; the deploy job
+# verifies that retained plan, plans again, and applies only an identical plan.
+# scripts/ci/workflow-policy.mjs rejects direct `alchemy` and destructive commands in workflows.
 on:
   workflow_dispatch:
     inputs:
@@ -9,6 +14,15 @@ on:
         required: true
         type: choice
         options: [staging, prod]
+      operation:
+        description: plan records the plan only; deploy applies it after the gate
+        required: true
+        type: choice
+        options: [plan, deploy]
+        default: plan
+      reviewed_plan_digest:
+        description: Required to deploy prod; the plan digest of a reviewed plan-only run of this commit
+        required: false
       request_id:
         description: Optional non-secret correlation ID
         required: false
@@ -16,14 +30,15 @@ on:
 permissions:
   contents: read
 
-# Serialize deploys and rotations. A cancelled apply could leave the Worker
-# without its key between script upload and secret reconciliation.
+# Serialize plans, deploys and rotations per stage, across both jobs of a run. A cancelled apply
+# could leave the Worker without its key between script upload and secret reconciliation, and a
+# concurrent apply would make the retained plan stale.
 concurrency:
   group: deploy-worker-${{ inputs.stage }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  plan:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: ${{ inputs.stage }}
@@ -42,7 +57,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
-      - name: Verify the stage App and deploy with Alchemy
+      - name: Plan the stage and refuse protected-resource replacement or deletion
         env:
           DEPLOY_STAGE: ${{ inputs.stage }}
           CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
@@ -65,5 +80,74 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/verify-github-app.ts "$DEPLOY_STAGE"
-          pnpm exec alchemy deploy --stage "$DEPLOY_STAGE" --yes
+          pnpm deploy-gate plan --stage "$DEPLOY_STAGE" --out deploy-plan
+      - name: Summarize the plan
+        if: always()
+        run: if [ -f deploy-plan/summary.md ]; then cat deploy-plan/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+      # Retained with the release evidence, refused plans included; the deploy job applies only this plan.
+      - name: Retain the plan
+        if: always()
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: deploy-plan-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: worker/deploy-plan/
+          retention-days: 90
+
+  deploy:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && inputs.operation == 'deploy'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.stage }}
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Download this run's retained plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: deploy-plan-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: worker/deploy-plan
+      - name: Verify the retained plan, plan again and apply only an identical plan
+        env:
+          REVIEWED_PLAN_DIGEST: ${{ inputs.reviewed_plan_digest }}
+          DEPLOY_STAGE: ${{ inputs.stage }}
+          CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_APP_CLIENT_ID: ${{ vars.SUPPORT_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_ID: ${{ vars.SUPPORT_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ vars.SUPPORT_GITHUB_APP_SLUG }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_WEBHOOK_PREVIOUS_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET }}
+          GITHUB_WEBHOOK_DIAGNOSTICS: ${{ inputs.stage == 'staging' && vars.SUPPORT_GITHUB_WEBHOOK_DIAGNOSTICS == 'true' && 'true' || 'false' }}
+          # Public dashboard keys and opaque staff IDs; unset leaves the operations API closed.
+          OPERATIONS_API_KEYS: ${{ vars.SUPPORT_OPERATIONS_API_KEYS }}
+          OPERATIONS_STAFF: ${{ vars.SUPPORT_OPERATIONS_STAFF }}
+          # The independent checker's public key; unset closes its probe and report routes.
+          OPERATIONS_CHECKER_KEYS: ${{ vars.SUPPORT_OPERATIONS_CHECKER_KEYS }}
+          # Discord webhook URLs are credentials, per stage environment. Unset closes that channel.
+          DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL }}
+          DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL: ${{ secrets.SUPPORT_DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-github-app.ts "$DEPLOY_STAGE"
+          reviewed=()
+          if [ -n "$REVIEWED_PLAN_DIGEST" ]; then reviewed=(--reviewed-digest "$REVIEWED_PLAN_DIGEST"); fi
+          pnpm deploy-gate apply --stage "$DEPLOY_STAGE" --evidence deploy-plan "${reviewed[@]}"
           node scripts/audit-github-app-custody.ts "$DEPLOY_STAGE"
+      - name: Retain the deployment provenance
+        if: always()
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: deploy-applied-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: worker/deploy-plan/
+          retention-days: 90

@@ -16,6 +16,8 @@ privacy/ledger failures open grouped incidents from durable records, and
 `pnpm operator health` shows measured observations. No stage has recorded a
 baseline or tuned threshold yet. The independent checker is implemented (#139, [below](#independent-outage-checks)),
 but no stage has it enabled until its setup is evidenced.
+Staging/prod deployments go through the [deployment plan gate](#deployment-plan-gate) (#140);
+no credentialed production plan has been recorded yet.
 
 ## Common procedure
 
@@ -299,6 +301,81 @@ Not yet done for any stage: no checker key is generated or registered, no
 service URL or stage list is set, the schedule is not enabled, no run has
 executed against a real Worker, Discord destinations are not configured, no
 dashboard endpoint is approved and no drill has run.
+
+## Deployment plan gate
+
+**Deploy Support Worker** (`.github/workflows/deploy-worker.yml`) is the only
+staging/prod deployment path; the webhook spike's `retire` redeploy uses the same
+gate. Run it on **main** with `operation: plan` to record a plan without applying
+it, or `operation: deploy` to plan and then apply. Both jobs bind the stage's GitHub
+Environment and share the stage's deploy lock. A run cannot apply another stage's,
+commit's or run's plan.
+
+Prod needs a reviewed plan. The prod Environment has only a branch policy, no
+required reviewers, so the gate enforces review itself: run `operation: plan` for
+the commit, have a reviewer check its summary and `plan.json` and record sign-off,
+then run `operation: deploy` with `reviewed_plan_digest` set to that plan's digest.
+The deploy run applies nothing unless its own plan has the same digest, which holds
+only for the same commit, stage, resources, actions and protected identities.
+
+1. The plan job runs typecheck and tests, verifies the App and runs
+   `pnpm deploy-gate plan --stage <stage> --out deploy-plan`. This is Alchemy's
+   own deploy planning (`alchemy/Alchemist` `Stack.plan`, which `alchemy plan`
+   and `deploy --dry-run` also use), run without `--adopt`, `--force`, a resource
+   selection or a state-store upgrade. It reads the stage's state and the
+   provider; in CI, Alchemy refuses rather than bootstrap or upgrade its state
+   store, and the gate stops if either starts. Like `alchemy deploy`, reading
+   the state-store token briefly opens a Workers edge-preview session.
+   The plan applies no resource.
+2. The gate refuses, and records why, if any resource would be replaced,
+   deleted or orphaned; the plan is not for `GQSupportWorker`, the stage or the
+   Tipme account; it is a destroy plan; `SupportDB`, `SupportLedger` or `Worker`
+   is missing or duplicated; or a protected identity differs from the stage's pins
+   in `worker/deploy/protected-resources.json`. A stage with no pins may only
+   create all three protected resources (its first deployment); once they exist,
+   an unpinned stage is refused. Unrecognized actions or identity values are refused.
+3. `worker/deploy-plan/plan.json` holds the verdict, reasons, commit, stage,
+   account, run URL, plan time, each resource's name/type/action, the protected
+   resources' D1 database ID/name/jurisdiction/account and Worker ID/name, and a
+   digest of the planned changes. No other state attribute, property, binding or
+   provider message is retained. It is secret-scanned and kept for 90 days with
+   `summary.md`, refused plans included.
+4. The deploy job downloads that artifact and runs
+   `pnpm deploy-gate apply --stage <stage> --evidence deploy-plan`. It applies
+   nothing if the plan is missing, unparseable, refused, edited (digest), for
+   another stage, commit, run, account or schema, or planned more than 6 hours
+   earlier. It then plans again, refuses unsafe or differing plans, and applies
+   that same plan object, not a third plan. `applied.json` records the outcome,
+   plan digest, time, run and public stack outputs; it is retained the same way.
+   Each run attempt plans afresh: re-running only a failed deploy job cannot find
+   its attempt's plan and applies nothing, so re-run all jobs.
+
+Pin identities only from reviewed credentialed plan evidence: copy the observed
+`databaseId` of `SupportDB` and `SupportLedger` and the `workerName` of `Worker`
+from `plan.json` (a refused plan records them) into
+`worker/deploy/protected-resources.json` under the stage, in a reviewed commit:
+
+```json
+{ "staging": { "SupportDB": { "databaseId": "…" }, "SupportLedger": { "databaseId": "…" }, "Worker": { "workerName": "…" } } }
+```
+
+Replacing or removing a protected resource has no CI path. That needs a separate
+reviewed migration and recovery plan (ADR 0013/0016/0017), never a relaxed gate.
+`scripts/ci/workflow-policy.mjs` rejects any workflow that runs `alchemy` other than
+`--help`, a `pnpm deploy`/`deploy:worker` script, `wrangler delete` or
+`wrangler d1 delete`, or `deploy-gate apply` without an earlier plan and retained
+upload. Destroy only personal stages, with `pnpm run destroy --stage <stage>`,
+whose guard refuses staging and prod.
+
+Evidence status: the gate and its CI policy are tested locally
+(`worker/test/plan-gate.test.ts`, `scripts/ci/workflow-policy.test.mjs`); that is
+not plan evidence. No credentialed plan has run for any stage since the gate was
+added, and neither stage has pins. The first staging plan is expected to be refused
+until its existing identities are pinned. Prod has never been deployed, so its first
+plan should create all three protected resources; pin them after that deployment,
+before the next. Production readiness needs a credentialed
+prod plan-only run, its retained `plan.json` with a `safe` verdict, the reviewed
+pins and the reviewer's sign-off.
 
 ## Drill and evidence checklist
 

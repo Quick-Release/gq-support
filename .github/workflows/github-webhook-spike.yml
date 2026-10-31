@@ -45,6 +45,48 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Run staging-only operation
+        if: inputs.operation != 'retire'
+        env:
+          OPERATION: ${{ inputs.operation }}
+          SPIKE_DELIVERY_ID: ${{ inputs.delivery_id }}
+          SPIKE_SINCE: ${{ inputs.since }}
+          CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_APP_CLIENT_ID: ${{ vars.SUPPORT_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_ID: ${{ vars.SUPPORT_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ vars.SUPPORT_GITHUB_APP_SLUG }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_WEBHOOK_PREVIOUS_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_PREVIOUS_SECRET }}
+          GITHUB_WEBHOOK_DIAGNOSTICS: 'true'
+        run: node scripts/github-webhook-spike.ts "$OPERATION"
+      # Retiring the previous secret redeploys staging, through the plan gate like every deployment.
+      - name: Plan the retiring deployment
+        if: inputs.operation == 'retire'
+        env:
+          OPERATION: ${{ inputs.operation }}
+          SPIKE_DELIVERY_ID: ${{ inputs.delivery_id }}
+          SPIKE_SINCE: ${{ inputs.since }}
+          CLOUDFLARE_ACCOUNT_ID: 8f38791a8c37b182239af2a385ab3c31
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_APP_CLIENT_ID: ${{ vars.SUPPORT_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_ID: ${{ vars.SUPPORT_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ vars.SUPPORT_GITHUB_APP_SLUG }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.SUPPORT_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.SUPPORT_GITHUB_WEBHOOK_SECRET }}
+          # Absent from the retiring deployment.
+          GITHUB_WEBHOOK_PREVIOUS_SECRET: ''
+          GITHUB_WEBHOOK_DIAGNOSTICS: 'true'
+        run: pnpm deploy-gate plan --stage staging --out deploy-plan
+      - name: Retain the plan
+        if: always() && inputs.operation == 'retire'
+        uses: ./.github/actions/upload-scanned-artifact
+        with:
+          name: deploy-plan-staging-${{ github.run_id }}-${{ github.run_attempt }}
+          path: worker/deploy-plan/
+          retention-days: 90
+      - name: Apply the retained plan and probe the retired secret
+        if: inputs.operation == 'retire'
         env:
           OPERATION: ${{ inputs.operation }}
           SPIKE_DELIVERY_ID: ${{ inputs.delivery_id }}
@@ -60,11 +102,7 @@ jobs:
           GITHUB_WEBHOOK_DIAGNOSTICS: 'true'
         run: |
           set -euo pipefail
-          if [ "$OPERATION" = retire ]; then
-            # The encrypted old source remains available to the probe in this
-            # job, but is explicitly absent from the runtime deployment.
-            GITHUB_WEBHOOK_PREVIOUS_SECRET='' pnpm exec alchemy deploy --stage staging --yes
-            node scripts/github-webhook-spike.ts retired-probe
-          else
-            node scripts/github-webhook-spike.ts "$OPERATION"
-          fi
+          # The encrypted old source remains available to the probe in this job, but is explicitly
+          # absent from the runtime deployment, as in the plan.
+          GITHUB_WEBHOOK_PREVIOUS_SECRET='' pnpm deploy-gate apply --stage staging --evidence deploy-plan
+          node scripts/github-webhook-spike.ts retired-probe

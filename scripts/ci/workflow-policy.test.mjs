@@ -92,3 +92,35 @@ test('pull-request code may pass a secret by name to a reusable workflow, which 
   assert.deepEqual(check(caller('    secrets:\n      TOKEN: ${{ secrets.TOKEN }}\n')), []);
   assert.match(check(caller('    secrets: inherit\n')).join('\n'), /`cells` .*secret/);
 });
+
+test('a workflow deploys a stage only through the plan gate and never runs a destructive command', () => {
+  const dispatch = (run) => check(workflow({ on: 'workflow_dispatch:', steps: `      - run: ${run}` }));
+  for (const run of [
+    'pnpm exec alchemy deploy --stage prod --yes',
+    'npx alchemy destroy --stage staging --yes',
+    'pnpm exec alchemy plan --stage prod && pnpm exec alchemy deploy --stage prod --yes',
+    'alchemy unsafe nuke',
+    'pnpm exec alchemy state delete --stage prod',
+    'pnpm deploy:worker',
+    'pnpm run deploy --stage prod',
+    'pnpm exec wrangler d1 delete gqsupportworker-supportdb-prod',
+    'pnpm exec wrangler delete --name gqsupportworker-worker-prod',
+  ]) assert.match(dispatch(run).join('\n'), /deploy gate|destructive/, run);
+  for (const run of [
+    'pnpm exec alchemy deploy --help',
+    'node scripts/verify-github-app.ts "$DEPLOY_STAGE"',
+    'pnpm run destroy --stage dev_valerio',
+    'echo "Deploy with Alchemy" # alchemy deploy is not run here',
+  ]) assert.deepEqual(dispatch(run), [], run);
+});
+
+test('a workflow applies a stage only after retaining its plan', () => {
+  const upload = '      - uses: ./.github/actions/upload-scanned-artifact\n        with:\n          name: plan\n          path: worker/deploy-plan/\n          retention-days: 90';
+  const steps = (...lines) => check(workflow({ on: 'workflow_dispatch:', steps: lines.join('\n') }));
+  const plan = '      - run: pnpm deploy-gate plan --stage "$STAGE" --out deploy-plan';
+  const apply = '      - run: pnpm deploy-gate apply --stage "$STAGE" --evidence deploy-plan';
+  assert.deepEqual(steps(plan, upload, apply), []);
+  assert.match(steps(apply).join('\n'), /retained plan/);
+  assert.match(steps(plan, apply).join('\n'), /retained plan/);
+  assert.match(steps(apply, plan, upload).join('\n'), /retained plan/);
+});

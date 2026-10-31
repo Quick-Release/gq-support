@@ -170,7 +170,9 @@ The Worker pins Alchemy `2.0.0-beta.83` and Effect / `@effect/platform-node`
 `4.0.5`. Its Vite 8 and Vitest 5 development dependencies satisfy Alchemy and
 Effect's peer requirements. Effect 4's HTTP modules use the `effect/http/*`
 exports. The old `rc.112` transitive overrides are no longer needed.
-CI checks CLI startup as well as the application tests.
+CI checks CLI startup as well as the application tests. Staging and prod deploy
+only through `pnpm deploy-gate` from **Deploy Support Worker**; see the
+[deployment plan gate](../docs/runbooks/support-operations.md#deployment-plan-gate).
 
 ```sh
 pnpm exec alchemy deploy --help
