@@ -215,8 +215,9 @@ jobs:
   dispatch-registry:
     name: Rebuild Composer registry after release
     needs: publish
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    permissions: {}
+    if: needs.publish.result == 'success'
+    permissions:
+      contents: read
     # Tags pushed by publish's GITHUB_TOKEN do not trigger push workflows.
     uses: ./.github/workflows/dispatch-registry.yml
     with:
