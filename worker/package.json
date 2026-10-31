@@ -9,6 +9,7 @@
     "deploy-gate": "node --import ./node_modules/alchemy/bin/register-oxc.js scripts/deploy-gate.ts",
     "destroy": "node scripts/destroy.ts",
     "operator": "node scripts/operator.ts",
+    "recovery-drill": "node scripts/recovery-drill.ts",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -b",
     "test": "vitest run",

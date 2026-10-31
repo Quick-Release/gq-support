@@ -66,7 +66,7 @@ const serve = (request: Request) => Effect.runPromise(handleWorkerRequest(HttpSe
   operationsAccess(JSON.stringify({ [banquinha.keyId]: banquinha.publicKey }), "alex"), ["operational_incidents"], null, {
     checker: checkerAccess(JSON.stringify({ [checker.keyId]: checker.publicKey })),
     ledger: ledger(), restored: async (db, ledgerDb) => !replayPending && await gate(db, ledgerDb, Date.now()),
-    ...(replayPending ? { restoreReady: async () => false } : {}),
+    ...(replayPending ? { restoreReady: async () => ({ open: false, maintenance: false }) } : {}),
     configuration,
   }));
 const PROBE = "/v1/operations/checker/probe";
@@ -79,7 +79,7 @@ it("answers only the independent checker's signed probe, with component health a
   expect(response.status).toBe(200);
   expect(response.headers.get("Cache-Control")).toBe("no-store");
   expect(await response.json()).toEqual({
-    worker: "ok", support_db: "ok", suppression_ledger: "ok", restore_gate: "open",
+    worker: "ok", support_db: "ok", suppression_ledger: "ok", restore_gate: "open", maintenance: "inactive",
     configuration: { github_app: "configured", operational_incidents: "configured" },
     observed_at: new Date(START).toISOString(),
   });

@@ -40,7 +40,7 @@ export interface ServiceOptions {
   /** The restore gate (src/ledger.ts): false until a recorded restore has been replayed. */
   readonly restored: (db: QueryDatabase, ledger: QueryDatabase) => Promise<boolean>;
   /** Optional read-only restore-status adapter; never performs replay. */
-  readonly restoreReady?: (db: QueryDatabase, ledger: QueryDatabase) => Promise<boolean | null>;
+  readonly restoreReady?: (db: QueryDatabase, ledger: QueryDatabase) => Promise<{ open: boolean; maintenance: boolean } | null>;
   readonly configuration: ServiceConfiguration;
 }
 
@@ -70,15 +70,20 @@ const answers = async (db: QueryDatabase) => {
   }
 };
 
-/** Compare durable restore epochs without invoking the gate's replay path. */
-const inspectRestoreReady = async (db: QueryDatabase, ledger: QueryDatabase): Promise<boolean | null> => {
+/**
+ * Compares durable restore epochs and reads the maintenance boundary, without
+ * invoking the gate's replay path: null when either cannot be read in time.
+ */
+const inspectRestoreReady = async (db: QueryDatabase, ledger: QueryDatabase): Promise<{ open: boolean; maintenance: boolean } | null> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       Promise.all([
         db.prepare("SELECT epoch FROM restore_state WHERE id = 1").first<{ epoch: number }>(),
-        ledger.prepare("SELECT epoch FROM ledger_epoch WHERE id = 1").first<{ epoch: number }>(),
-      ]).then(([main, recorded]) => main && recorded ? main.epoch >= recorded.epoch : null),
+        ledger.prepare(`SELECT e.epoch, m.state FROM ledger_epoch e, maintenance m WHERE e.id = 1 AND m.id = 1`)
+          .first<{ epoch: number; state: string }>(),
+      ]).then(([main, recorded]) => main && recorded
+        ? { open: main.epoch >= recorded.epoch && recorded.state === "serving", maintenance: recorded.state !== "serving" } : null),
       new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), STORAGE_TIMEOUT_MS); }),
     ]);
   } catch {
@@ -93,7 +98,8 @@ const inspectRestoreReady = async (db: QueryDatabase, ledger: QueryDatabase): Pr
  * nothing and never performing restore replay,
  * so it works while storage is down: whether this Worker answers,
  * whether the main database and suppression ledger each answer a trivial read,
- * whether the restore gate is open, and whether the service's configuration is
+ * whether the restore gate is open, whether the maintenance boundary holds
+ * (src/maintenance.ts), and whether the service's configuration is
  * present. Signature only: a replayed probe reveals nothing beyond these states,
  * and a replay record would need the D1 under test. Only restore epochs and
  * component status are read; no support record or credential value is exposed.
@@ -108,7 +114,8 @@ export const handleProbe = async (request: Request, db: QueryDatabase, options: 
     const present = (value: boolean) => value ? "configured" : "missing";
     return json({
       worker: "ok", support_db: main ? "ok" : "unavailable", suppression_ledger: ledger ? "ok" : "unavailable",
-      restore_gate: gate === null ? "unknown" : gate ? "open" : "pending",
+      restore_gate: gate === null ? "unknown" : gate.open ? "open" : "pending",
+      maintenance: gate === null ? "unknown" : gate.maintenance ? "active" : "inactive",
       configuration: { github_app: present(options.configuration.github_app),
         operational_incidents: present(options.configuration.operational_incidents) },
       observed_at: new Date(now).toISOString(),
@@ -135,7 +142,37 @@ export const EPISODE_RETENTION_MS = 7 * 86_400_000;
 const SKEW_MS = 300_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-interface Episode { id: string; component: Component; code: Code; first: number; last: number; recovered: number | null }
+export interface Episode { id: string; component: Component; code: Code; first: number; last: number; recovered: number | null }
+
+/**
+ * Records one episode: a new one opens its component's incident, or groups
+ * into the one already open; a known one takes its latest evidence. Shared
+ * with restore replay (src/ledger.ts), which brings back an acknowledged
+ * episode a restore dropped, reopening its incident for review.
+ */
+export const episodeWork = (episode: Episode, now: number): [string, (string | number | null)[]][] => {
+  const id = crypto.randomUUID();
+  const known = "EXISTS (SELECT 1 FROM independent_episode WHERE id = ?)";
+  return [
+    [`INSERT INTO incident (id, category, subject, state, first_observed_at, last_observed_at, detail)
+      SELECT ?, 'component_unavailable', ?, 'open', ?, ?, ? WHERE NOT ${known}
+      ON CONFLICT (category, subject) WHERE state = 'open' DO UPDATE SET
+        first_observed_at = MIN(first_observed_at, excluded.first_observed_at),
+        last_observed_at = MAX(last_observed_at, excluded.last_observed_at)`,
+    [id, episode.component, episode.first, episode.last, episode.component, episode.id]],
+    [`INSERT INTO incident_audit (id, incident_id, actor, via, action, previous_state, new_state, occurred_at)
+      SELECT ?, id, 'service', 'service', 'open', NULL, 'open', ? FROM incident WHERE id = ?`, [crypto.randomUUID(), now, id]],
+    [`INSERT INTO independent_episode (id, component, code, first_failed_at, last_failed_at, recovered_at, incident_id, received_at)
+      SELECT ?, ?, ?, ?, ?, ?, i.id, ? FROM incident i
+      WHERE i.category = 'component_unavailable' AND i.subject = ? AND i.state = 'open' AND NOT ${known}`,
+    [episode.id, episode.component, episode.code, episode.first, episode.last, episode.recovered, now, episode.component, episode.id]],
+    // A known episode: its latest evidence. A recovery, once reported, stands.
+    [`UPDATE independent_episode SET last_failed_at = MAX(last_failed_at, ?), code = ?,
+      recovered_at = COALESCE(recovered_at, ?) WHERE id = ?`, [episode.last, episode.code, episode.recovered, episode.id]],
+    [`UPDATE incident SET last_observed_at = MAX(last_observed_at, ?)
+      WHERE state = 'open' AND id = (SELECT incident_id FROM independent_episode WHERE id = ?)`, [episode.last, episode.id]],
+  ];
+};
 interface Report { observed: number; components: { component: Component; state: ComponentState; code: Code }[]; episodes: Episode[] }
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -185,7 +222,8 @@ const parseReport = (body: string, now: number): Report | null => {
  * resolvable when the checker has lost or expired the episode it opened.
  * Request IDs are single-use for 10 minutes, as for the operations API.
  */
-export const handleReport = async (request: Request, db: QueryDatabase, access: CheckerAccess, now: number): Promise<Response> => {
+export const handleReport = async (request: Request, db: QueryDatabase, access: CheckerAccess, now: number,
+  ledger: QueryDatabase): Promise<Response> => {
   try {
     if (request.method !== "POST" || new URL(request.url).search) return json({ code: "not_found" }, 404);
     const body = await readBody(request, BODY_BYTES);
@@ -210,34 +248,21 @@ export const handleReport = async (request: Request, db: QueryDatabase, access: 
         WHERE component = ? AND recovered_at IS NULL AND last_failed_at <= ?`).bind(report.observed, component, report.observed));
     }
     for (const episode of report.episodes) {
-      const id = crypto.randomUUID();
-      const known = "EXISTS (SELECT 1 FROM independent_episode WHERE id = ?)";
-      statements.push(
-        // A new episode opens the component's incident, or groups into the one already open.
-        db.prepare(`INSERT INTO incident (id, category, subject, state, first_observed_at, last_observed_at, detail)
-          SELECT ?, 'component_unavailable', ?, 'open', ?, ?, ? WHERE NOT ${known}
-          ON CONFLICT (category, subject) WHERE state = 'open' DO UPDATE SET
-            first_observed_at = MIN(first_observed_at, excluded.first_observed_at),
-            last_observed_at = MAX(last_observed_at, excluded.last_observed_at)`)
-          .bind(id, episode.component, episode.first, episode.last, episode.component, episode.id),
-        db.prepare(`INSERT INTO incident_audit (id, incident_id, actor, via, action, previous_state, new_state, occurred_at)
-          SELECT ?, id, 'service', 'service', 'open', NULL, 'open', ? FROM incident WHERE id = ?`).bind(crypto.randomUUID(), now, id),
-        db.prepare(`INSERT INTO independent_episode (id, component, code, first_failed_at, last_failed_at, recovered_at, incident_id, received_at)
-          SELECT ?, ?, ?, ?, ?, ?, i.id, ? FROM incident i
-          WHERE i.category = 'component_unavailable' AND i.subject = ? AND i.state = 'open' AND NOT ${known}`)
-          .bind(episode.id, episode.component, episode.code, episode.first, episode.last, episode.recovered, now, episode.component, episode.id),
-        // A known episode: its latest evidence. A recovery, once reported, stands.
-        db.prepare(`UPDATE independent_episode SET last_failed_at = MAX(last_failed_at, ?), code = ?,
-          recovered_at = COALESCE(recovered_at, ?) WHERE id = ?`).bind(episode.last, episode.code, episode.recovered, episode.id),
-        db.prepare(`UPDATE incident SET last_observed_at = MAX(last_observed_at, ?)
-          WHERE state = 'open' AND id = (SELECT incident_id FROM independent_episode WHERE id = ?)`).bind(episode.last, episode.id),
-      );
+      statements.push(...episodeWork(episode, now).map(([sql, parameters]) => db.prepare(sql).bind(...parameters)));
     }
     if (statements.length) await db.batch(statements);
     const linked = report.episodes.length ? (await db.prepare(`SELECT id, incident_id FROM independent_episode
       WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id`).bind(JSON.stringify(report.episodes.map(({ id }) => id)))
       .all<{ id: string; incident_id: string }>()).results : [];
-    return json({ episodes: report.episodes.map(({ id }) => ({ id, incident_id: linked.find((row) => row.id === id)?.incident_id ?? null })) });
+    // Acknowledged only once the ledger holds them too, so a restore of this database cannot drop evidence the
+    // checker has let go (ledger-migrations/0003). A failed ledger write leaves the recorded incidents as they are.
+    const retained = report.episodes.length === 0 || await ledger.batch(report.episodes.map((episode) => ledger.prepare(`INSERT INTO
+      retained_episode (id, component, code, first_failed_at, last_failed_at, recovered_at, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (id) DO UPDATE SET code = excluded.code, last_failed_at = MAX(last_failed_at, excluded.last_failed_at),
+        recovered_at = COALESCE(recovered_at, excluded.recovered_at), received_at = excluded.received_at`)
+      .bind(episode.id, episode.component, episode.code, episode.first, episode.last, episode.recovered, now))).then(() => true, () => false);
+    return json({ episodes: report.episodes.map(({ id }) => ({ id,
+      incident_id: retained ? linked.find((row) => row.id === id)?.incident_id ?? null : null })) });
   } catch {
     // Neither SQL errors nor report data enter logs or responses.
     return json({ code: "service_unavailable" }, 503);

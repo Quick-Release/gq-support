@@ -12,7 +12,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { SupportDB, SupportLedger } from "./support-db.ts";
 import { sweepDelivery } from "./delivery.ts";
 import { GitHubGateway, GitHubReader } from "./github-gateway.ts";
-import { scheduledTick } from "./scheduled.ts";
+import { serviceTick } from "./scheduled.ts";
 import { refreshStatus, type RefreshConfig } from "./status-refresh.ts";
 import type { SweepConfig } from "./status-sweep.ts";
 import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
@@ -33,7 +33,7 @@ let titleDigestKey: Promise<CryptoKey | null> | undefined;
 const destinationsOf = (env: Record<string, unknown>) => discordDestinations(
   typeof env.DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL === "string" ? env.DISCORD_SUPPORT_REQUESTS_WEBHOOK_URL : "",
   typeof env.DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL === "string" ? env.DISCORD_OPERATIONAL_INCIDENTS_WEBHOOK_URL : "");
-// Per isolate: nothing serves or sweeps until a recorded restore has been replayed (src/ledger.ts).
+// Per isolate: nothing serves or sweeps during maintenance or until a recorded restore has been replayed (src/ledger.ts).
 const restored = restoreGate();
 
 export default Cloudflare.Worker(
@@ -89,10 +89,9 @@ export default Cloudflare.Worker(
       if (!clientId || !slug || typeof env.GITHUB_APP_PRIVATE_KEY !== "string") return;
       const db = yield* database.raw;
       const ledger = yield* ledgerDatabase.raw;
-      if (!(yield* Effect.promise(() => restored(db, ledger, Date.now())))) return yield* Effect.logError("Support restore replay pending");
       const config = { clientId, slug, privateKeyPem: env.GITHUB_APP_PRIVATE_KEY };
       const key = yield* Effect.promise(() => titleDigestKey ??= digestKey(env.GITHUB_APP_PRIVATE_KEY as string));
-      yield* scheduledTick({ db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key,
+      yield* serviceTick(() => restored(db, ledger, Date.now()), { db, ledger, mappings: repositoryMappings, botLogin: `${slug}[bot]`, sweep, refresh, digestKey: key,
         notifications: { destinations: destinationsOf(env) } }).pipe(
         Effect.provide(Layer.mergeAll(GitHubGateway.live(config), GitHubReader.live(config))),
       );

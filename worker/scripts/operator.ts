@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { URL } from "node:url";
 import { parseArgs } from "node:util";
 import { runOperator } from "../src/operator.ts";
+import { GUARDED_COMMANDS } from "../src/maintenance.ts";
 import { stageInventories } from "../src/inventory.ts";
 import { stageMappings } from "../src/repository-mappings.ts";
 import { stageReleaseEnforcement } from "../src/release-policy.ts";
@@ -14,7 +15,7 @@ import { githubEvidence } from "./release-evidence.ts";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 
-const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|release-status|release-candidate|release-verify|release-approve|release-withdraw|release-boundary|fleet-launch|fleet-status|fleet-run|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
+const usage = "Usage: pnpm operator <enroll|revoke|status|resume|reconcile|unsuspend|erase|erasure-status|erasure-close|restore-recorded|maintenance-<begin|status|end>|cleanup-reconcile|cleanup-exception|offboard|status-<health|reconcile|repair>|incidents|incident|incident-claim|notifications|notification-retry|health|drill-verify|inventory|inventory-credentials|inventory-record|inventory-contact|release-status|release-candidate|release-verify|release-approve|release-withdraw|release-boundary|fleet-launch|fleet-status|fleet-run|update-access-status|update-access-grant|update-access-revoke|central-apply|central-status> [...] --stage <staging|prod> --account-id <id> --database-id <id> [--ledger-database-id <id>]";
 const directory = mkdtempSync(join(tmpdir(), "gq-support-operator-"));
 const lock = new URL("../revocations.lock", import.meta.url);
 let lockFd: number | undefined;
@@ -27,6 +28,10 @@ try {
   const accountId = values["account-id"], databaseId = values["database-id"], ledgerId = values["ledger-database-id"];
   if (!accountId || !/^[a-f0-9]{32}$/i.test(accountId) || !databaseId || !/^[a-f0-9-]{36}$/i.test(databaseId) ||
     (ledgerId !== undefined && !/^[a-f0-9-]{36}$/i.test(ledgerId))) throw new Error(usage);
+  // The maintenance boundary and restore epoch live in the ledger: a guarded or maintenance command cannot run without it.
+  if ((GUARDED_COMMANDS.includes(positionals[0] ?? "") || positionals[0]?.startsWith("maintenance-")) && !ledgerId) {
+    throw new Error(`${positionals[0]} checks the maintenance boundary: --ledger-database-id is required.\n${usage}`);
+  }
   const config = join(directory, "wrangler.json");
   writeFileSync(config, JSON.stringify({ account_id: accountId, d1_databases: [
     { binding: "SupportDB", database_name: "operator-target", database_id: databaseId },

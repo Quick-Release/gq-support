@@ -18,6 +18,7 @@ import type { ReleaseEnforcement } from "./release-policy.ts";
 import type { StageInventory } from "./inventory.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
 import type { QueryDatabase } from "./storage.ts";
+import { GUARDED_COMMANDS, guardOperatorMutation, runMaintenanceOperator } from "./maintenance.ts";
 
 export type CredentialDatabase = Pick<D1Database, "prepare" | "batch">;
 export interface OperatorOptions {
@@ -76,6 +77,9 @@ const enrollmentCode = (): string => {
 /** The operator command boundary; Cloudflare authentication belongs to the CLI adapter. */
 export const runOperator = async (args: readonly string[], options: OperatorOptions): Promise<string> => {
   const { query, recordRevocation, mappings, now = Date.now(), ledger } = options;
+  if (args[0]?.startsWith("maintenance-")) return runMaintenanceOperator(args, { ...options, now });
+  // The CLI adapter always supplies the ledger for these (scripts/operator.ts).
+  if (ledger && GUARDED_COMMANDS.includes(args[0] ?? "")) await guardOperatorMutation(args, query, ledger);
   if (args[0]?.startsWith("fleet-") || ["release-verify", "release-withdraw", "release-boundary"].includes(args[0] ?? "")) {
     return runFleetOperator(args, { ...options, now });
   }

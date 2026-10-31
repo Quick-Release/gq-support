@@ -81,6 +81,11 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
   const log = logger(options, now);
   const measure = (event: MetricEvent, slot?: string, durationMs?: number) => Effect.promise(() => recordMetric(options.db, event,
     { at: now(), ...clientFor(options.mappings, slot), ...(durationMs === undefined ? {} : { durationMs }) }));
+  // The maintenance boundary and restore epoch this execution runs under (src/maintenance.ts): nothing is
+  // dispatched during maintenance, and a create is authorized only while both are unchanged.
+  const ledger = options.ledger;
+  const fence = ledger ? yield* io(() => ledgerStore(ledger).control()) : null;
+  if (ledger && (!fence || fence.maintenance)) return;
   yield* io(() => store.recover(now()));
   const expired = yield* io(() => store.expire(now()));
   for (const row of expired) yield* log(row, "DeliveryDeadline", true);
@@ -115,9 +120,10 @@ export const sweepDelivery = (options: DeliveryOptions): Effect.Effect<void, Out
         if (now() >= deadline) return yield* Effect.fail(new OutcomeUnknown());
         const permitted = yield* io(() => store.authorized(row, now()));
         if (!permitted || now() >= deadline) return yield* Effect.fail(new OutcomeUnknown());
-        // A suppression the main database lost to a restore still holds here.
-        const ledger = options.ledger;
-        if (ledger && (yield* io(() => ledgerStore(ledger).suppressed(row.slot, row.request_id)))) return yield* Effect.fail(new OutcomeUnknown());
+        // A suppression the main database lost to a restore still holds here, and so does maintenance begun since.
+        if (ledger && fence && !(yield* io(() => ledgerStore(ledger).authorizes(row.slot, row.request_id, fence)))) {
+          return yield* Effect.fail(new OutcomeUnknown());
+        }
       });
       if (row.kind !== 'create') {
         // A close or reopen of the delivered issue (ADR 0020). GitHub stays

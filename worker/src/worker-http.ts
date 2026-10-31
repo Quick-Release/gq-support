@@ -24,21 +24,28 @@ export const handleWorkerRequest = <R>(request: HttpServerRequest.HttpServerRequ
   const web = HttpServerRequest.toWebResult(request);
   if (Result.isFailure(web)) return new Response(null, { status: 400 });
   const url = new URL(web.success.url);
+  if (url.pathname === GITHUB_WEBHOOK_PATH) {
+    if (web.success.method !== "POST" || url.search) return new Response(null, { status: 404 });
+    // The signature is verified before any D1 access, the gate's included: only a verified delivery that
+    // would write passes the gate, and during maintenance or a pending replay it is refused with a 503.
+    const gated = service && status ? { ...status, database: async () => {
+      const db = await status.database();
+      if (!await service.restored(db, service.ledger).catch(() => false)) throw new Error("Service gate closed");
+      return db;
+    } } : status;
+    return yield* webhook(web.success, waitUntil, gated);
+  }
   if (service) {
     const db = yield* database;
     // The independent checker's probe answers before the restore gate, and while storage is down.
     if (url.pathname === PROBE_PATH) return yield* Effect.promise(() => handleProbe(web.success, db, service, Date.now()));
-    // Nothing else is served until a recorded restore has been replayed (src/ledger.ts).
+    // Nothing else is served during maintenance or until a recorded restore has been replayed (src/ledger.ts).
     if (!(yield* Effect.promise(() => service.restored(db, service.ledger).catch(() => false)))) {
       return Response.json({ code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "60" } });
     }
   }
-  if (url.pathname === GITHUB_WEBHOOK_PATH) {
-    if (web.success.method !== "POST" || url.search) return new Response(null, { status: 404 });
-    return yield* webhook(web.success, waitUntil, status);
-  }
   const db = yield* database;
-  if (service && url.pathname === REPORT_PATH) return yield* Effect.promise(() => handleReport(web.success, db, service.checker, Date.now()));
+  if (service && url.pathname === REPORT_PATH) return yield* Effect.promise(() => handleReport(web.success, db, service.checker, Date.now(), service.ledger));
   // Native updates under their own narrow grant; never the installation API or its credentials.
   if (url.pathname.startsWith("/v1/updates/")) {
     let failure: string | undefined;

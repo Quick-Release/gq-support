@@ -109,17 +109,57 @@ pnpm operator erase shop/production <opaque-actor> <rs_reference> --stage <stage
 pnpm operator offboard shop/production <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
-After a Time Travel restore of `SupportDB`, record it before anything else:
+### Maintenance boundary and restores
+
+The maintenance boundary (`src/maintenance.ts`, ledger migration 0003) is held in
+`SupportLedger`, outside the database a restore rewinds. Every request and
+scheduled tick reads it together with the restore epoch, with no cached verdict:
+while it holds, or when the ledger cannot be read, every route but the
+independent checker's probe answers `503` with `Retry-After: 60`, ticks do no
+work, and the delivery sweep authorizes no create. A sweep captures the restore
+epoch and maintenance generation when it starts, and each create is authorized
+only while both are unchanged and the ledger suppresses neither its Slot nor its
+request. A GitHub webhook's signature is verified before any D1 access, the
+gate's included; a verified one that would write is refused with `503` during
+maintenance.
 
 ```sh
+pnpm operator maintenance-begin <opaque-actor> <restore|incident> <evidence-reference> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator maintenance-status --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 pnpm operator restore-recorded <opaque-actor> time-travel-restore --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
+pnpm operator maintenance-end <opaque-actor> <generation> <evidence-reference> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
-Each Worker then answers `503` and skips its sweeps until it has replayed the
-ledger: suppressions, erasures and cleanup records come back, restored rows
+Each transition writes a `maintenance_audit` row first, then changes state in
+one conditional statement, so concurrent or retried commands change it at most
+once. `maintenance-status` shows whether in-flight work has drained (2 minutes),
+whether a restore was recorded and replayed. `restore-recorded` is refused
+outside a drained `restore` maintenance. Workers then replay the ledger during
+maintenance: suppressions, erasures and cleanup records come back, restored rows
 under cleanup lose their text, suspensions and key revocations are reapplied
-(never lifted) and every request that is not delivered becomes
-`outcome-unknown`, reconciled by its marker.
+(never lifted), every request that is not delivered becomes `outcome-unknown`,
+reconciled by its marker, and checker episodes the service had acknowledged
+come back, reopening their incident for review. `maintenance-end` refuses with
+bounded blockers (`not_drained`, `restore_not_recorded`, `replay_pending`,
+`suppression_missing`, `erasure_missing`, `offboarding_missing`,
+`suspension_missing`, `revocation_missing`, `erased_text_present`,
+`withdrawn_release_current`, `episode_missing`) until the restored database
+holds everything the ledger keeps. The procedure is in the
+[operations runbook](../docs/runbooks/support-operations.md#d1-restore-or-corrupting-migration).
+
+`enroll`, `resume`, `reconcile`, `unsuspend`, `release-*`, `fleet-launch`,
+`fleet-run`, `update-access-grant` and `central-apply` require
+`--ledger-database-id` and are refused during maintenance, before a recorded
+restore is replayed, or when the ledger cannot be read; `release-withdraw` is
+allowed during maintenance once replayed, and records the withdrawn version in
+the ledger first. `resume` is also refused for a request the ledger suppresses.
+Revocation, erasure, offboarding and update-access revocation are not guarded.
+
+The ledger also retains checker episodes the service acknowledged (metadata
+only: component, bounded code, times; 45 days after their last report) and
+withdrawn release versions. A report is acknowledged to the checker only once
+the ledger holds its episodes too; a failed ledger write leaves the recorded
+incident and the checker retries.
 
 ## HTTP behavior
 
@@ -259,9 +299,10 @@ requires review because it has no pinned provider installation.
 
 The migration starts `delivery_control.enabled = 0`. After rollout/restore checks,
 an independently authenticated Operator can enable the intended database with
-`UPDATE delivery_control SET enabled = 1 WHERE id = 1`. Disable it before restore
-or incident recovery. This is a dispatch gate, not a complete restore procedure:
-#20 owns restore suppression replay, and #46 owns erasure/retention integration.
+`UPDATE delivery_control SET enabled = 1 WHERE id = 1`. This is a dispatch gate
+in the main database, which a restore rewinds: it is not a restore barrier. Use
+the [maintenance boundary](#maintenance-boundary-and-restores) for restore or
+incident recovery.
 Do not enable production report delivery until those gates are satisfied.
 `delivery_suppression` denies new creates/repairs by Slot or request; removing a
 WordPress key alone does not cancel accepted reports.
@@ -292,13 +333,14 @@ are log events for operations to route, not outbound notifications.
 An independent Operator may resume a **failed**, confirmed non-created request:
 
 ```sh
-pnpm operator resume shop/production int_<id> 2026-10-18T12:00:00Z operator-7 permissions-restored --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator resume shop/production int_<id> 2026-10-18T12:00:00Z operator-7 permissions-restored --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 Supply an opaque actor, an explicit deadline within the next 24 hours and one of
 `configuration-fixed`, `permissions-restored`, `provider-recovered`. The command
-writes an audit before its conditional mutation, rechecks mapping/suppression,
-and refuses unknown, superseded or unsafe requests. The audit records the
+writes an audit before its conditional mutation, rechecks mapping/suppression
+(the ledger's too), and refuses unknown, superseded or unsafe requests, and any
+resume during maintenance. The audit records the
 attempted authorization even if the command loses eligibility before mutation.
 For a positive observation discovered after the automatic reconciliation window,
 `pnpm operator reconcile <slot> <intent> <opaque-actor> positive-evidence` (with
@@ -547,7 +589,7 @@ separately, so an outage of one never implies another:
 |---|---|---|
 | `worker` | The signed probe below, from GitHub's network | No connection, timeout, a `5xx`, or an invalid answer. A `401` means the checker's key is not registered: `unknown`/`unauthorized`, not an outage |
 | `support_db`, `suppression_ledger` | The probe: each D1 answers `SELECT 1` within 2 s | It does not |
-| `restore_gate` | The probe: the [restore gate](#suppression-ledger-and-restores) | A recorded restore is not yet replayed (`pending`); `unknown` when a database is down |
+| `restore_gate` | The probe: the [restore gate](#maintenance-boundary-and-restores) | Maintenance holds or a recorded restore is not yet replayed (`pending`; the probe's `maintenance` field tells them apart); `unknown` when a database is down |
 | `service_configuration` | The probe: whether the GitHub App and incident webhook secrets are set | Either is missing: the minute tick, and with it every Discord notification, cannot run |
 | `github` | `GET https://api.github.com/rate_limit` with the run's token | No connection, timeout or a `5xx`; a rate limit is `unknown`. This is GitHub's API as the runner sees it, not the App's permissions |
 | `discord` | `GET` of the stage's incident webhook, which posts nothing | No connection, `5xx`, or the webhook is gone (`destination_rejected`). A `429` is `unknown` and waited out |
@@ -601,8 +643,9 @@ the checker's own signature: the operations API's wire format with label
 workflow run), verified against the stage's `SUPPORT_OPERATIONS_CHECKER_KEYS`
 variable (a JSON object of key ID to base64 raw Ed25519 public key; unset or
 malformed closes both routes). The probe is signature-only, as a replay reveals
-nothing beyond those states. It compares restore epochs with bounded reads and
-never performs replay or other recovery; ordinary gated traffic owns that path.
+nothing beyond those states. It compares restore epochs and reads the maintenance
+boundary (`maintenance`: `active`, `inactive` or `unknown`) with bounded reads,
+and never performs replay or other recovery; ordinary gated traffic owns that path.
 A report's request ID is single-use for 10
 minutes. A staff, Discord or installation identity never verifies here, and the
 checker key grants nothing else.

@@ -6,6 +6,7 @@ import type { CentralTarget, CentralTransport, CommandResult } from "../src/cent
 import { listIncidents } from "../src/incidents.ts";
 import { slotInventory } from "../src/inventory.ts";
 import { observeSignals } from "../src/operational-signals.ts";
+import { restoreGate } from "../src/ledger.ts";
 import { asQueryDatabase, runOperator } from "../src/operator.ts";
 import type { PackageSource } from "../src/package-source.ts";
 import type { RepositoryMapping } from "../src/repository-mappings.ts";
@@ -408,4 +409,29 @@ it("records a rollback boundary only after every Slot verified the release and t
   targets = targets.map((target) => ({ ...target, source: "composer" }));
   const second = await ship("0.3.0", String(first.id));
   expect((await state(second.id)).slots.filter((slot) => slot.reason === "managed_source_unsupported").length).toBe(2);
+});
+
+it("a restore that makes a withdrawn release current again blocks service until it is withdrawn again", async () => {
+  const good = await ship("0.2.0", "none");
+  const bad = await ship("0.3.0", String(good.id));
+  const db = stage.databases.shared;
+  const tables = (await db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    AND name NOT LIKE '_cf_%' AND name != 'd1_migrations'`).all<{ name: string }>()).results.map(({ name }) => name);
+  const image = await Promise.all(tables.map(async (table) => ({ table, rows: (await db.prepare(`SELECT * FROM ${table}`).all()).results })));
+  await json("release-withdraw", String(bad.id), "0.2.0", evidence.deploy("prod"), "alex");
+
+  await json("maintenance-begin", "alex", "restore", "inc-restore-1");
+  now += 120_000;
+  vi.setSystemTime(now);
+  // A Time Travel restore of the main database to before the withdrawal.
+  await db.batch([db.prepare("PRAGMA defer_foreign_keys = ON"), ...image.map(({ table }) => db.prepare(`DELETE FROM ${table}`)),
+    ...image.flatMap(({ table, rows }) => rows.map((row) => db.prepare(`INSERT INTO ${table} (${Object.keys(row).join(", ")})
+      VALUES (${Object.keys(row).map(() => "?").join(", ")})`).bind(...Object.values(row))))]);
+  await operator("restore-recorded", "alex", "time-travel-restore");
+  await restoreGate()(db, stage.databases.ledger, now);
+  await expect(operator("maintenance-end", "alex", "1", "inc-restore-1")).rejects.toThrow(/withdrawn_release_current/);
+  // Nothing else may change the fleet during maintenance, but the withdrawal can be made again.
+  await expect(operator("fleet-launch", String(bad.id), evidence.deploy("prod"), "alex")).rejects.toThrow(/maintenance is in effect/);
+  await json("release-withdraw", String(bad.id), "0.2.0", evidence.deploy("prod"), "alex");
+  expect(await json("maintenance-end", "alex", "1", "inc-restore-1")).toMatchObject({ state: "serving" });
 });

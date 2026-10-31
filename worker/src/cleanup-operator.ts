@@ -2,6 +2,7 @@ import { ERASABLE, erasureImages, erasureStatements, erasureStatus, OFFBOARDING_
 import { imageOf, ledgerStore } from "./ledger.ts";
 import { asQueryDatabase, type OperatorOptions } from "./operator.ts";
 import { mappingFor } from "./repository-mappings.ts";
+import { MAINTENANCE_DRAIN_MS } from "./maintenance.ts";
 import { reporterReference } from "./support-issues.ts";
 import { ulid } from "./support-requests.ts";
 
@@ -36,11 +37,20 @@ export const runCleanupOperator = async (args: readonly string[], { query, mappi
   };
   if (command === "restore-recorded" && args.length === 3 && ACTOR.test(reference ?? "") && actor === "time-travel-restore") {
     ledger();
+    // Only inside a drained restore maintenance (src/maintenance.ts): nothing admitted before it can still write.
+    const [boundary] = await ledgerQuery!("SELECT state, reason, began_at FROM maintenance WHERE id = 1", []);
+    if (boundary?.state !== "maintenance" || boundary.reason !== "restore") {
+      throw new Error("Refused: begin a restore maintenance (maintenance-begin <actor> restore <evidence>) before restoring; nothing was recorded");
+    }
+    const eligible = "EXISTS (SELECT 1 FROM maintenance WHERE id = 1 AND state = 'maintenance' AND reason = 'restore' AND began_at <= ?)";
+    if (Number(boundary.began_at) > now - MAINTENANCE_DRAIN_MS) throw new Error("Refused: maintenance has not drained yet; see maintenance-status");
     // Every Worker replays the ledger into the restored database before serving traffic or sweeping again.
-    await ledgerQuery!(`INSERT INTO ledger_audit (id, actor, action, reason, occurred_at) VALUES (?, ?, 'restore', ?, ?)`,
-      [crypto.randomUUID(), reference!, actor, now]);
-    await ledgerQuery!("UPDATE ledger_epoch SET epoch = epoch + 1, recorded_at = ? WHERE id = 1", [now]);
-    return "Restore recorded; Workers replay the ledger before serving traffic";
+    const audited = await ledgerQuery!(`INSERT INTO ledger_audit (id, actor, action, reason, occurred_at) SELECT ?, ?, 'restore', ?, ?
+      WHERE ${eligible} RETURNING id`, [crypto.randomUUID(), reference!, actor, now, now - MAINTENANCE_DRAIN_MS]);
+    const recorded = audited.length === 1 && await ledgerQuery!(`UPDATE ledger_epoch SET epoch = epoch + 1, recorded_at = ?
+      WHERE id = 1 AND ${eligible} RETURNING epoch`, [now, now - MAINTENANCE_DRAIN_MS]);
+    if (!recorded || recorded.length !== 1) throw new Error("Refused: maintenance changed while recording; see maintenance-status");
+    return "Restore recorded; Workers replay the ledger during maintenance, then verify and end it with maintenance-end";
   }
   if (!ACTOR.test(actor ?? "")) throw new Error(USAGE);
   if (command === "erase" && args.length === 4) {

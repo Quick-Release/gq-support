@@ -16,3 +16,26 @@ Not every revocation goes through the Operator CLI. Re-enrollment replaces a Slo
 ## Amendment: the title digest in the ledger
 
 The ledger's copy of a cleanup record carries the keyed title digest for as long as the main database's copy does; no erased title text is mirrored. What it holds, its key and when it is cleared are in the [privacy design](../support-privacy-design.md#title-digest).
+
+## Amendment: the maintenance boundary and what else the ledger keeps (#146)
+
+Recording a restore after the fact left a gap: between the restore and its
+record, and while any isolate trusted a cached verdict, a restored database
+could serve. Restores therefore happen inside a maintenance boundary held in the
+suppression ledger, never in the main database, whose dispatch flag a restore
+rewinds. Every request and scheduled tick reads the boundary and the restore
+epoch without caching a verdict, and an unreadable ledger closes service. A
+restore is recorded only inside a drained restore maintenance, replay runs while
+maintenance still holds, and service resumes only once an Operator's audited end
+verifies that the restored database holds everything the ledger keeps. Each
+delivery execution captures the restore epoch and maintenance generation, and a
+create is authorized only while both are unchanged, so work admitted before a
+restore cannot post after it; a late provider success is reconciled by its marker.
+
+The ledger also keeps two further kinds of state a restore would otherwise drop,
+without report text: the independent checker's outage episodes the service
+acknowledged (the checker lets them go once acknowledged, so a report is
+acknowledged only after the ledger holds it; replay reopens their incident for
+review), and withdrawn release versions (recorded before the main withdrawal;
+service cannot resume while a withdrawn release is current again). Native update
+key revocations already share the `revocation` kind (#142).

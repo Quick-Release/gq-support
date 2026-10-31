@@ -426,6 +426,12 @@ export const runFleetOperator = async (args: readonly string[], options: Operato
     const deployed = await evidence.run(run!);
     const deployment = await deploymentEvidence(evidence, run!, stage, deployed?.head_sha ?? "");
     if (typeof deployment === "string") throw new GateRefusal({ infrastructure: `the ${stage} deployment run ${deployment}` });
+    // The suppression ledger first (ledger-migrations/0003): a restore of the main database can then never make the
+    // withdrawn version current again unnoticed, since service cannot resume while it is (src/maintenance.ts).
+    if (options.ledger) {
+      await options.ledger(`INSERT INTO release_withdrawal (package_version, release_sequence, withdrawn_by, withdrawn_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT (package_version) DO NOTHING`, [current.package_version, current.sequence, actor!, now]);
+    }
     // One statement: the bad release is still the approved one, and the recovery package still qualifies. From here the
     // bad release is withdrawn: nothing offers or serves it, though the recovery is not dispatched until the launch below.
     const [approved] = await query(`INSERT INTO release_approval (sequence, package_version, kind, previous_sequence, evidence, approved_by, approved_at)

@@ -124,27 +124,59 @@ set up and evidenced (below), with authorized credentials.
 
 ## D1 restore or corrupting migration
 
-1. Halt deployment and dispatch; establish a maintenance boundary that blocks
-   intake/writes and scheduled execution before restore. Record in-flight work
-   and account for late provider success. A dispatch flag alone is not a complete
-   traffic/write barrier.
-2. Verify stage/resource IDs, approved restore point and a usable independent
-   suppression ledger/revocation log. Never restore `SupportLedger` together with
-   `SupportDB`. Preserve the external restore epoch required by ADR 0016.
-3. Perform the authorized restore using current provider operations. Before
-   resuming traffic, run the existing `restore-recorded` workflow from the Worker
-   README and replay suppressions, erasures, suspensions and revocations. Strip
-   restored erased text before it can be served or dispatched. A missing or
-   failing ledger blocks service resumption.
-4. Every restored non-delivered request becomes outcome-unknown, even if the
-   restored row says pending/failed. Reconcile positive GitHub evidence; never
-   blindly replay the old outbox or infer absence from a search.
-5. Verify suppression replay, drained execution/late success handling, privacy
-   cleanup and read-only status reconciliation with audited evidence. Resume
-   authorized intake/dispatch only after all checks pass.
+The maintenance boundary, restore recording, replay verification and resume are
+implemented (#146; [Worker README](../../worker/README.md#maintenance-boundary-and-restores)).
+They have been rehearsed only locally (`pnpm recovery-drill`, below); no staging
+restore, Time Travel operation or credentialed drill has run. All commands take
+`--stage`, `--account-id`, `--database-id` and `--ledger-database-id`.
 
-Provider restore commands and the exact maintenance barrier must be implemented
-and rehearsed before this procedure is considered executable production recovery.
+1. **Halt.** Stop deployments and fleet changes. Begin maintenance with an opaque
+   actor and the incident ID as evidence:
+   `pnpm operator maintenance-begin <actor> restore <incident-id>`.
+   The boundary lives in `SupportLedger`, which the restore never rewinds. From
+   the next request every Worker isolate answers `503` (except the independent
+   checker's probe, which reports `maintenance: active`), scheduled ticks do no
+   work, no create is authorized, and guarded Operator mutations are refused.
+   Revocation, erasure, offboarding and update-access revocation still apply,
+   ledger first. Webhooks that would write are refused with `503`; plan a
+   `status-reconcile` from the maintenance start afterwards ([missed webhooks](missed-webhooks.md)).
+   Ordinary WordPress page rendering is unaffected.
+2. **Drain.** Wait until `pnpm operator maintenance-status` shows `drained: true`
+   (2 minutes after the start: a tick's phases end within 58 seconds, a
+   request's background delivery within 25). Creates already posted may still
+   succeed at GitHub later; they are found by marker in step 6.
+3. **Verify inputs.** Confirm stage, account and resource IDs, the approved
+   restore point and that `SupportLedger` answers. Never restore `SupportLedger`
+   together with `SupportDB`; never restore any production resource as a drill.
+   A ledger that cannot be read blocks every later step.
+4. **Restore `SupportDB` only**, with the provider's current Time Travel
+   operation, reviewed against Cloudflare's documentation at the time. Then
+   record it: `pnpm operator restore-recorded <actor> time-travel-restore`.
+   It is refused outside a drained restore maintenance and bumps the external
+   restore epoch.
+5. **Replay.** The next scheduled tick (or any request) replays the ledger into
+   the restored database while maintenance still holds: suppressions, erasures,
+   cleanup records, offboardings, suspensions and report/update key revocations
+   come back; restored text under cleanup is purged; every request that is not
+   delivered becomes `outcome-unknown`; acknowledged independent-checker
+   episodes come back, reopening their `component_unavailable` incident for
+   review. `maintenance-status` shows `replayed_epoch` equal to `restore_epoch`.
+6. **Verify and resume.** `pnpm operator maintenance-end <actor> <generation> <incident-id>`
+   refuses, listing bounded blockers, until: drained, restore recorded, replay
+   complete, every ledger suppression/erasure/offboarding/suspension present,
+   no ledger-revoked key usable, no erased text left, no withdrawn release
+   current again and every retained episode present. For `withdrawn_release_current`,
+   run `release-withdraw` again (allowed during maintenance once replayed).
+   Then reconcile: restored uncertain creates are reconciled by marker on the
+   normal schedule; positive evidence settles them, an empty or incomplete scan
+   never proves absence, nothing is force-created and `resume` refuses them.
+   Review reopened incidents and run `status-reconcile` before resolving.
+7. Record the evidence below; the `maintenance_audit` and `ledger_audit` rows hold
+   actors, evidence references and times.
+
+An incident maintenance (`maintenance-begin <actor> incident <incident-id>`) uses
+the same boundary without a restore, for example to stop all intake and dispatch
+during a privacy exposure; it ends once drained and verified.
 
 ## Retention, erasure or private-data exposure
 
@@ -556,14 +588,24 @@ onboarding and after changes affecting the relevant recovery path. Evidence must
 include the incident ID, opaque actor, timestamps, stage/versions, fault, observed
 signal/notification, recovery action, invariant checks, result and human sign-off.
 
+`pnpm recovery-drill [--out <report.json>]` (from `worker/`) runs the synthetic
+local rehearsals of the recovery drills (Worker HTTP, scheduled and Operator
+entries over local D1 with fake GitHub/Discord and a controlled clock) and prints
+an evidence report: each drill's local result, and its staging rehearsal as
+`not_run` with the real inputs it needs. A local pass is not staging evidence and
+not a sign-off; the report says so (`staging_evidence: false`, `signed_off: false`).
+`--stage staging` runs nothing and exits 2: no staging fault injection, Time
+Travel restore or live provider change is authorized or configured from it.
+
 | Drill | Required proof |
 |---|---|
-| GitHub outage and poisoned outbox item | Known-non-creation retries bounded; unrelated Slots progress; unknown outcomes never reposted |
+| GitHub outage and poisoned outbox item | Known-non-creation retries bounded; unrelated Slots progress; unknown outcomes never reposted. Local only: no staging GitHub fault method is agreed |
 | Ambiguous create and late GitHub success | 15-minute incident, 24-hour handoff, positive reconciliation and no duplicate create |
 | Credential replacement/revocation | Correct stage/Slot only, old key refused, independent update recovery still available |
 | Broken staging webhook | 401/5xx reaches incident store and Discord; `drill-verify webhook` passes; configuration restored; status repair evidence complete. Not yet run: staging Discord destinations are not configured |
 | Worker/D1 outage | Independent detection works; website requests remain independent; accepted work and incident state reconcile into one `component_unavailable` incident. Not yet run: the [independent checker](#independent-outage-checks) is not set up for any stage |
-| D1 restore | Suppressions/revocations survive; erased text not served; stale delivered work never blindly replayed; unsafe resume refused |
+| Maintenance boundary | Every isolate refuses intake/writes; ticks dispatch nothing; probe shows `maintenance: active`; guarded Operator mutations refused; audit complete. Local only (`pnpm recovery-drill`) |
+| D1 restore | Suppressions/revocations survive; erased text not served; stale delivered work never blindly replayed; unsafe resume refused; withdrawn release not current; checker episodes reopened. Local only: no staging restore point, provider restore command or credentialed run is recorded |
 | Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused. Exercised locally only (`worker/test/fleet-rollout.test.ts`, `package.sh native` and `central` on the disposable test site): no gate, launch, central target or native grant exists for any stage, so the staging drill has not run |
 | Release window | Previous release accepted until exactly 24 hours after recorded dispatch, then 426 at the service; WordPress closes new reports from its cached policy; accepted retries replay; production `enforced` |
 | Discord/Banquinha outage | Incidents survive; CLI works when storage is healthy; notifications recover without duplicate incidents |

@@ -338,7 +338,12 @@ before onboarding, not values established by this interview.
 - Shared Worker and D1 resources per stage follow ADR 0013; D1 jurisdiction
   follows ADR 0017.
 - Recovery follows ADRs 0016 and 0019: restore suppression and revocations before
-  service resumes, and never blindly recreate uncertain GitHub outcomes.
+  service resumes, and never blindly recreate uncertain GitHub outcomes. #146
+  implements the maintenance boundary in the suppression ledger, drained restore
+  recording, replay under maintenance (including retained checker episodes and
+  withdrawn releases) and an audited, verified resume ([Worker README](../worker/README.md#maintenance-boundary-and-restores)).
+  Only synthetic local drills have run (`pnpm recovery-drill`); no staging
+  restore point, provider restore command or credentialed drill is recorded.
 - Delivery recovery uses the D1 outbox; Queues and DLQ are deferred.
 - Website rendering must remain independent of support-service availability.
 - Existing release CI verifies packaged bytes and installed upgrades, but does

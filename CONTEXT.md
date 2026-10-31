@@ -109,6 +109,10 @@ _Avoid_: Ticket, when the distinction from a Support request matters
 A scheduled check that runs outside the support service and observes its Worker, databases, GitHub, Discord and dashboard separately, so a failed component need not report its own outage. Its observations become Operational incidents only once the service can record them; it has no staff, Operator or installation authority.
 _Avoid_: Monitor, health check, when the service's own measured health is meant
 
+**Maintenance boundary**:
+The Operator-declared state, held outside the database a restore rewinds, in which the support service accepts no intake, makes no writes, dispatches nothing and refuses unsafe Operator changes, so a restore can be recorded, replayed and verified before service resumes. Ordinary WordPress pages are unaffected.
+_Avoid_: Delivery disabled, maintenance mode, when only the dispatch flag in the main database is meant
+
 **Release candidate**:
 A published plugin package recorded from its verified release artifacts: version, package hash and provenance. It is not supported merely by existing.
 _Avoid_: Release, when approval has not been recorded

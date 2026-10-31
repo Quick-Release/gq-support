@@ -72,3 +72,15 @@ export const scheduledTick = (options: ScheduledOptions): Effect.Effect<void, ne
     metricStatement(options.db, { metric: "scheduler", outcome: `${name}_${outcome}` }, { at, durationMs })))).pipe(
     Effect.timeoutOption(500), Effect.catchCause(() => Effect.logError("Scheduler measurement failed")));
 });
+
+/**
+ * The minute Cron's entry: the restore gate first (src/ledger.ts), which
+ * replays a recorded restore even during maintenance, then the tick only
+ * while the service is serving. Maintenance or an unreadable ledger skips
+ * every phase, so nothing is dispatched, swept or notified.
+ */
+export const serviceTick = (admitted: () => Promise<boolean>, options: ScheduledOptions):
+  Effect.Effect<void, never, GitHubGateway | GitHubReader> => Effect.gen(function* () {
+  if (!(yield* Effect.promise(() => admitted().catch(() => false)))) return yield* Effect.logError("Support service gate closed: maintenance or restore replay pending");
+  yield* scheduledTick(options);
+});
