@@ -189,6 +189,16 @@ it("completes a full ledger mirror within the cleanup phase at 170 ms D1 roundtr
   expect(await phases()).not.toHaveProperty("cleanup_timed_out");
 }, 30_000);
 
+it("completes an idle cleanup pass within its bound at 320 ms D1 roundtrips", async () => {
+  // A stage with nothing to clean up, mirrored once, as staging is on most minutes.
+  await tick();
+  advance(MINUTE);
+  roundtrip = () => 320;
+  await tick();
+  expect(await phases()).toMatchObject({ cleanup_completed: 2 });
+  expect(await phases()).not.toHaveProperty("cleanup_timed_out");
+}, 60_000);
+
 it("starts no mirror read or write once the cleanup phase is cut off, and the next tick mirrors in full", async () => {
   await unmirroredRevocation();
   // The ledger's reads outlast the phase bound; nothing is recorded, and the mirror is not marked done.

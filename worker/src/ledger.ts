@@ -103,9 +103,9 @@ export const ledgerStore = (ledger: QueryDatabase) => ({
   },
   /** Removals outlive the 30-day Time Travel window, then go. */
   async compact(now: number, keepMs: number) {
-    await ledger.prepare("DELETE FROM ledger_entry WHERE payload IS NULL AND recorded_at <= ?").bind(now - keepMs).run();
-    // Retained checker episodes go once no restore within the Time Travel window could need them.
-    await ledger.prepare("DELETE FROM retained_episode WHERE received_at <= ?").bind(now - keepMs).run();
+    // One roundtrip, in order. Retained checker episodes go once no restore within the Time Travel window could need them.
+    await ledger.batch([ledger.prepare("DELETE FROM ledger_entry WHERE payload IS NULL AND recorded_at <= ?").bind(now - keepMs),
+      ledger.prepare("DELETE FROM retained_episode WHERE received_at <= ?").bind(now - keepMs)]);
   },
 });
 
