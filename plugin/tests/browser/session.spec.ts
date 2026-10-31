@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { submitLogIn } from '../performance/test-site.cjs';
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
 const wp = (args: string[]) => execFileSync('ddev', ['wp', '--path=.test-site', ...args], { encoding: 'utf8' }).trim();
@@ -12,11 +13,7 @@ test.afterAll(() => wp(['eval', "GQ_Support_State::update(array('connection' => 
 
 for (const change of ['different account', 'new login session', 'revoked grant']) {
   test(`draft is protected after ${change}`, async ({ page }) => {
-    await page.goto(`${site}/wp-login.php`);
-    await page.locator('#user_login').fill('admin');
-    await page.locator('#user_pass').fill('launcher-test-password');
-    await page.locator('#wp-submit').click();
-    await page.waitForURL(/wp-admin/);
+    await submitLogIn(page, 'admin', 'launcher-test-password');
     await page.goto(`${site}/wp-admin/`);
     await page.getByRole('button', { name: /^Support/ }).click();
     const description = page.getByRole('textbox', { name: 'Description' });
@@ -47,11 +44,7 @@ for (const change of ['different account', 'new login session', 'revoked grant']
 }
 
 test('REST requires cookie plus nonce and sends private no-store errors', async ({ page }) => {
-  await page.goto(`${site}/wp-login.php`);
-  await page.locator('#user_login').fill('admin');
-  await page.locator('#user_pass').fill('launcher-test-password');
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(/wp-admin/);
+  await submitLogIn(page, 'admin', 'launcher-test-password');
   await page.goto(`${site}/wp-admin/`);
   const binding = await page.evaluate(() => window.gqSupportLauncher);
   const refreshed = await page.request.get(`${binding.ajaxUrl}?action=gq_support_session&session=${binding.session}`);

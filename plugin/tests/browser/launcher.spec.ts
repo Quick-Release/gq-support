@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { submitLogIn } from '../performance/test-site.cjs';
 
 const site = process.env.GQ_SUPPORT_TEST_URL ?? 'https://gq-support-lifecycle-testsite.ddev.site';
 const wp = (args: string[]) => execFileSync('ddev', ['exec', '--dir', '/var/www/html/.test-site', 'wp', ...args], { encoding: 'utf8' }).trim();
@@ -19,13 +20,7 @@ test.beforeAll(() => {
 });
 test.afterAll(() => setConnection('not_connected'));
 
-async function logIn(page: Page, user = 'admin', password = 'launcher-test-password') {
-  await page.goto(`${site}/wp-login.php`);
-  await page.locator('#user_login').fill(user);
-  await page.locator('#user_pass').fill(password);
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(/wp-admin/);
-}
+const logIn = (page: Page, user = 'admin', password = 'launcher-test-password') => submitLogIn(page, user, password);
 
 test('anonymous and unsupported admin screens receive no launcher assets', async ({ page }) => {
   await page.goto(`${site}/wp-admin/`);
