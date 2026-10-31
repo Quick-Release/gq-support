@@ -4,17 +4,22 @@ Tags: support, issue-tracking, bug-report
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.1.10
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Adds an in-dashboard support widget for authenticated users to submit reports and view their status.
+Adds an in-dashboard support widget for authorized users to submit reports and view their status.
 
 == Description ==
 
-This plugin is under active development. Authorized Reporters on a connected installation see a Support launcher on supported admin screens; sending reports is not available yet.
+Authorized Reporters on a connected installation can submit Support requests and review their status from supported admin screens. An approved service connection and explicit access are required.
 
 == Changelog ==
+
+= 0.2.0 =
+* Sign the plugin version and installed file digest so the service can verify release compatibility and update outcomes.
+* Support approved private updates and compatible recovery independently of report access.
+* Pause new reports when the cached release policy requires an update, while retaining access to accepted requests.
 
 = 0.1.10 =
 * Let Reporters, and Support managers within their installation, close and reopen a delivered Support request; GitHub stays authoritative for its status.
