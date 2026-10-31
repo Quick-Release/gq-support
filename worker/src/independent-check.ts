@@ -39,6 +39,8 @@ export interface ServiceOptions {
   readonly ledger: QueryDatabase;
   /** The restore gate (src/ledger.ts): false until a recorded restore has been replayed. */
   readonly restored: (db: QueryDatabase, ledger: QueryDatabase) => Promise<boolean>;
+  /** Optional read-only restore-status adapter; never performs replay. */
+  readonly restoreReady?: (db: QueryDatabase, ledger: QueryDatabase) => Promise<boolean | null>;
   readonly configuration: ServiceConfiguration;
 }
 
@@ -68,14 +70,33 @@ const answers = async (db: QueryDatabase) => {
   }
 };
 
+/** Compare durable restore epochs without invoking the gate's replay path. */
+const inspectRestoreReady = async (db: QueryDatabase, ledger: QueryDatabase): Promise<boolean | null> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.all([
+        db.prepare("SELECT epoch FROM restore_state WHERE id = 1").first<{ epoch: number }>(),
+        ledger.prepare("SELECT epoch FROM ledger_epoch WHERE id = 1").first<{ epoch: number }>(),
+      ]).then(([main, recorded]) => main && recorded ? main.epoch >= recorded.epoch : null),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), STORAGE_TIMEOUT_MS); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /**
  * The narrow health probe, answered before the restore gate and recording
- * nothing of its own (the gate may run its pending replay, as for any request),
+ * nothing and never performing restore replay,
  * so it works while storage is down: whether this Worker answers,
  * whether the main database and suppression ledger each answer a trivial read,
  * whether the restore gate is open, and whether the service's configuration is
  * present. Signature only: a replayed probe reveals nothing beyond these states,
- * and a replay record would need the D1 under test. No record or value is read.
+ * and a replay record would need the D1 under test. Only restore epochs and
+ * component status are read; no support record or credential value is exposed.
  */
 export const handleProbe = async (request: Request, db: QueryDatabase, options: ServiceOptions, now: number): Promise<Response> => {
   try {
@@ -83,7 +104,7 @@ export const handleProbe = async (request: Request, db: QueryDatabase, options: 
     const body = await readBody(request, 0);
     if (body !== "" || !await authenticated(request, "", options.checker, now)) return unauthorized();
     const [main, ledger] = await Promise.all([answers(db), answers(options.ledger)]);
-    const gate = main && ledger ? await options.restored(db, options.ledger).catch(() => null) : null;
+    const gate = main && ledger ? await (options.restoreReady ?? inspectRestoreReady)(db, options.ledger).catch(() => null) : null;
     const present = (value: boolean) => value ? "configured" : "missing";
     return json({
       worker: "ok", support_db: main ? "ok" : "unavailable", suppression_ledger: ledger ? "ok" : "unavailable",

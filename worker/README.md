@@ -598,7 +598,9 @@ the checker's own signature: the operations API's wire format with label
 workflow run), verified against the stage's `SUPPORT_OPERATIONS_CHECKER_KEYS`
 variable (a JSON object of key ID to base64 raw Ed25519 public key; unset or
 malformed closes both routes). The probe is signature-only, as a replay reveals
-nothing beyond those states; a report's request ID is single-use for 10
+nothing beyond those states. It compares restore epochs with bounded reads and
+never performs replay or other recovery; ordinary gated traffic owns that path.
+A report's request ID is single-use for 10
 minutes. A staff, Discord or installation identity never verifies here, and the
 checker key grants nothing else.
 

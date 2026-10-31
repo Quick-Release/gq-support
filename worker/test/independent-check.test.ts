@@ -66,6 +66,7 @@ const serve = (request: Request) => Effect.runPromise(handleWorkerRequest(HttpSe
   operationsAccess(JSON.stringify({ [banquinha.keyId]: banquinha.publicKey }), "alex"), ["operational_incidents"], null, {
     checker: checkerAccess(JSON.stringify({ [checker.keyId]: checker.publicKey })),
     ledger: ledger(), restored: async (db, ledgerDb) => !replayPending && await gate(db, ledgerDb, Date.now()),
+    ...(replayPending ? { restoreReady: async () => false } : {}),
     configuration,
   }));
 const PROBE = "/v1/operations/checker/probe";
@@ -82,6 +83,17 @@ it("answers only the independent checker's signed probe, with component health a
     configuration: { github_app: "configured", operational_incidents: "configured" },
     observed_at: new Date(START).toISOString(),
   });
+});
+
+it("observes a pending restore without executing replay through the probe", async () => {
+  await stage.databases.ledger.prepare("UPDATE ledger_epoch SET epoch = ? WHERE id = 1").bind(START).run();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await serve(await checker.request("GET", PROBE, "run-1"));
+    expect(await response.json()).toMatchObject({ restore_gate: "pending" });
+  }
+  // An ordinary gated request may perform recovery; the checker only observes it.
+  expect((await serve(await banquinha.request("GET", "/v1/operations/incidents", "alex"))).status).toBe(200);
+  expect(await (await serve(await checker.request("GET", PROBE, "run-1"))).json()).toMatchObject({ restore_gate: "open" });
 });
 
 it("tells an unavailable database, ledger or closed restore gate apart, and serves nothing else meanwhile", async () => {
