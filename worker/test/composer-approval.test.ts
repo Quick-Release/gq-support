@@ -248,6 +248,22 @@ it("refuses when the state it read changes before the record is complete", async
   } finally { packageTags.read = read; }
 });
 
+it.each(["schema", "rollback boundary"])("refuses when the %s changes during the published-tag read", async (change) => {
+  const { id } = await approved("0.1.11");
+  const read = packageTags.read;
+  packageTags.read = async (tag) => {
+    if (change === "schema") {
+      await sql(stage.databases.shared, "UPDATE __alchemy_migrations SET hash = ? WHERE name = ?", "0".repeat(64), reviewedMigrations().at(-1)!.name);
+    } else {
+      await sql(stage.databases.shared, "INSERT INTO rollback_boundary (sequence, schema_floor, evidence, recorded_by, recorded_at) VALUES (?, 1, 'reviewed-boundary', 'alex', ?)", id, now);
+    }
+    return read(tag);
+  };
+  try {
+    await expect(approval(SLOT, id, "0.1.11", "prepare")).rejects.toThrow(/changed during the read/);
+  } finally { packageTags.read = read; }
+});
+
 it("reads only: no D1 record is added or changed, and the record holds no secrets or request content", async () => {
   const { id } = await approved("0.2.0");
   await launch(id);

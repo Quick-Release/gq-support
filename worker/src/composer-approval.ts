@@ -111,6 +111,8 @@ const observe = async (options: OperatorOptions, ledger: OperatorOptions["query"
     replayed: restore ? Number(restore.epoch) : null,
     offboarded: Number(main?.offboarded ?? 1) === 1 || await ledgerOffboarded(asQueryDatabase(ledger), slot),
     current,
+    liveSchema: await readLiveSchema(query, options.migrations),
+    floor: await boundaryFloor(query),
     withdrawn: Number(withdrawn?.withdrawn ?? 0) === 1 || ledgerWithdrawn.length > 0,
   };
 };
@@ -119,7 +121,7 @@ const observe = async (options: OperatorOptions, ledger: OperatorOptions["query"
 export const composerApproval = async (args: readonly string[], options: OperatorOptions): Promise<ComposerApproval> => {
   const [, slot, releaseId, directory, phase] = args;
   if (args.length !== 5 || !RELEASE_ID.test(releaseId!) || !directory || (phase !== "prepare" && phase !== "deploy")) throw new Error(USAGE);
-  const { stage, ledger, readArtifact, packageTags, migrations, now = Date.now() } = options;
+  const { stage, ledger, readArtifact, packageTags, now = Date.now() } = options;
   if (!stage) throw new ComposerApprovalRefusal("this Operator command has no reviewed target stage");
   if (!ledger) throw new ComposerApprovalRefusal("the suppression ledger is required (--ledger-database-id)");
   if (!readArtifact) throw new ComposerApprovalRefusal("this Operator boundary cannot read release artifacts");
@@ -144,12 +146,11 @@ export const composerApproval = async (args: readonly string[], options: Operato
   }
   if (release.files_sha256 === null) throw new ComposerApprovalRefusal("no verified release gates are recorded for these bytes; run release-verify");
   if (phase === "deploy" && release.dispatched_at === null) throw new ComposerApprovalRefusal("the release's fleet dispatch is not recorded; only prepare is possible");
-  const schema = await readLiveSchema(options.query, migrations);
+  const { liveSchema: schema, floor } = state;
   if (schema.state !== "ok") throw new ComposerApprovalRefusal(`the live schema is not the reviewed one (${schema.reason})`);
   if (schema.live! < release.schema_from! || schema.live! > release.schema_to!) {
     throw new ComposerApprovalRefusal(`the live schema ${schema.live} is outside the release's tested range ${release.schema_from}-${release.schema_to}`);
   }
-  const floor = await boundaryFloor(options.query);
   if (schema.destructive.some((number) => number < floor || floor === 0)) {
     throw new ComposerApprovalRefusal("a live destructive migration has no rollback boundary allowing it");
   }
