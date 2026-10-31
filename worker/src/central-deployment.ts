@@ -117,11 +117,14 @@ const inflate = async (bytes: Uint8Array) => new Uint8Array(await new Response(n
   .pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
 
 /**
- * The SHA-256 of every file in an approved release ZIP, by path under its single
+ * The raw bytes of every file in an approved release ZIP, by path under its single
  * `gq-support/` root, read from the verified bytes themselves rather than from a
- * separately published manifest. Anything unusual refuses the package.
+ * separately published manifest. Anything unusual refuses the package: an
+ * encrypted entry, a symlink or other non-regular entry, a path outside the root
+ * or with a `.`/`..`, backslash or non-ASCII segment, a duplicate, or a size or
+ * count past the bounds.
  */
-export const packageFiles = async (zip: Uint8Array): Promise<Map<string, string>> => {
+export const packageContents = async (zip: Uint8Array): Promise<Map<string, Uint8Array>> => {
   const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
   const refuse = (): never => { throw new Error("The approved package is not a plain gq-support/ ZIP; it is not applied"); };
   let end = -1;
@@ -131,7 +134,7 @@ export const packageFiles = async (zip: Uint8Array): Promise<Map<string, string>
   if (end < 0) refuse();
   const count = view.getUint16(end + 10, true);
   if (count === 0xffff || count > MAX_FILES) refuse();
-  const files = new Map<string, string>();
+  const files = new Map<string, Uint8Array>();
   let at = view.getUint32(end + 16, true);
   let unpacked = 0;
   for (let index = 0; index < count; index++) {
@@ -146,7 +149,8 @@ export const packageFiles = async (zip: Uint8Array): Promise<Map<string, string>
     const offset = view.getUint32(at + 42, true);
     const name = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(zip.subarray(at + 46, at + 46 + nameLength));
     at += 46 + nameLength + skip;
-    if ((flags & 1) !== 0 || (mode & 0o170000) === 0o120000) refuse();
+    // Only regular files and directories, where the entry records a Unix type at all.
+    if ((flags & 1) !== 0 || ![0, 0o100000, 0o040000].includes(mode & 0o170000)) refuse();
     if (name === "gq-support/") continue;
     if (!name.startsWith("gq-support/")) refuse();
     const path = name.slice("gq-support/".length);
@@ -158,11 +162,15 @@ export const packageFiles = async (zip: Uint8Array): Promise<Map<string, string>
     const data = zip.subarray(start, start + packed);
     const content = method === 0 ? data : method === 8 ? await inflate(data).catch(refuse) : refuse();
     if (content.length !== size) refuse();
-    files.set(path, await hex(content));
+    files.set(path, content);
   }
   if (!files.has("gq-support.php")) refuse();
   return files;
 };
+
+/** The SHA-256 of every file in an approved release ZIP (packageContents), by path. */
+export const packageFiles = async (zip: Uint8Array): Promise<Map<string, string>> =>
+  new Map(await Promise.all([...await packageContents(zip)].map(async ([path, content]) => [path, await hex(content)] as const)));
 
 /**
  * One digest of a package's exact file set: the SHA-256 of each `<path> NUL <sha256> LF`

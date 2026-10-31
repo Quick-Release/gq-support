@@ -22,7 +22,7 @@ const parsed = (text: string): Record<string, unknown> => {
  * Only what the artifacts prove: the version both records name and the SHA-256
  * of the actual bytes, which both records must agree with. Nothing is typed in.
  */
-const verifiedPackage = async (artifact: ReleaseArtifact) => {
+export const verifiedPackage = async (artifact: ReleaseArtifact) => {
   const manifest = parsed(artifact.manifest);
   const provenance = parsed(artifact.provenance);
   const zip = manifest.zip as { size?: unknown; sha256?: unknown } | undefined;
@@ -32,7 +32,8 @@ const verifiedPackage = async (artifact: ReleaseArtifact) => {
     typeof provenance.commit !== "string" || !COMMIT.test(provenance.commit) || typeof provenance.run !== "string" || !/^[1-9][0-9]{0,19}$/.test(provenance.run)) {
     throw new Error("The package bytes, manifest and provenance do not agree; record only a verified release workflow's artifacts");
   }
-  return { version: manifest.version, sha256: digest, provenance: `release-plugin run ${provenance.run} at ${provenance.commit}` };
+  return { version: manifest.version, sha256: digest, commit: provenance.commit as string, run: provenance.run as string,
+    provenance: `release-plugin run ${provenance.run} at ${provenance.commit}` };
 };
 
 /** The full restricted record of an approval, for the Operator only. */

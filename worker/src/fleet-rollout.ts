@@ -102,7 +102,7 @@ interface Package { package_version: string; contract_version: number; schema_fr
 const served = (row: Package) => row.contract_version >= SUPPORTED_CONTRACTS.min && row.contract_version <= SUPPORTED_CONTRACTS.max;
 
 /** The highest recorded rollback boundary's schema floor, or 0. */
-const boundaryFloor = async (query: OperatorOptions["query"]) =>
+export const boundaryFloor = async (query: OperatorOptions["query"]) =>
   Number((await query("SELECT COALESCE(MAX(schema_floor), 0) AS floor FROM rollback_boundary", []))[0]?.floor ?? 0);
 
 /**
@@ -255,7 +255,7 @@ const hex = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.
   .map((byte) => byte.toString(16).padStart(2, "0")).join("");
 
 /** A withdrawn version: one a recovery approval replaced. It is never offered or recovered to again. */
-const WITHDRAWN = `EXISTS (SELECT 1 FROM release_approval w JOIN release_approval r ON r.previous_sequence = w.sequence AND r.kind = 'recovery'
+export const WITHDRAWN = `EXISTS (SELECT 1 FROM release_approval w JOIN release_approval r ON r.previous_sequence = w.sequence AND r.kind = 'recovery'
   WHERE w.package_version = c.package_version)`;
 
 /**

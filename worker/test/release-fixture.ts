@@ -13,11 +13,15 @@ import { MIGRATIONS_DIR, migrationFiles } from "./local-d1.ts";
 export const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 
 /** A release ZIP as the release workflow writes it: every file under one `gq-support/` root, deflated. */
-export const zipOf = (files: Record<string, string>) => {
+export const zipOf = (files: Record<string, string>) =>
+  zipEntries([["gq-support/", ""], ...Object.entries(files).map(([path, text]): [string, string] => [`gq-support/${path}`, text])]);
+
+/** A ZIP of exactly these entries, in order: names as given, with an optional Unix mode (default 0644 file or 0755 directory). */
+export const zipEntries = (entries: readonly (readonly [name: string, text: string, mode?: number])[]) => {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
-  for (const [path, text] of Object.entries({ "gq-support/": "", ...Object.fromEntries(Object.entries(files).map(([p, t]) => [`gq-support/${p}`, t])) })) {
+  for (const [path, text, mode] of entries) {
     const name = Buffer.from(path);
     const data = Buffer.from(text);
     const directory = path.endsWith("/");
@@ -28,7 +32,7 @@ export const zipOf = (files: Record<string, string>) => {
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(0x0314, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(directory ? 0 : 8, 10);
     central.writeUInt32LE(crc32(data), 16); central.writeUInt32LE(packed.length, 20); central.writeUInt32LE(data.length, 24);
-    central.writeUInt16LE(name.length, 28); central.writeUInt32LE((directory ? 0o40755 : 0o100644) * 0x10000, 38); central.writeUInt32LE(offset, 42);
+    central.writeUInt16LE(name.length, 28); central.writeUInt32LE((mode ?? (directory ? 0o40755 : 0o100644)) * 0x10000, 38); central.writeUInt32LE(offset, 42);
     locals.push(local, name, packed);
     centrals.push(central, name);
     offset += local.length + name.length + packed.length;

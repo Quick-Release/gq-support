@@ -206,7 +206,7 @@ holds everything the ledger keeps. The procedure is in the
 [operations runbook](../docs/runbooks/support-operations.md#d1-restore-or-corrupting-migration).
 
 `enroll`, `resume`, `reconcile`, `unsuspend`, `release-*`, `fleet-launch`,
-`fleet-run`, `update-access-grant` and `central-apply` require
+`fleet-run`, `update-access-grant`, `central-apply` and `composer-approval` require
 `--ledger-database-id` and are refused during maintenance, before a recorded
 restore is replayed, or when the ledger cannot be read; `release-withdraw` is
 allowed during maintenance once replayed, and records the withdrawn version in
@@ -935,6 +935,16 @@ submission disabled or the Installation credential revoked.
 ```sh
 pnpm operator central-apply <slot> <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 pnpm operator central-status <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
+```
+
+A Composer-managed central Slot's site deployment tooling gets what it may
+install from the read-only `composer-approval` record (`src/composer-approval.ts`,
+[runbook](../docs/runbooks/support-operations.md#composer-approval-record)). It
+reads the published `v<version>` tag's git records with the Operator's `gh`
+login (`scripts/package-tags.ts`) and writes nothing:
+
+```sh
+pnpm operator composer-approval <slot> <release-id> <artifact-directory> <prepare|deploy> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
 ## Fleet rollout and recovery

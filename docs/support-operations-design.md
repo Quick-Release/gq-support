@@ -174,6 +174,10 @@ Not yet established: any real gate, deployment or launch record; a credentialed
 production plan and its reviewer's sign-off; staged update and rollback drills;
 central targets, Composer-managed deployment source updates (refused until a
 reviewed adapter exists); native grants; and production `enforced` policy.
+The read-only `composer-approval` Operator record
+([runbook](runbooks/support-operations.md#composer-approval-record)) gives site
+deployment tooling the approved package, its published tag commit and exact
+file set; it installs nothing and enables no Composer target.
 
 ## Private package access
 
