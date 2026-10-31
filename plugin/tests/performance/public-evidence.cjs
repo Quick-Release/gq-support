@@ -8,10 +8,13 @@
 // A nonce field's name, then up to 24 characters of quoting, escaping or URL encoding, then the
 // nonce: ten hex characters. Covers `_wpnonce=`, `X-WP-Nonce:`, `"nonce":"`, `storeApiNonce: '`,
 // its URL-encoded copy in the mini-cart's dependencies, and `createNonceMiddleware( "`.
-const NONCE = /(nonce(?:middleware)?(?:%[0-9a-f]{2}|\\[\\'"]|amp;|[\s"'`:=(),&;]){1,24})[0-9a-f]{10}(?![0-9a-z])/gi;
+const NONCE = /(nonce(?:middleware)?(?:%[0-9a-f]{2}|\\[\\'"]|&(?:quot|apos);|&#(?:x0*(?:22|27)|0*(?:34|39));|amp;|[\s"'`:=(),&;>]){1,24})[0-9a-f]{10}(?![0-9a-z])/gi;
+
+const NONCE_FIELD = /\b(?:name|id)\s*=\s*(?:"[\w-]*nonce"|'[\w-]*nonce'|[\w-]*nonce(?=[\s/>]))/i;
 
 /** @param {string} html */
-exports.redactNonces = (html) => html.replace(NONCE, '$1<REDACTED>');
+exports.redactNonces = (html) => html.replace(NONCE, '$1<REDACTED>').replace(/<input\b[^>]*>/gi, (tag) =>
+  NONCE_FIELD.test(tag) ? tag.replace(/(\bvalue\s*=\s*["']?)[0-9a-f]{10}(?![0-9a-z])/gi, '$1<REDACTED>') : tag);
 
 const MAX_LINES = 20;
 const BEFORE = 120;
@@ -47,19 +50,23 @@ exports.describeChange = (offHtml, onHtml) => {
   while (tail < off.length - head && tail < on.length - head && off[off.length - 1 - tail] === on[on.length - 1 - tail]) tail++;
   const removed = off.slice(head, off.length - tail);
   const added = on.slice(head, on.length - tail);
+  // Sanitize before splitting: a field name and its nonce may occupy different lines.
+  const sanitizedOff = exports.redactNonces(offHtml).split('\n').slice(head, off.length - tail);
+  const sanitizedOn = exports.redactNonces(onHtml).split('\n').slice(head, on.length - tail);
 
   const out = [
     `Support off: ${off.length} lines; Support on: ${on.length} lines.`,
     `The first ${head} and last ${tail} lines match; nonces read <REDACTED>.`,
   ];
-  const describe = (sign, lines, others) => {
+  const describe = (sign, lines, others, sanitized, sanitizedOthers) => {
     lines.slice(0, MAX_LINES).forEach((raw, i) => {
-      const line = exports.redactNonces(raw);
+      const line = sanitized[i];
       const other = others[i];
+      if (raw === other) return;
       let at = 0;
       let note = '';
       if (other !== undefined) {
-        const sanitizedOther = exports.redactNonces(other);
+        const sanitizedOther = sanitizedOthers[i];
         at = firstDifference(line, sanitizedOther);
         // Equal once sanitized: only a nonce changed. Redaction keeps lengths, so the raw index holds.
         if (at === -1) {
@@ -71,7 +78,7 @@ exports.describeChange = (offHtml, onHtml) => {
     });
     if (lines.length > MAX_LINES) out.push(`${sign} … ${lines.length - MAX_LINES} more changed lines`);
   };
-  describe('-', removed, added);
-  describe('+', added, removed);
+  describe('-', removed, added, sanitizedOff, sanitizedOn);
+  describe('+', added, removed, sanitizedOn, sanitizedOff);
   return `${out.join('\n')}\n`;
 };

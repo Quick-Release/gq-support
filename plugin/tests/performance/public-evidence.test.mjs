@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +17,7 @@ const work = mkdtempSync(join(tmpdir(), 'gq-public-evidence-'));
 after(() => rmSync(work, { recursive: true, force: true }));
 
 const nonce = () => randomBytes(5).toString('hex');
-const encode = (text) => encodeURIComponent(text);
+const encode = (text) => encodeURIComponent(text).replace(/'/g, '%27');
 
 /** A public page with a nonce in every form WordPress and WooCommerce print one. */
 function page(nonces) {
@@ -41,7 +41,7 @@ const nonces = () => ({ store: nonce(), rest: nonce(), settings: nonce(), logout
 function artifactScan(name, files) {
   const dir = join(work, name);
   rmSync(dir, { recursive: true, force: true });
-  spawnSync('mkdir', ['-p', dir]);
+  mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) writeFileSync(join(dir, file), content);
   return spawnSync(join(ROOT, 'scripts', 'ci', 'scan-artifact.sh'), [dir], { encoding: 'utf8' });
 }
@@ -65,6 +65,7 @@ test('sanitizing changes nothing but nonces', () => {
   // Asset versions and other hex stay, so a changed version still shows.
   assert.match(sanitized, /e3f189e7e5007fb14fff/);
   assert.match(sanitized, /\?ver=0a1b2c3d4e/);
+  assert.match(sanitized, /wcStoreApiNonceTimestamp: '1793452351'/);
   assert.equal(redactNonces('<p>No nonce here, 0123456789.</p>'), '<p>No nonce here, 0123456789.</p>');
 });
 
@@ -99,4 +100,28 @@ test('the summary is bounded, however much changed', () => {
 test('identical pages have no change to describe', () => {
   const raw = page(nonces());
   assert.match(describeChange(raw, raw), /^No line differs/);
+});
+
+test('hidden fields, HTML entities, escaped JSON and multiline nonces never reach evidence', () => {
+  const value = nonce();
+  const forms = [
+    `<input type="hidden" name="_wpnonce" value="${value}">`,
+    `<input value='${value}' id='_wpnonce' type='hidden'>`,
+    `&quot;nonce&quot;:&quot;${value}&quot;`,
+    String.raw`\"nonce\":\"${value}\"`,
+    `'nonce' => '${value}'`,
+    `storeApiNonce:\n  '${value}'`,
+  ];
+  for (const [index, raw] of forms.entries()) {
+    const sanitized = redactNonces(raw);
+    const summary = describeChange('', raw);
+    assert.ok(!sanitized.includes(value), `form ${index} survived in the page`);
+    assert.ok(!summary.includes(value), `form ${index} survived in the summary`);
+    assert.equal(artifactScan(`form-${index}`, { 'page.html': sanitized, 'diff.txt': summary }).status, 0);
+  }
+});
+
+test('unchanged lines inside the changed interval are not reported as changed nonces', () => {
+  const summary = describeChange('A\nX\nQ\nB', 'A\nY\nQ\nZ\nB');
+  assert.doesNotMatch(summary, /column 0|differs only inside a redacted nonce/);
 });
