@@ -71,18 +71,9 @@ case "${1:?usage: package.sh single|native|central|network}" in
       check seed
       check revoke
       mkdir -p "$(dirname "$probe")"
-      cat > "$probe" <<'PHP'
-<?php
-// WordPress's own update checks to wordpress.org are not the plugin's; every other host is recorded.
-function package_test_http_probe( $pre, $args, $url ) {
-	if ( ! preg_match( '#^https?://([a-z0-9-]+\.)*wordpress\.org/#i', $url ) ) {
-		update_option( 'package_test_http_calls', array_merge( (array) get_option( 'package_test_http_calls', array() ), array( $url ) ), false );
-	}
-	return new WP_Error( 'http_request_failed', 'No remote calls during an upgrade.' );
-}
-add_filter( 'pre_http_request', 'package_test_http_probe', 10, 3 );
-PHP
+      cp plugin/tests/integration/package-http-probe.php "$probe"
       trap 'rm -f "$probe"' EXIT
+      check probe-boundary
       # The package installer replaces the files in place; nothing calls activation.
       wp plugin install "$zip" --force
       wp plugin is-active gq-support
