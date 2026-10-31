@@ -42,7 +42,19 @@ switch ( $gq_support_scenario ) {
 		delete_option( 'package_test_http_calls' );
 		delete_transient( 'doing_cron' );
 		wp_schedule_single_event( time() - 1, 'package_test_probe_due' );
+		$gq_support_cron_requests = 0;
+		$gq_support_observe_cron  = static function ( $pre, $request_args, $url ) use ( &$gq_support_cron_requests ) {
+			if ( strtok( $url, '?' ) === site_url( 'wp-cron.php' ) ) {
+				++$gq_support_cron_requests;
+			}
+			return $pre;
+		};
+		add_filter( 'pre_http_request', $gq_support_observe_cron, 9, 3 );
 		spawn_cron( time() );
+		remove_filter( 'pre_http_request', $gq_support_observe_cron, 9 );
+		if ( 1 !== $gq_support_cron_requests ) {
+			$gq_support_fail( 'Core cron did not dispatch exactly one request.' );
+		}
 		wp_clear_scheduled_hook( 'package_test_probe_due' );
 		if ( get_option( 'package_test_http_calls', array() ) ) {
 			$gq_support_fail( 'Core cron was attributed to the plugin.' );
