@@ -258,6 +258,43 @@ service refuses its download (410) and offers only the approved package. Core
 does not downgrade through its updater, so installations already running a newer
 withdrawn release need the recovery path in #144.
 
+## Central deployment
+
+Installations whose reviewed deployment method is `central` get the approved
+release from an Operator over the hosting access GETQUICK already holds (#143).
+Commands are in the [Worker README](../../worker/README.md#central-deployment).
+No stage has a reviewed central target yet: this repository records no central
+deployment host, alias or path, so `central-apply` refuses every Slot. The
+existing central site deployment tooling and its credentials are outside this
+repository; collect them through the implementation workflow, never guess them.
+
+1. **Review a target.** Set the Slot's `deployment: "central"` in its Repository
+   mapping and add its `stageCentralTargets` entry by reviewed PR: the runner that
+   reaches the host (an ssh alias resolved by the Operator's own ssh
+   configuration, for example), WP-CLI with its `--path`, the installed plugin
+   directory and an upload directory. Record who owns that hosting access and
+   how it is revoked in the inventory's credential custody. Never put a key,
+   password, token or URL with credentials in the target.
+2. **Apply.** After the release's fleet dispatch is recorded, download its tested
+   package (`gh release download v<version> --repo Quick-Release/gq-support
+   --pattern 'gq-support*' --pattern provenance.json --dir <dir>`) and run
+   `central-apply <slot> <release-id> <dir> <opaque-actor>`. The bytes must match the
+   approved SHA-256; the host checks its upload's digest; WordPress installs that
+   upload; the files read back must be exactly the package's.
+3. **Read the outcome.** `verified` is complete. `failed` was confirmed by a
+   read-back: alert, keep the installation's current version and investigate.
+   `unknown` lost its answer after the install was requested: run the same
+   command again once the host answers, which verifies without reinstalling when
+   the install did complete. `unreachable` and `refused` changed nothing: restore
+   access, or fix the reason (a symlinked checkout, an unavailable plugin, a
+   downgrade outside a recovery approval, a newer approval). `central-status`
+   lists recent outcomes; an `abandoned` record may have changed the installation,
+   so verify it with another run.
+4. **Recovery.** Approve the earlier verified compatible package as `recovery`,
+   record its dispatch, then apply it: only a recovery approval downgrades.
+   Report-key revocation, `GQ_SUPPORT_DISABLED` and disconnecting do not affect
+   this path; offboarding does, and refuses further applications.
+
 ## Inventory and credential custody
 
 Use the [Slot inventory](../../worker/README.md#slot-inventory) to find a Slot's
@@ -469,7 +506,7 @@ signal/notification, recovery action, invariant checks, result and human sign-of
 | Broken staging webhook | 401/5xx reaches incident store and Discord; `drill-verify webhook` passes; configuration restored; status repair evidence complete. Not yet run: staging Discord destinations are not configured |
 | Worker/D1 outage | Independent detection works; website requests remain independent; accepted work and incident state reconcile into one `component_unavailable` incident. Not yet run: the [independent checker](#independent-outage-checks) is not set up for any stage |
 | D1 restore | Suppressions/revocations survive; erased text not served; stale delivered work never blindly replayed; unsafe resume refused |
-| Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused |
+| Bad plugin and migration | Whole-fleet result tracked; approved compatible rollback works; unsafe schema rollback refused. Central deployment's adapter is exercised only on the disposable test site (`package.sh central`): no reviewed central target exists for any stage |
 | Release window | Previous release accepted until exactly 24 hours after recorded dispatch, then 426 at the service; WordPress closes new reports from its cached policy; accepted retries replay; production `enforced` |
 | Discord/Banquinha outage | Incidents survive; CLI works when storage is healthy; notifications recover without duplicate incidents |
 | Local fail-safe and Client contact | Disable/re-enable through hosting/admin access; separate-device independent contact verified |

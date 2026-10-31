@@ -763,6 +763,54 @@ pnpm operator update-access-grant <slot> <update-public-key> <expires-at> <evide
 pnpm operator update-access-revoke <slot> <key-id|all> <evidence-ref> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id> --ledger-database-id <ledger-database-id>
 ```
 
+## Central deployment
+
+Installations whose reviewed Repository mapping has `deployment: "central"` get
+the approved release from an Operator through the hosting access GETQUICK
+already holds for them (#143, `src/central-deployment.ts`, migration 0029); the
+[runbook](../docs/runbooks/support-operations.md#central-deployment) has the
+procedure. Nothing is installed on the site for it, so it works with report
+submission disabled or the Installation credential revoked.
+
+- **Targets.** `stageCentralTargets` lists each Slot's reviewed runner (such as
+  `ssh -o BatchMode=yes <alias>`), WP-CLI with its `--path`, the installed plugin
+  directory and an upload directory. Every token must be a shell-safe literal,
+  because ssh joins its arguments into a remote command. The runner
+  authenticates with the Operator's own configuration and agent; no credential,
+  host secret or URL belongs in the file, and none is printed or recorded. No
+  stage has a target yet, so `central-apply` refuses every Slot until one is
+  added by reviewed PR.
+- **Bytes.** The approved version's `gq-support.zip` from its downloaded release
+  workflow artifact (`gh release download v<version>` or the run artifact), used
+  only when its SHA-256 is the approved one. The expected file digests come from
+  that ZIP's own entries. The fleet coordinator can pass another `PackageSource`,
+  such as the GitHub Release source native updates use.
+- **What runs.** Each command is spawned directly, without a local shell, bounded
+  in time and output, with stderr discarded: `test ! -L`, `wp plugin get` and
+  `is-active`, `cp /dev/stdin` of the bytes, `sha256sum` of the upload, `wp plugin
+  install <upload> --force` (which keeps the activation state), then `find` and
+  `sha256sum` of every installed file, and `rm` of the upload.
+- **Outcomes.** One `central_deployment` row per application, written before the
+  host is contacted in a statement that rechecks the release is the approved,
+  dispatched one, the Slot is not offboarded and no other application to it is
+  running. Approval and offboarding are checked again just before WordPress
+  installs. `verified` needs the approved version and exactly the approved files;
+  `failed` is a read-back that confirmed otherwise; `unknown` is a lost answer after
+  the install was requested; `unreachable` changed nothing; `refused` (a symlinked
+  checkout, an unavailable plugin, a downgrade outside a recovery approval, or a
+  superseded release) changed nothing either. A run on an already verified
+  installation verifies it without reinstalling, so retry `unknown` with the same
+  command.
+- **Inventory.** A requested install is `attempted` (source `central-deployment`),
+  and so is an unfinished record whose Operator process ended; a read-back is
+  `observed`; only a confirmed failure is `failed`. Each Slot shows its latest
+  central outcome. Unreachable installations stay unknown.
+
+```sh
+pnpm operator central-apply <slot> <release-id> <artifact-directory> <opaque-actor> --stage <stage> --account-id <account-id> --database-id <database-id>
+pnpm operator central-status <slot> --stage <stage> --account-id <account-id> --database-id <database-id>
+```
+
 ## Discord notifications
 
 Accepted Support requests and Operational incidents are announced in two

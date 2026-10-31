@@ -160,8 +160,25 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
   // A package the native updater served is an attempt (src/update-access.ts), confirmed only by a later observation.
   const served = (await db.prepare("SELECT slot, 'attempted' AS kind, version, attempted_at AS observed_at, 'native-update' AS source FROM slot_update_attempt")
     .bind().all<Evidence>()).results;
+  // Central deployment (src/central-deployment.ts): an install it asked WordPress for, or one whose Operator
+  // process may have ended mid-way, is an attempt; only its read-back is an observation, and a failure is one
+  // only when that read-back confirmed it. Unreachable and refused applications changed nothing.
+  const central = (await db.prepare(`SELECT slot, 'attempted' AS kind, package_version AS version, started_at AS observed_at,
+      'central-deployment' AS source FROM central_deployment WHERE installed = 1 OR outcome IS NULL
+    UNION ALL SELECT slot, 'observed', observed_version, finished_at, 'central-deployment' FROM central_deployment WHERE observed_version IS NOT NULL
+    UNION ALL SELECT slot, 'failed', package_version, finished_at, 'central-deployment' FROM central_deployment WHERE outcome = 'failed'`)
+    .bind().all<Evidence>()).results;
+  const applications = (await db.prepare(`SELECT slot, release_sequence, package_version, outcome, reason, started_at, finished_at FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY slot ORDER BY started_at DESC, rowid DESC) AS position FROM central_deployment) WHERE position = 1`)
+    .bind().all<{ slot: string; release_sequence: number; package_version: string; outcome: string | null; reason: string | null;
+      started_at: number; finished_at: number | null }>()).results;
+  const centralDeployment = (slot: string) => {
+    const row = applications.find((application) => application.slot === slot);
+    return row ? { release_id: row.release_sequence, version: row.package_version, outcome: row.outcome ?? "pending", reason: row.reason,
+      at: new Date(row.finished_at ?? row.started_at).toISOString() } : null;
+  };
   const releases = await releaseSummary(db, release);
-  const latest = [...recorded, ...signed, ...served];
+  const latest = [...recorded, ...signed, ...served, ...central];
   // The approved release is every Slot's desired version, unless a later Slot-specific record says otherwise.
   // Its dispatch is policy intent: never an attempt or observation of any one installation.
   const approved = releases.approved && { kind: "desired", version: releases.approved.package_version,
@@ -199,6 +216,7 @@ export const slotInventory = async (db: QueryDatabase, mappings: readonly Reposi
         observed: observation(find(mapping.slot, "observed"), now) },
       update: update(find(mapping.slot, "attempted"), find(mapping.slot, "observed"), find(mapping.slot, "failed")),
       update_access: updateAccess(mapping.slot),
+      central_deployment: centralDeployment(mapping.slot),
       contact: contact(mapping.slot),
     })),
     credentials: credentialCustody(inventory, now, { restricted }),

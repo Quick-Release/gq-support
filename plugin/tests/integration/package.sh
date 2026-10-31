@@ -7,6 +7,8 @@
 #            support service (#142), refuses corrupt, wrong-origin, unauthorized and withdrawn packages,
 #            renews expired download access, keeps working disabled and without the report key, and
 #            makes no remote call while pages render; then reinstalls the candidate.
+#   central  after single: central deployment's WP-CLI adapter installs approved next and recovery
+#            releases from verified bytes with support disabled and no report key (#143).
 #   network  after multisite.sh: network deactivation and uninstall stay bounded to the main site.
 # Runs on the disposable DDEV site from any directory.
 set -euo pipefail
@@ -21,7 +23,22 @@ check() { wp eval-file plugin/tests/integration/package.php "$@"; }
 # Blocks every outgoing request and records the plugin's, from before the first request that loads new code.
 probe=.test-site/wp-content/mu-plugins/package-test-http-probe.php
 
-case "${1:?usage: package.sh single|native|network}" in
+# The installed candidate's files under a higher version, as a release ZIP: an approved next release.
+next_release() {
+  python3 - "$plugin" "$1" "$version" "$2" <<'PY'
+import pathlib, sys, zipfile
+tree, out, old, new = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted(p for p in tree.rglob("*") if p.is_file()):
+        data = path.read_bytes()
+        if path.name == "gq-support.php":
+            data = data.replace(f"Version:            {old}".encode(), f"Version:            {new}".encode())
+            data = data.replace(f"'GQ_SUPPORT_VERSION', '{old}'".encode(), f"'GQ_SUPPORT_VERSION', '{new}'".encode())
+        archive.writestr(f"gq-support/{path.relative_to(tree)}", data)
+PY
+}
+
+case "${1:?usage: package.sh single|native|central|network}" in
   single)
     node scripts/ci/release-package.mjs installed "$package_dir" "$plugin"
     wp plugin is-active gq-support || wp plugin activate gq-support
@@ -92,17 +109,7 @@ PHP
 
     # The approved next release: the installed candidate's files under a higher version.
     next_version="$version.1"
-    python3 - "$plugin" ".test-site/$next_zip" "$version" "$next_version" <<'PY'
-import pathlib, sys, zipfile
-tree, out, old, new = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
-    for path in sorted(p for p in tree.rglob("*") if p.is_file()):
-        data = path.read_bytes()
-        if path.name == "gq-support.php":
-            data = data.replace(f"Version:            {old}".encode(), f"Version:            {new}".encode())
-            data = data.replace(f"'GQ_SUPPORT_VERSION', '{old}'".encode(), f"'GQ_SUPPORT_VERSION', '{new}'".encode())
-        archive.writestr(f"gq-support/{path.relative_to(tree)}", data)
-PY
+    next_release ".test-site/$next_zip" "$next_version"
     next_main=$(python3 -c 'import hashlib, sys, zipfile; print(hashlib.sha256(zipfile.ZipFile(sys.argv[1]).read("gq-support/gq-support.php")).hexdigest())' ".test-site/$next_zip")
 
     native provision
@@ -152,6 +159,27 @@ PY
     echo 'Installed native update passed.'
     ;;
 
+  central)
+    # After single: central deployment (#143) applies approved releases over hosting access with
+    # WP-CLI, here `docker exec` into the site, while report submission is disabled and the report credential is
+    # gone, then the approved recovery package; worker/test/central-installed.test.ts drives it.
+    [[ ! -L "$plugin" ]] || { echo 'central needs the installed copy, never the plugin/ checkout' >&2; exit 1; }
+    next_zip=.test-site/central-next.zip
+    trap 'rm -f "$next_zip"; wp config delete GQ_SUPPORT_DISABLED >/dev/null 2>&1 || true' EXIT
+    next_release "$next_zip" "$version.1"
+    native() { wp eval-file plugin/tests/integration/native-update.php "$@"; }
+    wp config set GQ_SUPPORT_DISABLED true --raw
+    native disconnect
+    native recovering
+    GQ_SUPPORT_CENTRAL_PACKAGE="$package_dir" GQ_SUPPORT_CENTRAL_NEXT="$next_zip" \
+      pnpm --filter gq-support-worker exec vitest run test/central-installed.test.ts
+    # The recovery package is the candidate, file for file.
+    node scripts/ci/release-package.mjs installed "$package_dir" "$plugin"
+    wp plugin is-active gq-support
+    native cleanup
+    echo 'Installed central deployment passed.'
+    ;;
+
   network)
     wp eval 'exit( is_multisite() ? 0 : 1 );'
     wp plugin is-active gq-support --network
@@ -176,7 +204,7 @@ PY
     ;;
 
   *)
-    echo "usage: package.sh single|native|network" >&2
+    echo "usage: package.sh single|native|central|network" >&2
     exit 2
     ;;
 esac

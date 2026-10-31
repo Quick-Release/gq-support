@@ -47,9 +47,10 @@ if [[ -n "$CELL_SUITE" ]]; then
 fi
 
 if [[ -n "${GQ_SUPPORT_PLUGIN_ZIP:-}" ]]; then
-  echo '::group::Installed package uninstall, upgrade and native update'
+  echo '::group::Installed package uninstall, upgrade, native update and central deployment'
   bash plugin/tests/integration/package.sh single
   bash plugin/tests/integration/package.sh native
+  bash plugin/tests/integration/package.sh central
   echo '::endgroup::'
 fi
 

@@ -188,8 +188,17 @@ with a narrow read-only token, verified against the approved SHA-256 there and
 again on the installation. Not yet established: the stage read tokens, any
 native Slot mapping or grant, a real approved and dispatched release, immutable
 releases on the repository, and a staged end-to-end drill. Offboarding's
-revocation of update access is #147; central deployment is #143 and fleet
-convergence/rollback #144.
+revocation of update access is #147 and fleet convergence/rollback #144.
+
+Implemented for the central path in #143 ([runbook](runbooks/support-operations.md#central-deployment)):
+a per-installation adapter that an Operator (and later the fleet coordinator)
+runs with the hosting access GETQUICK already holds, applying the approved,
+dispatched release's verified bytes with WP-CLI, verifying every installed file
+against the package and recording `verified`, `failed`, `unknown`, `unreachable`
+or `refused`. It needs nothing on the installation. Not yet established: the
+existing central site deployment tooling, its hosts and its credentials are not
+recorded in this repository, so no stage has a reviewed central target and no
+installation has been updated this way.
 
 ## Operational event and metric contract
 

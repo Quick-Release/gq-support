@@ -9,6 +9,8 @@ import { runIncidentOperator } from "./incident-operator.ts";
 import { runInventoryOperator } from "./inventory-operator.ts";
 import { runReleaseOperator, type ReleaseArtifact } from "./release-operator.ts";
 import { runUpdateAccessOperator } from "./update-access-operator.ts";
+import { runCentralOperator, type CentralTarget, type CentralTransport } from "./central-deployment.ts";
+import type { PackageSource } from "./package-source.ts";
 import type { ReleaseEnforcement } from "./release-policy.ts";
 import type { StageInventory } from "./inventory.ts";
 import { imageOf, ledgerStore } from "./ledger.ts";
@@ -28,6 +30,8 @@ export interface OperatorOptions {
   readonly readArtifact?: (directory: string) => Promise<ReleaseArtifact>;
   /** The target stage's reviewed release enforcement (src/release-policy.ts), for display. */
   readonly release?: ReleaseEnforcement;
+  /** Central deployment (src/central-deployment.ts): the stage's reviewed targets, the hosting transport, and optionally another package source. */
+  readonly central?: { readonly targets: readonly CentralTarget[]; readonly transport: CentralTransport; readonly packages?: PackageSource };
 }
 
 /** A one-statement-at-a-time D1 view of an Operator query function, for shared store code. */
@@ -65,6 +69,7 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   const { query, recordRevocation, mappings, now = Date.now(), ledger } = options;
   if (args[0]?.startsWith("release-")) return runReleaseOperator(args, { ...options, now });
   if (args[0]?.startsWith("update-access")) return runUpdateAccessOperator(args, { ...options, now });
+  if (args[0]?.startsWith("central-")) return runCentralOperator(args, { ...options, now });
   if (args[0] === "resume" || args[0] === "reconcile") return recoverDelivery(args, { query, recordRevocation, mappings, now });
   if (args[0] === "unsuspend") return unsuspendRepository(args, { query, recordRevocation, mappings, now, ...(ledger ? { ledger } : {}) });
   if (["erase", "erasure-status", "erasure-close", "restore-recorded", "cleanup-reconcile", "cleanup-exception", "offboard"].includes(args[0] ?? "")) {
@@ -75,7 +80,7 @@ export const runOperator = async (args: readonly string[], options: OperatorOpti
   if (args[0]?.startsWith("inventory")) return runInventoryOperator(args, { ...options, now });
   const [command, slot] = args;
   if (args.length !== 2 || !["enroll", "revoke", "status"].includes(command)) {
-    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|approve|dispatch> and update-access-<status|grant|revoke>");
+    throw new Error("Usage: operator <enroll|revoke|status> <slot>; see also resume, reconcile, unsuspend, erase, erasure-status, erasure-close, cleanup-reconcile, cleanup-exception, offboard, status-<health|reconcile|repair>, incidents, incident, incident-claim, notifications, notification-retry, health, drill-verify, inventory-record, release-<status|candidate|approve|dispatch>, update-access-<status|grant|revoke> and central-<apply|status>");
   }
   const mapping = mappingFor(mappings, slot);
   if (!mapping) throw new Error("Unknown Slot; add its Repository mapping by reviewed PR first.");
