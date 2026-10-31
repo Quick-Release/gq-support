@@ -4,7 +4,7 @@ Tags: support, issue-tracking, bug-report
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.2.0
+Stable tag: 0.1.11
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,7 +16,7 @@ Authorized Reporters on a connected installation can submit Support requests and
 
 == Changelog ==
 
-= 0.2.0 =
+= 0.1.11 =
 * Sign the plugin version and installed file digest so the service can verify release compatibility and update outcomes.
 * Support approved private updates and compatible recovery independently of report access.
 * Pause new reports when the cached release policy requires an update, while retaining access to accepted requests.
