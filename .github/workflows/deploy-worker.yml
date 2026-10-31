@@ -40,7 +40,10 @@ concurrency:
 jobs:
   plan:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    # The full Worker suite runs here; its integration tests time out on 2 vCPUs, so use the runner
+    # CI's `worker` job is sized for (scripts/ci/workflow-policy.mjs enforces the match).
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
     environment: ${{ inputs.stage }}
     defaults:
       run:
