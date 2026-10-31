@@ -41,11 +41,30 @@ exports.logIn = async function logIn(page, user = 'admin', password = exports.ad
   }
   // Logged in as someone else, wp-login.php clears the typed password.
   await page.context().clearCookies({ name: /^wordpress/ });
-  await page.goto(`${exports.site}/wp-login.php`);
-  await page.locator('#user_login').fill(user);
-  await page.locator('#user_pass').fill(password);
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(/wp-admin/);
+  await exports.submitLogIn(page, user, password);
   // Only the login's own cookies, not a test's (such as a Worker outage).
   savedCookies.set(user, (await page.context().cookies()).filter(({ name }) => name.startsWith('wordpress')));
+};
+
+/**
+ * Submits wp-login.php in a fresh login session, every call, and waits for wp-admin.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} user
+ * @param {string} password
+ */
+exports.submitLogIn = async function submitLogIn(page, user, password) {
+  await page.goto(`${exports.site}/wp-login.php`);
+  const userField = page.locator('#user_login');
+  const passwordField = page.locator('#user_pass');
+  // wp-login.php focuses and selects the username 200 ms after it renders (core's wp_attempt_focus()).
+  // When that lands while the password is typed, the password replaces the username and the
+  // required password stays empty. The timer fires once, so a second fill keeps; check before submitting.
+  for (let attempt = 1; ; attempt++) {
+    await userField.fill(user);
+    await passwordField.fill(password);
+    if (await userField.inputValue() === user && await passwordField.inputValue() === password) break;
+    if (attempt === 3) throw new Error(`wp-login.php lost the typed credentials for ${user} ${attempt} times`);
+  }
+  await page.locator('#wp-submit').click();
+  await page.waitForURL(/wp-admin/);
 };
