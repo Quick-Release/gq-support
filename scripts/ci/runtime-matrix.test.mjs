@@ -125,12 +125,12 @@ test('a cell that ran its declared runtime verifies, with 7.1 reported for 7.1.0
 test('a cell that ran another PHP, WordPress or WooCommerce fails', () => {
   assert.match(verifyRuntime(cell('minimum'), { ...report, php: '8.2.33' }).join('\n'), /PHP 8\.2\.33.*8\.0/);
   assert.match(verifyRuntime(cell('minimum'), { ...report, wordpress: '7.0.8' }).join('\n'), /WordPress 7\.0\.8.*7\.1\.4/);
-  assert.match(verifyRuntime(cell('minimum'), { ...report, woocommerce: '11.2.1' }).join('\n'), /WooCommerce/);
+  assert.match(verifyRuntime(cell('minimum'), { ...report, woocommerce: '11.3.0' }).join('\n'), /WooCommerce/);
 });
 
 test('WordPress-provided React must match, and the app dependency graph must resolve', () => {
   assert.match(verifyRuntime(cell('minimum'), { ...report, react: '18.2.0' }).join('\n'), /React 18\.2\.0/);
-  assert.deepEqual(verifyRuntime(cell('stable'), { ...report, php: '8.4.1', wordpress: '7.1.4', woocommerce: '11.2.1', react: '18.3.1.1' }), []);
+  assert.deepEqual(verifyRuntime(cell('stable'), { ...report, php: '8.4.1', wordpress: '7.1.4', woocommerce: '11.3.0', react: '18.3.1.1' }), []);
   assert.match(verifyRuntime(cell('minimum'), { ...report, assets: { ...report.assets, unresolved: ['wp-a11y'] } }).join('\n'), /wp-a11y/);
   assert.match(verifyRuntime(cell('minimum'), { ...report, assets: { ...report.assets, forbidden: ['react-jsx-runtime'] } }).join('\n'), /react-jsx-runtime/);
   assert.match(verifyRuntime(cell('minimum'), { ...report, assets: null }).join('\n'), /build/);
@@ -143,7 +143,7 @@ test('the topology, database and object cache must be the declared ones', () => 
   assert.match(verifyRuntime(subdomain, { ...report, php: '8.4.1', wordpress: '7.1.4', multisite: true }, { topology: 'multisite' }).join('\n'), /subdomain/);
   assert.match(verifyRuntime(cell('mysql-8.0'), { ...report, php: '8.4.1', wordpress: '7.1.4' }).join('\n'), /MySQL 8\.0/);
   assert.deepEqual(verifyRuntime(cell('mysql-8.0'), { ...report, php: '8.4.1', wordpress: '7.1.4', database: { server: '8.0.40', version: '8.0.40' } }), []);
-  assert.match(verifyRuntime(cell('object-cache'), { ...report, php: '8.4.1', wordpress: '7.1.4', woocommerce: '11.2.1' }).join('\n'), /object cache/);
+  assert.match(verifyRuntime(cell('object-cache'), { ...report, php: '8.4.1', wordpress: '7.1.4', woocommerce: '11.3.0' }).join('\n'), /object cache/);
 });
 
 test('the GETQUICK Design that ran must be the fixture, or the cell\'s real release with its classes loaded', () => {
@@ -160,7 +160,7 @@ test('a floating canary records whatever WordPress it resolved', () => {
   assert.deepEqual(verifyRuntime(cell('wordpress-nightly'), { ...report, php: '8.4.1', wordpress: '7.2-alpha-61234', woocommerce: null }), []);
 });
 
-const upstream = { wordpress: { '6.9': '6.9.11', '7.0': '7.0.8', '7.1': '7.1.4' }, woocommerce: '11.2.1', 'plugin-check': '2.1.0' };
+const upstream = { wordpress: { '6.9': '6.9.11', '7.0': '7.0.8', '7.1': '7.1.4' }, woocommerce: '11.3.0', 'plugin-check': '2.2.0' };
 
 test('current pins report no drift', () => {
   assert.deepEqual(pinDrift(manifest, upstream), []);
@@ -169,12 +169,12 @@ test('current pins report no drift', () => {
 test('a WordPress patch, a new WordPress minor and newer pinned plugins are reported', () => {
   const patch = pinDrift(manifest, { ...upstream, wordpress: { ...upstream.wordpress, '7.1': '7.1.5' } });
   assert.deepEqual(patch.map((row) => [row.pinned, row.available, row.note]), [['7.1.4', '7.1.5', 'patch release: bump the WordPress pin']]);
-  const drift = pinDrift(manifest, { wordpress: { ...upstream.wordpress, '7.2': '7.2.0' }, woocommerce: '11.3.0', 'plugin-check': '2.2.0' });
+  const drift = pinDrift(manifest, { wordpress: { ...upstream.wordpress, '7.2': '7.2.0' }, woocommerce: '11.4.0', 'plugin-check': '2.3.0' });
   const text = drift.map((row) => `${row.component} ${row.pinned} → ${row.available}`);
   assert.ok(text.includes('WordPress 7.1.4 → 7.2.0'), text.join('\n'));
   assert.match(drift[0].note, /Requires at least and Tested up to/);
-  assert.ok(text.includes('WooCommerce 11.2.1 → 11.3.0'), text.join('\n'));
-  assert.ok(text.includes('Plugin Check 2.1.0 → 2.2.0'), text.join('\n'));
+  assert.ok(text.includes('WooCommerce 11.3.0 → 11.4.0'), text.join('\n'));
+  assert.ok(text.includes('Plugin Check 2.2.0 → 2.3.0'), text.join('\n'));
   // Patches on older branches are not ours to track: only the latest release is supported.
   assert.deepEqual(pinDrift(manifest, { ...upstream, wordpress: { ...upstream.wordpress, '7.0': '7.0.9' } }), []);
 });
