@@ -9,8 +9,8 @@ const defaults = require('@wordpress/scripts/config/eslint.config.cjs');
 module.exports = [
   ...defaults,
   {
-    // The oldest React that WordPress registers (WordPress 6.5), not the npm devDependency.
-    settings: { react: { version: '18.2' } },
+    // The React that the one supported WordPress release (7.1) registers, not the npm devDependency.
+    settings: { react: { version: '18.3' } },
     // See eslint.config.mjs: needed once both configurations load in one process.
     languageOptions: { parserOptions: { tsconfigRootDir: __dirname } },
     rules: {

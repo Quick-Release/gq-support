@@ -46,7 +46,7 @@
 		</properties>
 	</rule>
 
-	<config name="minimum_supported_wp_version" value="6.5"/>
+	<config name="minimum_supported_wp_version" value="7.1"/>
 
 	<rule ref="PHPCompatibilityWP"/>
 	<config name="testVersion" value="8.0-"/>

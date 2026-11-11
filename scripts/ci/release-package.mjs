@@ -153,7 +153,7 @@ export function checkTree(dir, { version }) {
   const assets = read('assets/dist/index.asset.php');
   const dependencies = [...(assets.match(/'dependencies'\s*=>\s*array\(([^)]*)\)/)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((match) => match[1]);
   if (has.has('assets/dist/index.asset.php') && !dependencies.includes('wp-element')) problems.push('assets/dist/index.asset.php: must depend on wp-element, WordPress\'s React');
-  if (dependencies.includes('react-jsx-runtime')) problems.push('assets/dist/index.asset.php: depends on react-jsx-runtime, which WordPress 6.5 lacks');
+  if (dependencies.includes('react-jsx-runtime')) problems.push('assets/dist/index.asset.php: depends on react-jsx-runtime; the app uses the classic JSX runtime (ADR 0011)');
   if (read('assets/dist/index.js').includes('__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED')) problems.push('assets/dist/index.js: bundles its own React');
 
   // Every runtime class the shipped PHP names must ship, at the path the autoloader loads. The

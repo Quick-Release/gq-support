@@ -62,21 +62,33 @@ export function cellName(cell) {
   return `${cell.id}: ${parts.join(', ')}`;
 }
 
+/**
+ * A cell with the WordPress it runs: the manifest's one pinned release, unless a canary floats
+ * on `latest` or `nightly`.
+ */
+export function resolveCell(manifest, cell) {
+  return { ...cell, wordpress: cell.wordpress ?? manifest.wordpress };
+}
+
 /** The cells of the given tiers, as GitHub matrix entries carrying the shared tool pins. */
 export function cellsFor(manifest, tiers) {
   return manifest.cells
     .filter((cell) => tiers.includes(cell.tier))
+    .map((cell) => resolveCell(manifest, cell))
     .map((cell) => ({ ...cell, name: cellName(cell), tools: manifest.tools }));
 }
 
 /**
  * Declared support must equal what blocking cells execute: widening a range needs a cell that
- * runs it, not only PHPCompatibility or PHPStan configuration.
+ * runs it, not only PHPCompatibility or PHPStan configuration. GETQUICK supports only the latest
+ * WordPress release, so every blocking cell runs the one pinned core, whose minor is both
+ * "Requires at least" and "Tested up to".
  * @returns {string[]} Failures.
  */
 export function checkPolicy(manifest, sources) {
   const failures = [];
   const { wordpress: floor, testedUpTo, php } = manifest.supported;
+  const pin = manifest.wordpress;
   const expect = (label, actual, expected) => {
     if (actual !== expected) failures.push(`${label} is ${actual ?? 'missing'}; the runtime matrix declares ${expected}`);
   };
@@ -95,6 +107,10 @@ export function checkPolicy(manifest, sources) {
   expect('PHPStan phpVersion.min', Number(sources.phpstan.match(/min:\s*(\d+)/)?.[1]), phpId(php.minimum));
   expect('PHPStan phpVersion.max', Number(sources.phpstan.match(/max:\s*(\d+)/)?.[1]), phpId(php.maximum) + 99);
 
+  if (!EXACT.test(pin ?? '')) failures.push(`the WordPress pin is ${pin ?? 'missing'}; it must be an exact x.y.z release`);
+  else if (minor(pin) !== floor) failures.push(`the WordPress pin ${pin} is not on the declared minimum ${floor}: only the latest release is supported`);
+  if (testedUpTo !== floor) failures.push(`Tested up to ${testedUpTo} differs from Requires at least ${floor}: only the latest WordPress release is supported`);
+
   const ids = new Set();
   for (const cell of manifest.cells) {
     if (ids.has(cell.id)) failures.push(`cell id ${cell.id} is not unique`);
@@ -104,7 +120,8 @@ export function checkPolicy(manifest, sources) {
     if (!cell.browser !== !cell.suite || (cell.suite && !SUITES.includes(cell.suite))) failures.push(`${cell.id} needs both a browser and a suite (${SUITES.join(' or ')}), or neither`);
     if (cell.multisite && !TOPOLOGIES.includes(cell.multisite)) failures.push(`${cell.id} has unknown multisite topology ${cell.multisite}`);
     if (cell.tier === 'canary') continue;
-    for (const key of ['wordpress', 'woocommerce', 'pluginCheck', 'gqDesign']) {
+    if ('wordpress' in cell) failures.push(`${cell.id} pins WordPress ${cell.wordpress}; blocking cells run only the pinned latest release ${pin}`);
+    for (const key of ['woocommerce', 'pluginCheck', 'gqDesign']) {
       if (key in cell && !EXACT.test(cell[key])) failures.push(`${cell.id} pins ${key} "${cell[key]}"; blocking cells need an exact x.y.z release`);
     }
     if (phpId(cell.php) < phpId(php.minimum) || phpId(cell.php) > phpId(php.maximum)) failures.push(`${cell.id} runs PHP ${cell.php}, outside the supported ${php.minimum}–${php.maximum}`);
@@ -117,8 +134,8 @@ export function checkPolicy(manifest, sources) {
     if (!cells.some((cell) => cell.multisite)) failures.push(`no pull-request cell runs ${label} as multisite`);
     if (!cells.every((cell) => cell.react)) failures.push(`every pull-request cell on ${label} must state the WordPress-provided React it expects`);
   };
-  boundary(`WordPress ${floor}.0 on PHP ${php.minimum}`, (cell) => cell.wordpress === `${floor}.0` && cell.php === php.minimum);
-  boundary(`WordPress ${testedUpTo} on PHP ${php.maximum}`, (cell) => EXACT.test(cell.wordpress) && minor(cell.wordpress) === testedUpTo && cell.php === php.maximum);
+  boundary(`WordPress ${pin} on PHP ${php.minimum}`, (cell) => cell.php === php.minimum);
+  boundary(`WordPress ${pin} on PHP ${php.maximum}`, (cell) => cell.php === php.maximum);
   // Every other cell runs the one-line fixture that plugin/tests/integration/run.sh writes.
   if (!pr.some((cell) => cell.gqDesign && cell.suite)) failures.push('no pull-request browser cell installs the real GETQUICK Design (gqDesign)');
   const [major, lowest] = php.minimum.split('.').map(Number);
@@ -178,8 +195,8 @@ export function verifyRuntime(cell, report, { topology = 'single' } = {}) {
 }
 
 /**
- * Pins that newer upstream releases have overtaken. The WordPress x.y.0 floor cell is a
- * deliberate compatibility sentinel, not a stale pin.
+ * Pins that newer upstream releases have overtaken. Any WordPress release newer than the pin
+ * means bumping it: only the latest release is supported.
  * @param {{ wordpress: Record<string, string>, woocommerce: string, 'plugin-check': string }} upstream Latest release per WordPress branch and plugin.
  */
 export function pinDrift(manifest, upstream) {
@@ -187,14 +204,12 @@ export function pinDrift(manifest, upstream) {
   const blocking = manifest.cells.filter((cell) => cell.tier !== 'canary');
   const pins = (key) => [...new Set(blocking.map((cell) => cell[key]).filter((version) => version && EXACT.test(version)))];
 
-  for (const pin of pins('wordpress')) {
-    if (pin === `${manifest.supported.wordpress}.0`) continue;
-    const available = upstream.wordpress[minor(pin)];
-    if (available && compareVersions(available, pin) > 0) drift.push({ component: 'WordPress', pinned: pin, available, note: 'patch release on a pinned branch' });
-  }
-  const latestBranch = newest(Object.keys(upstream.wordpress));
-  if (compareVersions(latestBranch, manifest.supported.testedUpTo) > 0) {
-    drift.push({ component: 'WordPress', pinned: manifest.supported.testedUpTo, available: upstream.wordpress[latestBranch], note: 'new minor: run the full pre-release suite before raising Tested up to' });
+  const latest = upstream.wordpress[newest(Object.keys(upstream.wordpress))];
+  if (latest && compareVersions(latest, manifest.wordpress) > 0) {
+    const note = minor(latest) === minor(manifest.wordpress)
+      ? 'patch release: bump the WordPress pin'
+      : 'new minor: bump the WordPress pin, Requires at least and Tested up to after the full pre-release suite';
+    drift.push({ component: 'WordPress', pinned: manifest.wordpress, available: latest, note });
   }
   for (const [component, key, latest] of [['WooCommerce', 'woocommerce', upstream.woocommerce], ['Plugin Check', 'pluginCheck', upstream['plugin-check']]]) {
     const pinned = newest(pins(key));
@@ -240,8 +255,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.stdout.write(JSON.stringify(cellsFor(manifest, args)));
   } else if (command === 'env') {
     // Shell assignments for scripts/ci/run-cell.sh: CELL_WORDPRESS=…, unset fields empty.
-    const cell = manifest.cells.find((candidate) => candidate.id === args[0]);
-    if (!cell) fail('Runtime matrix', [`unknown cell ${args[0] ?? ''}`]);
+    const found = manifest.cells.find((candidate) => candidate.id === args[0]);
+    if (!found) fail('Runtime matrix', [`unknown cell ${args[0] ?? ''}`]);
+    const cell = resolveCell(manifest, found);
     const fields = {
       id: cell.id,
       name: cellName(cell),
@@ -260,13 +276,14 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.stdout.write(Object.entries(fields).map(([key, value]) => `CELL_${key.toUpperCase()}=${quote(value)}\n`).join(''));
   } else if (command === 'policy') {
     const failures = checkPolicy(manifest, readSources());
-    const rows = manifest.cells.map((cell) => `| ${cell.tier} | ${cellName(cell)} | ${cell.woocommerce ?? '—'} | ${cell.react ?? '—'} |`);
+    const rows = manifest.cells.map((cell) => resolveCell(manifest, cell)).map((cell) => `| ${cell.tier} | ${cellName(cell)} | ${cell.woocommerce ?? '—'} | ${cell.react ?? '—'} |`);
     summarize('Runtime matrix', ['| Tier | Cell | WooCommerce | React |', '|---|---|---|---|', ...rows].join('\n'));
     fail('Runtime policy', failures);
   } else if (command === 'verify') {
     const [id, topology = 'single'] = args;
-    const cell = manifest.cells.find((candidate) => candidate.id === id);
-    if (!cell) fail('Runtime', [`unknown cell ${id}`]);
+    const found = manifest.cells.find((candidate) => candidate.id === id);
+    if (!found) fail('Runtime', [`unknown cell ${id}`]);
+    const cell = resolveCell(manifest, found);
     const report = JSON.parse(readFileSync(0, 'utf8'));
     summarize(`Runtime of ${cellName(cell)} (${topology})`, `\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\``);
     fail('Runtime', verifyRuntime(cell, report, { topology }));

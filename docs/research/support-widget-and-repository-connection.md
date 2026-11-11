@@ -89,7 +89,7 @@ The implementation validation plan is:
 | Eligible Reporter before opening | Only the tiny vanilla launcher and its scoped styles/bootstrap load; no `wp-element`, full app, or support-data request. |
 | Cold open | Insert the deferred asset template in order, including core inline scripts and translations. Mount once, and fetch only the authorized Reporter projection. REST calls carry the `wp_rest` nonce. |
 | Screen that already loaded `wp-element` (block editor) | The template holds only the missing handles. React is not loaded twice. |
-| WordPress 6.5.0 minimum | The same cold-open, REST, and failure checks pass in the DDEV job pinned to 6.5.0. |
+| Supported WordPress release | The same cold-open, REST, and failure checks pass in the DDEV jobs pinned to the latest release (`.github/runtime-matrix.json`). |
 | Runtime/app/style load failure | Keep launcher usable, announce a retryable error, and make no duplicate mount or automatic retry. |
 | Close/reopen | Stop requests while closed, preserve the current-page draft, reuse loaded code, and fetch only after reopening/manual refresh or an explicit action. |
 | Navigation/reload | Tear down in-memory state; the next request re-runs the PHP eligibility gate. |

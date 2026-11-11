@@ -4,7 +4,7 @@
  * Plugin URI:         https://github.com/Quick-Release/gq-support
  * Description:        Adds an in-dashboard support widget for authorized users to submit reports and view their status.
  * Version:            0.1.11
- * Requires at least:  6.5
+ * Requires at least:  7.1
  * Requires PHP:       8.0
  * Requires Plugins:   gq-design
  * Update URI:         https://support.getquick.io/gq-support
