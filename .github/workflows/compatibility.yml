@@ -1,8 +1,8 @@
 name: Compatibility
 
 # Runtime cells beyond the pull-request matrix (.github/runtime-matrix.json). Nightly: the
-# scheduled cells (previous WordPress minor, MySQL/MariaDB, persistent object cache, subdomain
-# multisite, Firefox, WebKit) plus nonblocking canaries (WordPress nightly, PHP 8.5, floating
+# scheduled cells on the pinned latest WordPress (MySQL/MariaDB, persistent object cache,
+# subdomain multisite, Firefox, WebKit) plus nonblocking canaries (WordPress nightly, PHP 8.5, floating
 # latest releases) and the pin discovery report. Before a release, release-plugin.yml calls it
 # with the pull-request and scheduled cells, which must all pass. Canaries never block: promoting
 # one means pinning it in a reviewed change to the runtime matrix.

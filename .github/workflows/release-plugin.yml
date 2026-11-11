@@ -97,8 +97,8 @@ jobs:
             > package-zip/provenance.json
           cat package-zip/provenance.json
 
-      # The floor and current endpoints, each as acceptance (with multisite, and Plugin Check on
-      # stable) and as the counter gate.
+      # PHP 8.0 (with WooCommerce 9.4.3) and PHP 8.4 on the pinned WordPress, each as acceptance
+      # (with multisite, and Plugin Check on stable) and as the counter gate.
       - name: Installed-package cells
         id: cells
         run: |

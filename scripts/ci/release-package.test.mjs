@@ -18,9 +18,9 @@ const scratch = (name) => join(work, `${name}-${++serial}`);
 
 const VERSION = '1.2.3';
 const validFiles = (version = VERSION) => ({
-  'gq-support.php': `<?php\n/**\n * Plugin Name:       GETQUICK Support\n * Version:            ${version}\n * Requires at least:  6.5\n * Requires PHP:       8.0\n * Requires Plugins:   gq-design\n * License:            GPL-2.0-or-later\n * Text Domain:        gq-support\n */\ndefine( 'GQ_SUPPORT_VERSION', '${version}' );\nGQ_Support_Plugin::boot();\n`,
+  'gq-support.php': `<?php\n/**\n * Plugin Name:       GETQUICK Support\n * Version:            ${version}\n * Requires at least:  7.1\n * Requires PHP:       8.0\n * Requires Plugins:   gq-design\n * License:            GPL-2.0-or-later\n * Text Domain:        gq-support\n */\ndefine( 'GQ_SUPPORT_VERSION', '${version}' );\nGQ_Support_Plugin::boot();\n`,
   'uninstall.php': "<?php\nif ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {\n\texit;\n}\n",
-  'readme.txt': `=== GETQUICK Support ===\nRequires at least: 6.5\nTested up to: 7.1\nRequires PHP: 8.0\nStable tag: ${version}\nLicense: GPLv2 or later\n`,
+  'readme.txt': `=== GETQUICK Support ===\nRequires at least: 7.1\nTested up to: 7.1\nRequires PHP: 8.0\nStable tag: ${version}\nLicense: GPLv2 or later\n`,
   'README.md': '# GETQUICK Support\n',
   'composer.json': JSON.stringify({ name: 'getquick/gq-support', type: 'wordpress-plugin', license: 'GPL-2.0-or-later', require: { php: '>=8.0', 'composer/installers': '^2.0' }, 'require-dev': { 'phpunit/phpunit': '^9.6' }, extra: { 'installer-name': 'gq-support' } }),
   'includes/class-gq-support-plugin.php': '<?php\nfinal class GQ_Support_Plugin { public static function boot(): void { GQ_Support_State::get(); } }\n',
@@ -135,7 +135,7 @@ test('every version must match the requested release', () => {
     ['gq-support.php', `'GQ_SUPPORT_VERSION', '${VERSION}'`, "'GQ_SUPPORT_VERSION', '1.2.2'"],
     ['readme.txt', `Stable tag: ${VERSION}`, 'Stable tag: 1.2.2'],
     ['readme.txt', 'Requires PHP: 8.0', 'Requires PHP: 8.1'],
-    ['readme.txt', 'Requires at least: 6.5', 'Requires at least: 6.4'],
+    ['readme.txt', 'Requires at least: 7.1', 'Requires at least: 7.0'],
   ]) {
     const problems = candidate({ ...files, [file]: files[file].replace(from, to) }).problems;
     assert.notDeepEqual(problems, [], `${file}: ${to} must fail`);

@@ -120,7 +120,7 @@ Three layers keep noise out of the pass/fail signal.
      - read CDP `Performance.getMetrics` through `newCDPSession`, because Playwright has no `page.metrics()`;
      - install a `longtask` `PerformanceObserver` with an init script;
      - wrap `setInterval` in an init script to record plugin-initiated timers, checking the stack for `gq-support`.
-   - Run it for the scenarios in B1–B12, on WordPress 6.5.0 and latest (matching the current matrix), with and without WooCommerce. Counters need about 3 samples, not 100.
+   - Run it for the scenarios in B1–B12, on the pinned latest WordPress release (matching the current matrix), with and without WooCommerce. Counters need about 3 samples, not 100.
 3. **Timing benchmark, on `main` and on PRs labelled `perf`, report-only at first.**
    - Interleave within one job: rounds on the outside, plugin on/off (and base/head for PRs) on the inside. This is the Gutenberg pattern: "each shard measuring all branches on the same runner", using "medians from all rounds" ([Gutenberg performance docs](https://github.com/WordPress/gutenberg/blob/trunk/docs/explanations/architecture/performance.md)).
    - Take 50 or more PHP pairs and 20 browser rounds. Set `SAVEQUERIES`, `WP_DEBUG` and `SCRIPT_DEBUG` off, and `DISABLE_WP_CRON` and `WP_HTTP_BLOCK_EXTERNAL` on, as core's performance workflow does ([reusable-performance-test-v2.yml](https://github.com/WordPress/wordpress-develop/blob/trunk/.github/workflows/reusable-performance-test-v2.yml)).
@@ -176,7 +176,7 @@ Layer 3 is `.github/workflows/benchmark.yml`, which runs `plugin/tests/performan
 ## Acceptance criteria for implementation
 
 1. A CI step fails when a built launcher or app file exceeds B5 or B7 (gzip), and comments the size diff against the base branch on each PR.
-2. A DDEV-backed spec, run on WordPress 6.5.0 and latest, asserts B1–B4, B6 and B9–B12 with deterministic counters. Each assertion has a negative control that proves the probe detects a violation (for example, a test mu-plugin that adds a query, an HTTP call, a `setInterval` or an autoloaded option makes the gate fail).
+2. A DDEV-backed spec, run on the pinned latest WordPress release, asserts B1–B4, B6 and B9–B12 with deterministic counters. Each assertion has a negative control that proves the probe detects a violation (for example, a test mu-plugin that adds a query, an HTTP call, a `setInterval` or an autoloaded option makes the gate fail).
 3. Once #34 lands, the spec asserts B8, B10 and B13, using a fake Worker. With the Worker unreachable, B1–B6 still pass and plugin routes return within adapter timeout + 1 s.
 4. The benchmark job interleaves plugin-on/plugin-off (and base/head on PRs) samples in one job. It uploads JSON with the WordPress, PHP, database, browser and runner versions, the commit, the object-cache mode and the sample counts. It reports median, p95, standard deviation, MAD and the paired-delta CI.
 5. T1–T3 become failing gates after ten `main` runs, and the resulting thresholds are written back into this document. Done in #47: see the budget table and Implementation.

@@ -101,7 +101,7 @@ final class GQ_Support_Updater {
 			'url'          => 'https://getquick.io',
 			'package'      => (string) $package,
 			'autoupdate'   => ! empty( $offer['auto_update'] ),
-			'requires'     => '6.5',
+			'requires'     => '7.1',
 			'requires_php' => '8.0',
 		);
 	}
