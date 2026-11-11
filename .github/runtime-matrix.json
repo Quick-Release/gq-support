@@ -13,22 +13,22 @@
   "cells": [
     { "id": "minimum", "tier": "pr", "php": "8.0", "woocommerce": "9.4.3", "react": "18.3.1", "browser": "chromium", "suite": "acceptance", "multisite": "subdirectory" },
     { "id": "minimum-counters", "tier": "pr", "php": "8.0", "woocommerce": "9.4.3", "react": "18.3.1", "browser": "chromium", "suite": "performance" },
-    { "id": "stable", "tier": "pr", "php": "8.4", "woocommerce": "11.2.1", "react": "18.3.1", "browser": "chromium", "suite": "acceptance", "multisite": "subdirectory", "pluginCheck": "2.1.0" },
-    { "id": "stable-counters", "tier": "pr", "php": "8.4", "woocommerce": "11.2.1", "react": "18.3.1", "browser": "chromium", "suite": "performance" },
-    { "id": "real-design", "tier": "pr", "php": "8.4", "woocommerce": "11.2.1", "react": "18.3.1", "browser": "chromium", "suite": "acceptance", "gqDesign": "0.8.1" },
+    { "id": "stable", "tier": "pr", "php": "8.4", "woocommerce": "11.3.0", "react": "18.3.1", "browser": "chromium", "suite": "acceptance", "multisite": "subdirectory", "pluginCheck": "2.2.0" },
+    { "id": "stable-counters", "tier": "pr", "php": "8.4", "woocommerce": "11.3.0", "react": "18.3.1", "browser": "chromium", "suite": "performance" },
+    { "id": "real-design", "tier": "pr", "php": "8.4", "woocommerce": "11.3.0", "react": "18.3.1", "browser": "chromium", "suite": "acceptance", "gqDesign": "0.8.1" },
     { "id": "php-8.1", "tier": "pr", "php": "8.1", "react": "18.3.1" },
     { "id": "php-8.2", "tier": "pr", "php": "8.2", "react": "18.3.1" },
     { "id": "php-8.3", "tier": "pr", "php": "8.3", "react": "18.3.1" },
 
     { "id": "mysql-8.0", "tier": "scheduled", "php": "8.4", "database": "mysql:8.0", "multisite": "subdirectory" },
     { "id": "mariadb-10.11", "tier": "scheduled", "php": "8.4", "database": "mariadb:10.11", "multisite": "subdirectory" },
-    { "id": "object-cache", "tier": "scheduled", "php": "8.4", "woocommerce": "11.2.1", "objectCache": true, "browser": "chromium", "suite": "acceptance" },
+    { "id": "object-cache", "tier": "scheduled", "php": "8.4", "woocommerce": "11.3.0", "objectCache": true, "browser": "chromium", "suite": "acceptance" },
     { "id": "multisite-subdomain", "tier": "scheduled", "php": "8.4", "multisite": "subdomain" },
-    { "id": "firefox", "tier": "scheduled", "php": "8.4", "woocommerce": "11.2.1", "browser": "firefox", "suite": "acceptance" },
-    { "id": "webkit", "tier": "scheduled", "php": "8.4", "woocommerce": "11.2.1", "browser": "webkit", "suite": "acceptance" },
+    { "id": "firefox", "tier": "scheduled", "php": "8.4", "woocommerce": "11.3.0", "browser": "firefox", "suite": "acceptance" },
+    { "id": "webkit", "tier": "scheduled", "php": "8.4", "woocommerce": "11.3.0", "browser": "webkit", "suite": "acceptance" },
 
     { "id": "wordpress-nightly", "tier": "canary", "wordpress": "nightly", "php": "8.4", "browser": "chromium", "suite": "acceptance" },
-    { "id": "php-8.5", "tier": "canary", "php": "8.5", "woocommerce": "11.2.1", "browser": "chromium", "suite": "acceptance" },
+    { "id": "php-8.5", "tier": "canary", "php": "8.5", "woocommerce": "11.3.0", "browser": "chromium", "suite": "acceptance" },
     { "id": "floating-latest", "tier": "canary", "wordpress": "latest", "php": "8.4", "woocommerce": "latest", "browser": "chromium", "suite": "acceptance", "multisite": "subdirectory", "pluginCheck": "latest" }
   ]
 }

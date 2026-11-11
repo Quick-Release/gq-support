@@ -41,7 +41,7 @@ GETQUICK supports only the latest WordPress release. The official [WordPress ver
 | Lane | WordPress | PHP | Database / topology | Browser / frequency |
 |---|---|---|---|---|
 | PHP and WooCommerce minimums | 7.1.4 | 8.0 | DDEV default recorded DB; WooCommerce 9.4.3; single site then subdirectory multisite | Chromium acceptance and counters; required PR |
-| Current endpoint | 7.1.4 | 8.4 | Same, WooCommerce 11.2.1; single site then subdirectory multisite | Chromium acceptance and counters, Plugin Check, real GETQUICK Design; required PR |
+| Current endpoint | 7.1.4 | 8.4 | Same, WooCommerce 11.3.0; single site then subdirectory multisite | Chromium acceptance and counters, Plugin Check, real GETQUICK Design; required PR |
 | Intermediate PHP coverage | 7.1.4 | 8.1, 8.2, 8.3 | Single site; integration/contract only | Required PR; no redundant full browser matrix |
 | Database/cache variants | 7.1.4 | 8.4 | MySQL 8.0 and pinned MariaDB baseline; persistent object cache on/off; multisite subdomain variant | Nightly and pre-release; isolate DNS fixture |
 | Alternate browsers | 7.1.4 | 8.4 | Single site | Locked Playwright Firefox and WebKit; nightly and pre-release |
