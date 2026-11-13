@@ -1,5 +1,5 @@
 import type { RuntimeContext } from "alchemy/RuntimeContext";
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Effect from "effect/Effect";
 import * as Config from "effect/Config";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
@@ -15,7 +15,7 @@ import { GitHubGateway, GitHubReader } from "./github-gateway.ts";
 import { serviceTick } from "./scheduled.ts";
 import { refreshStatus, type RefreshConfig } from "./status-refresh.ts";
 import type { SweepConfig } from "./status-sweep.ts";
-import { WorkerExecutionContext, WorkerEnvironment } from "alchemy/Cloudflare/Workers/WorkerRuntime";
+import { WorkerExecutionContext, WorkerEnvironment } from "@alchemy.run/cloudflare/Workers/WorkerRuntime";
 import { checkBoundGitHubAppKey } from "./github-app-key-check.ts";
 import { digestKey } from "./cleanup.ts";
 import { restoreGate } from "./ledger.ts";

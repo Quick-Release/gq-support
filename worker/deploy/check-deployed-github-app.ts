@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import { SUPPORT_ACCOUNT_ID, type AppConfig } from "./github-app.ts";
 
 export class DeployedGitHubAppCheckError extends Error {
+  readonly _tag = "DeployedGitHubAppCheckError";
   constructor(step: "connection" | "rpc" | "identity" | "fingerprint") {
     super(`Deployed GitHub App key check failed (${step})`);
   }

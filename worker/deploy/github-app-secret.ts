@@ -1,5 +1,6 @@
 import { Resource } from "alchemy/Resource";
 import * as Provider from "alchemy/Provider";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { provisionAppKey } from "./github-app.ts";
 import { provisionWebhookSecrets } from "./github-webhook-secrets.ts";
@@ -12,6 +13,9 @@ type GitHubAppSecret = Resource<
   { stage: string; workerName: string },
   Awaited<ReturnType<typeof provisionAppKey>> & { appId: number; checkedAt: string }
 >;
+
+/** Alchemy providers fail with tagged errors; the message never carries a secret or provider output. */
+class GitHubAppSecretError extends Data.TaggedError("GitHubAppSecretError")<{ readonly message: string }> {}
 
 export const GitHubAppSecret = Resource<GitHubAppSecret>("GQSupport.GitHubAppSecret");
 
@@ -29,7 +33,7 @@ export const GitHubAppSecretProvider = () => Provider.succeed(GitHubAppSecret, {
       return { ...metadata, ...evidence };
     },
     catch: (error) => error instanceof DeployedGitHubAppCheckError
-      ? error : new Error("GitHub App secret provisioning failed; see the key custody runbook"),
+      ? error : new GitHubAppSecretError({ message: "GitHub App secret provisioning failed; see the key custody runbook" }),
   }),
   // The owning Worker deletes its bindings when it is destroyed.
   delete: () => Effect.void,
