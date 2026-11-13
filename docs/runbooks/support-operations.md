@@ -593,8 +593,8 @@ only for the same commit, stage, resources, actions and protected identities.
 
 1. The plan job runs typecheck and tests, verifies the App and runs
    `pnpm deploy-gate plan --stage <stage> --out deploy-plan`. This is Alchemy's
-   own deploy planning (`alchemy/Alchemist` `Stack.plan`, which `alchemy plan`
-   and `deploy --dry-run` also use), run without `--adopt`, `--force`, a resource
+   own deploy planning (`alchemy/Alchemist` `plan`, which `alchemy deploy
+   --dry-run` also uses), run without `--adopt`, `--force`, a resource
    selection or a state-store upgrade. It reads the stage's state and the
    provider; in CI, Alchemy refuses rather than bootstrap or upgrade its state
    store, and the gate stops if either starts. Like `alchemy deploy`, reading
@@ -608,6 +608,11 @@ only for the same commit, stage, resources, actions and protected identities.
    create all three protected resources (its first deployment); once they exist,
    an unpinned stage is refused. Both staging and prod are pinned. Unrecognized
    actions or identity values are refused.
+   Independently of the gate, `SupportDB` and `SupportLedger` carry
+   `RemovalPolicy.protect()` on staging and prod: Alchemy itself fails any plan
+   that would replace or delete either one (`ProtectedResource`), including
+   `alchemy destroy`. To replace or remove one deliberately, first deploy it
+   without `protect()` through a reviewed PR.
 3. `worker/deploy-plan/plan.json` holds the verdict, reasons, commit, stage,
    account, run URL, plan time, each resource's name/type/action, the protected
    resources' D1 database ID/name/jurisdiction/account and Worker ID/name, and a
