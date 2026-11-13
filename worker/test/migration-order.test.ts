@@ -2,12 +2,12 @@
 // version), with in-memory state and fake providers shaped like D1 (stable
 // `databaseId`, `migrationsHashes` set by reconcile) and the Worker.
 import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Output from "alchemy/Output";
-import { evalStack } from "alchemy/Stack";
+import * as Alchemist from "alchemy/Alchemist";
+import { evalStack } from "alchemy/EvalStack";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
-import * as Core from "alchemy/Test/Core";
 import { inMemoryState } from "alchemy/State/InMemoryState";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -78,8 +78,9 @@ const deployer = (world: World) => {
       if (ordered) yield* worker.bind`${MIGRATED_SCHEMA_BINDING}`({ name: MIGRATED_SCHEMA_BINDING, text: migratedSchema(database, ledger) });
       return { workerName: worker.workerName };
     }));
-    const options = { providers: Layer.empty as never, state, stage: "test" };
-    return Core.run(Core.deploy(options, stack as never, { stage: "test" }) as never, options);
+    return Effect.runPromise(Effect.gen(function* () {
+      return yield* Alchemist.apply(yield* Alchemist.plan({ stack, stage: "test", operation: "deploy" }));
+    }).pipe(Effect.scoped, Effect.provide(Alchemist.layer())));
   };
 };
 
@@ -137,8 +138,9 @@ describe("the Support Worker's migration order", () => {
       yield* Worker;
       return {};
     }));
-    const options = { providers: Layer.empty as never, state, stage: "dev_migration_order" };
-    const compiled = await Core.run(evalStack(stack as never, (stack) => Effect.succeed(stack), { stage: options.stage }) as never, options) as
+    // The stack's own state and providers satisfy the rest at runtime; its type still lists them.
+    const evaluated = evalStack(stack as never, (stack) => Effect.succeed(stack), { stage: "dev_migration_order" }) as Effect.Effect<unknown, unknown>;
+    const compiled = await Effect.runPromise(evaluated.pipe(Effect.provide(Alchemist.layer()))) as
       { bindings: Record<string, ReadonlyArray<{ data: { bindings?: ReadonlyArray<Record<string, unknown>> } }>> };
     const bindings = compiled.bindings.Worker!.flatMap(({ data }) => data.bindings ?? []);
     const schema = bindings.filter((binding) => binding.name === MIGRATED_SCHEMA_BINDING);

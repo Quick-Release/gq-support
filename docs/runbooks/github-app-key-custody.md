@@ -118,7 +118,7 @@ through the [deployment plan gate](support-operations.md#deployment-plan-gate).
 Deployments to a stage are serialized and are not automatically cancelled. Do not run deployment jobs with
 Actions debug logging, shell tracing or Alchemy trace/debug logging enabled.
 
-The pinned Alchemy `2.0.0-beta.83` serializes `Redacted` contents in its state
+The pinned Alchemy `2.0.0-beta.86` serializes `Redacted` contents in its state
 encoding (`src/State/StateEncoding.ts` in the installed package). Consequently,
 **do not use `Config.Redacted`, `Worker.env`, an Output or resource properties
 to pass the App private key**. Redaction of display output alone is insufficient.

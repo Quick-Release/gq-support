@@ -5,7 +5,7 @@ import { appConfig, SUPPORT_ACCOUNT_ID } from "../deploy/github-app.ts";
 import { keyLeakCheck, scanKeyFiles } from "../deploy/key-custody-scan.ts";
 import * as Effect from "effect/Effect";
 import * as Alchemist from "alchemy/Alchemist";
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import { State } from "alchemy/State";
 import { AuthProviders } from "alchemy/Auth/AuthProvider";
 import { encodeState } from "alchemy/State/StateEncoding";

@@ -266,8 +266,12 @@ provisioning is established by these changes.
 
 ## Verification
 
-The Worker pins Alchemy `2.0.0-beta.83` and Effect / `@effect/platform-node`
-`4.0.5`. Its Vite 8 and Vitest 5 development dependencies satisfy Alchemy and
+The Worker pins Alchemy and `@alchemy.run/cloudflare` `2.0.0-beta.86` and
+Effect / `@effect/platform-node` `4.1.4`. From beta.84 Alchemy's Cloudflare
+resources are imported from `@alchemy.run/cloudflare`, not `alchemy/Cloudflare`,
+and it must stay a direct dependency: the CLI finds the Cloudflare state store
+and credentials through it. The account's shared state store speaks protocol v8
+since 2026-11-13, which Alchemy beta.84 and older cannot read. Its Vite 8 and Vitest 5 development dependencies satisfy Alchemy and
 Effect's peer requirements. Effect 4's HTTP modules use the `effect/http/*`
 exports. The old `rc.112` transitive overrides are no longer needed.
 CI checks CLI startup as well as the application tests. Staging and prod deploy
